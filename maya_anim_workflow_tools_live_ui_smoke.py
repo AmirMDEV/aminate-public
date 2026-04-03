@@ -172,6 +172,8 @@ try:
         "parenting_fix_blend_text": main_window.parenting_panel.fix_pop_button.text(),
         "has_parenting_event_list": hasattr(main_window.parenting_panel, "event_list"),
         "parenting_jump_text": main_window.parenting_panel.jump_button.text(),
+        "parenting_delete_switch_text": main_window.parenting_panel.delete_switch_button.text(),
+        "parenting_clear_switches_text": main_window.parenting_panel.clear_switches_button.text(),
         "parenting_maintain_offset_checked": main_window.parenting_panel.maintain_offset_check.isChecked(),
         "parenting_advanced_visible": main_window.parenting_panel.advanced_widget.isVisible(),
         "parenting_advanced_toggle_text": main_window.parenting_panel.advanced_toggle.text(),
@@ -310,13 +312,17 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_parent_to_world_text") != "World":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_apply_weights_text") != "Save Mix":
+    if main.get("parenting_apply_weights_text") != "Blend Parents":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_fix_blend_text") != "Fix Here":
+    if main.get("parenting_fix_blend_text") != "Fix Jump Here":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("has_parenting_event_list"):
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_jump_text") != "Jump To Frame":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_delete_switch_text") != "Delete Chosen":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_clear_switches_text") != "Delete All":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("parenting_maintain_offset_checked"):
         raise AssertionError(json.dumps(payload, indent=2))

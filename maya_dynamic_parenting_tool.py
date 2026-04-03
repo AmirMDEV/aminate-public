@@ -631,7 +631,7 @@ class MayaDynamicParentingController(object):
             return False, "Pick a constrained object from the list first."
         cmds.setAttr(setup["setup_group"] + ".adpMaintainOffset", int(bool(enabled)))
         self.maintain_offset = bool(enabled)
-        return True, "Keep Current Position When It Switches is now {0}.".format("on" if enabled else "off")
+        return True, "Stay Put is now {0}.".format("on" if enabled else "off")
 
     def current_weights(self, setup=None):
         setup = setup or self.current_setup()
@@ -894,21 +894,45 @@ class MayaDynamicParentingController(object):
             return []
         results = []
         for item in setup.get("event_log") or []:
+            frame_value = float(item.get("frame", 0.0))
             weights = item.get("weights") or {}
             weight_text = ", ".join("{0} {1:.2f}".format(name, float(value)) for name, value in sorted(weights.items()))
             if not weight_text:
                 weight_text = "nothing active"
             results.append(
                 {
-                    "frame": float(item.get("frame", 0.0)),
+                    "frame": frame_value,
                     "display": "F{0}: {1} -> {2}".format(
-                        _frame_display(item.get("frame", 0.0)),
+                        _frame_display(frame_value),
                         item.get("action", "switch").title(),
                         weight_text,
                     ),
                 }
             )
         return results
+
+    def delete_event_frame(self, frame_value):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Pick a saved object first."
+        frame_value = float(frame_value)
+        event_log = list(setup.get("event_log") or [])
+        kept_events = [item for item in event_log if abs(float(item.get("frame", 0.0)) - frame_value) >= EPSILON]
+        if len(kept_events) == len(event_log):
+            return False, "Pick a saved switch first."
+        _save_event_log(setup["setup_group"], kept_events)
+        setup["event_log"] = kept_events
+        return True, "Deleted the saved switch on frame {0}.".format(_frame_display(frame_value))
+
+    def clear_event_log(self):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Pick a saved object first."
+        if not (setup.get("event_log") or []):
+            return False, "There are no saved switches to delete."
+        _save_event_log(setup["setup_group"], [])
+        setup["event_log"] = []
+        return True, "Deleted all saved switches for {0}.".format(setup["label"])
 
     def jump_to_event(self, frame_value):
         cmds.currentTime(float(frame_value), edit=True)
@@ -962,14 +986,23 @@ if QtWidgets:
             step_box = QtWidgets.QGroupBox("How To Use")
             step_layout = QtWidgets.QVBoxLayout(step_box)
             for text in (
-                "1. Pick the object you want to move, then click Add Object.",
-                "2. Pick the hand, gun, or other thing it should follow, then click Pick Parent.",
-                "3. Click Switch or World.",
-                "4. Open More only if you want blends, history, or extra cleanup.",
+                "1. Pick the thing that moves, like the magazine, then click Add Object.",
+                "2. Pick the thing it should follow, then click Pick Parent.",
+                "3. Click Switch to make it follow that thing on the next frame.",
+                "4. Click World if it should stop following everything.",
+                "5. Leave Stay Put on if it should not jump.",
             ):
                 label = QtWidgets.QLabel(text)
                 label.setWordWrap(True)
                 step_layout.addWidget(label)
+            example_label = QtWidgets.QLabel(
+                "Example: Gun + Magazine\n"
+                "- When the magazine is in the gun, make it follow the gun.\n"
+                "- When a hand pulls it out, make it follow the hand.\n"
+                "- When you let go, make it follow World."
+            )
+            example_label.setWordWrap(True)
+            step_layout.addWidget(example_label)
             main_layout.addWidget(step_box)
 
             object_row = QtWidgets.QHBoxLayout()
@@ -1009,11 +1042,11 @@ if QtWidgets:
             self.target_line.setReadOnly(True)
             self.target_line.setPlaceholderText("Pick a hand, gun, or other thing to follow.")
             self.use_target_button = QtWidgets.QPushButton("Pick Parent")
-            self.use_target_button.setToolTip("Read the extra selected hand, gun, or object into the Parent To box.")
+            self.use_target_button.setToolTip("Take the thing you picked and put it into the Parent To box.")
             self.parent_to_picked_button = QtWidgets.QPushButton("Switch")
-            self.parent_to_picked_button.setToolTip("Keep the current parent on this frame, then switch to the picked parent on the next frame.")
+            self.parent_to_picked_button.setToolTip("Keep the old parent on this frame, then turn this picked parent on next frame.")
             self.add_target_button = QtWidgets.QPushButton("Add Parent")
-            self.add_target_button.setToolTip("Add the selected hand, gun, or object to the parent-choice list without switching yet.")
+            self.add_target_button.setToolTip("Remember this parent so you can switch to it later.")
             target_row.addWidget(QtWidgets.QLabel("Parent To"))
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
@@ -1034,9 +1067,9 @@ if QtWidgets:
 
             action_row = QtWidgets.QHBoxLayout()
             self.parent_to_row_button = QtWidgets.QPushButton("Switch Chosen")
-            self.parent_to_row_button.setToolTip("Keep the current parent on this frame, then switch fully to the chosen parent on the next frame.")
+            self.parent_to_row_button.setToolTip("Use the parent row you picked and switch to it on the next frame.")
             self.parent_to_world_button = QtWidgets.QPushButton("World")
-            self.parent_to_world_button.setToolTip("Keep the current parent on this frame, then switch to World on the next frame.")
+            self.parent_to_world_button.setToolTip("Stop following everything and switch to World on the next frame.")
             action_row.addWidget(self.parent_to_row_button)
             action_row.addWidget(self.parent_to_world_button)
             main_layout.addLayout(action_row)
@@ -1055,23 +1088,41 @@ if QtWidgets:
 
             advanced_actions = QtWidgets.QHBoxLayout()
             self.add_target_button.setParent(self.advanced_widget)
-            self.apply_weights_button = QtWidgets.QPushButton("Save Mix")
-            self.apply_weights_button.setToolTip("Key the shown parent weights on this frame when you want a real blend, like half World and half gun.")
-            self.fix_pop_button = QtWidgets.QPushButton("Fix Here")
-            self.fix_pop_button.setToolTip("Rebuild the current parent blend on this frame so the object stays where it is.")
-            self.remove_target_button = QtWidgets.QPushButton("Remove Parent")
+            self.apply_weights_button = QtWidgets.QPushButton("Blend Parents")
+            self.apply_weights_button.setToolTip("Save the weights you see now on this frame, like half gun and half World.")
+            self.fix_pop_button = QtWidgets.QPushButton("Fix Jump Here")
+            self.fix_pop_button.setToolTip("If the object pops on this frame, click this to rebuild the current follow setup here.")
+            self.remove_target_button = QtWidgets.QPushButton("Forget Parent")
+            self.remove_target_button.setToolTip("Remove the picked parent row from this object's saved parent list.")
             advanced_actions.addWidget(self.add_target_button)
             advanced_actions.addWidget(self.apply_weights_button)
             advanced_actions.addWidget(self.fix_pop_button)
             advanced_actions.addWidget(self.remove_target_button)
             advanced_layout.addLayout(advanced_actions)
 
+            advanced_help = QtWidgets.QLabel(
+                "What these extra buttons mean:\n"
+                "- Add Parent: remember a parent for later.\n"
+                "- Blend Parents: let two parents share the object on this frame.\n"
+                "- Fix Jump Here: fix a pop on this frame.\n"
+                "- Forget Parent: remove that parent from the list."
+            )
+            advanced_help.setWordWrap(True)
+            advanced_layout.addWidget(advanced_help)
+
             history_group = QtWidgets.QGroupBox("History")
             history_layout = QtWidgets.QVBoxLayout(history_group)
             self.event_list = QtWidgets.QListWidget()
+            self.event_list.setToolTip("Every saved switch for this object in this scene.")
             history_layout.addWidget(self.event_list)
+            history_button_row = QtWidgets.QHBoxLayout()
             self.jump_button = QtWidgets.QPushButton("Jump To Frame")
-            history_layout.addWidget(self.jump_button)
+            self.delete_switch_button = QtWidgets.QPushButton("Delete Chosen")
+            self.clear_switches_button = QtWidgets.QPushButton("Delete All")
+            history_button_row.addWidget(self.jump_button)
+            history_button_row.addWidget(self.delete_switch_button)
+            history_button_row.addWidget(self.clear_switches_button)
+            history_layout.addLayout(history_button_row)
             advanced_layout.addWidget(history_group, 1)
 
             self.summary_box = QtWidgets.QPlainTextEdit()
@@ -1109,6 +1160,8 @@ if QtWidgets:
             self.fix_pop_button.clicked.connect(self._refresh_active_weights)
             self.remove_target_button.clicked.connect(self._remove_target)
             self.jump_button.clicked.connect(self._jump_to_event)
+            self.delete_switch_button.clicked.connect(self._delete_event)
+            self.clear_switches_button.clicked.connect(self._clear_events)
             self.event_list.itemDoubleClicked.connect(self._jump_to_event)
             self.advanced_toggle.toggled.connect(self._toggle_advanced)
 
@@ -1269,6 +1322,18 @@ if QtWidgets:
                 self._set_status("Pick a saved switch first.", False)
                 return
             success, message = self.controller.jump_to_event(frame_value)
+            self._set_status(message, success)
+
+        def _delete_event(self):
+            frame_value = self._selected_event_frame()
+            if frame_value is None:
+                self._set_status("Pick a saved switch first.", False)
+                return
+            success, message = self.controller.delete_event_frame(frame_value)
+            self._set_status(message, success)
+
+        def _clear_events(self):
+            success, message = self.controller.clear_event_log()
             self._set_status(message, success)
 
         def _open_follow_url(self, url=None):

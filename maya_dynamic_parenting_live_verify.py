@@ -114,6 +114,13 @@ try:
     panel.event_list.setCurrentRow(1)
     panel._jump_to_event()
     jumped_frame = float(cmds.currentTime(query=True))
+    panel.event_list.setCurrentRow(1)
+    panel._delete_event()
+    delete_status = panel.status_label.text()
+    event_items_after_delete = [panel.event_list.item(index).text() for index in range(panel.event_list.count())]
+    panel._clear_events()
+    clear_status = panel.status_label.text()
+    event_count_after_clear = panel.event_list.count()
 
     window.tab_widget.setCurrentWidget(window.parenting_tab)
     if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
@@ -133,6 +140,8 @@ try:
         "blend_text": panel.apply_weights_button.text(),
         "fix_text": panel.fix_pop_button.text(),
         "jump_text": panel.jump_button.text(),
+        "delete_text": panel.delete_switch_button.text(),
+        "clear_text": panel.clear_switches_button.text(),
         "first_pick_status": first_pick_status,
         "second_pick_status": second_pick_status,
         "first_driver": first_driver_line,
@@ -151,6 +160,10 @@ try:
         "release_summary": release_summary,
         "event_items": event_items,
         "jumped_frame": jumped_frame,
+        "delete_status": delete_status,
+        "event_items_after_delete": event_items_after_delete,
+        "clear_status": clear_status,
+        "event_count_after_clear": event_count_after_clear,
         "before_first_switch": before_first_switch,
         "after_first_switch": after_first_switch,
         "before_switch": before_switch,
@@ -181,11 +194,15 @@ except Exception:
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("world_text") != "World":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("blend_text") != "Save Mix":
+    if result.get("blend_text") != "Blend Parents":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("fix_text") != "Fix Here":
+    if result.get("fix_text") != "Fix Jump Here":
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("jump_text") != "Jump To Frame":
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("delete_text") != "Delete Chosen":
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("clear_text") != "Delete All":
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadHand_CTRL" not in (result.get("first_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
@@ -221,6 +238,17 @@ except Exception:
     if "F11: World -> World 1.00" not in event_items[3]:
         raise AssertionError(json.dumps(result, indent=2))
     if abs(float(result.get("jumped_frame", 0.0)) - 7.0) > 0.01:
+        raise AssertionError(json.dumps(result, indent=2))
+    if "Deleted the saved switch on frame 7" not in (result.get("delete_status") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    event_items_after_delete = result.get("event_items_after_delete") or []
+    if len(event_items_after_delete) != 3:
+        raise AssertionError(json.dumps(result, indent=2))
+    if any("F7:" in item for item in event_items_after_delete):
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("event_count_after_clear") != 0:
+        raise AssertionError(json.dumps(result, indent=2))
+    if "Deleted all saved switches" not in (result.get("clear_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
 
     before_first_switch = result.get("before_first_switch") or []
