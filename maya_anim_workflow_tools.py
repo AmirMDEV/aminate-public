@@ -9,6 +9,7 @@ from __future__ import absolute_import, division, print_function
 import importlib
 
 import maya_dynamic_parent_pivot as _impl  # noqa: F401
+import maya_dynamic_parenting_tool as _parenting  # noqa: F401
 import maya_contact_hold as _contact_hold  # noqa: F401
 import maya_onion_skin as _onion  # noqa: F401
 import maya_rotation_doctor as _rotation  # noqa: F401
@@ -19,6 +20,7 @@ import maya_timeline_notes as _timeline_notes  # noqa: F401
 
 
 def _reloaded_impl():
+    importlib.reload(_parenting)
     importlib.reload(_contact_hold)
     importlib.reload(_onion)
     importlib.reload(_rotation)

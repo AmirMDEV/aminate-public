@@ -126,6 +126,7 @@ try:
         }}
 
     contact_hold_panel_state = panel_snapshot(main_window.tab_widget, main_window.contact_hold_tab, main_window.contact_hold_panel)
+    parenting_panel_state = panel_snapshot(main_window.tab_widget, main_window.parenting_tab, main_window.parenting_panel)
     onion_panel_state = panel_snapshot(main_window.tab_widget, main_window.onion_tab, main_window.onion_panel)
     rotation_panel_state = panel_snapshot(main_window.tab_widget, main_window.rotation_tab, main_window.rotation_panel)
     skin_panel_state = panel_snapshot(main_window.tab_widget, main_window.skin_tab, main_window.skin_panel)
@@ -158,17 +159,20 @@ try:
             main_window.guide_tab,
         ]),
         "timeline_scroll_widget_resizable": bool(main_window.timeline_tab.widgetResizable()),
-        "parenting_simple_steps_text": main_window.parenting_simple_steps_label.text(),
-        "create_temp_text": main_window.create_temp_button.text(),
-        "use_object_text": main_window.use_driver_button.text(),
-        "grab_here_text": main_window.add_grab_button.text(),
-        "release_here_text": main_window.add_release_button.text(),
-        "fix_jumps_text": main_window.normalize_button.text(),
-        "pickup_text": main_window.pickup_button.text(),
-        "pass_text": main_window.pass_button.text(),
-        "drop_text": main_window.drop_button.text(),
-        "has_parenting_event_list": hasattr(main_window, "parenting_event_list"),
-        "parenting_jump_text": main_window.parenting_jump_button.text(),
+        "has_parenting_panel": hasattr(main_window, "parenting_panel"),
+        "parenting_panel_state": parenting_panel_state,
+        "parenting_add_object_text": main_window.parenting_panel.add_object_button.text(),
+        "parenting_remove_object_text": main_window.parenting_panel.remove_object_button.text(),
+        "parenting_pick_parent_text": main_window.parenting_panel.use_target_button.text(),
+        "parenting_parent_to_picked_text": main_window.parenting_panel.parent_to_picked_button.text(),
+        "parenting_add_parent_text": main_window.parenting_panel.add_target_button.text(),
+        "parenting_parent_to_row_text": main_window.parenting_panel.parent_to_row_button.text(),
+        "parenting_parent_to_world_text": main_window.parenting_panel.parent_to_world_button.text(),
+        "parenting_apply_weights_text": main_window.parenting_panel.apply_weights_button.text(),
+        "parenting_fix_blend_text": main_window.parenting_panel.fix_pop_button.text(),
+        "has_parenting_event_list": hasattr(main_window.parenting_panel, "event_list"),
+        "parenting_jump_text": main_window.parenting_panel.jump_button.text(),
+        "parenting_maintain_offset_checked": main_window.parenting_panel.maintain_offset_check.isChecked(),
         "switch_fk_to_ik_text": main_window.switch_fk_to_ik_button.text(),
         "has_ik_controls_field": hasattr(main_window, "ik_controls_line"),
         "ik_controls_placeholder": main_window.ik_controls_line.placeholderText(),
@@ -271,7 +275,7 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("tab_intro_count") != 11:
         raise AssertionError(json.dumps(payload, indent=2))
-    if "different hands, props, or objects without popping" not in (main.get("parenting_intro_text") or ""):
+    if "switch between hand, gun, world, or mixed parents without popping" not in (main.get("parenting_intro_text") or ""):
         raise AssertionError(json.dumps(payload, indent=2))
     if "plain-English version of what each tab does" not in (main.get("guide_intro_text") or ""):
         raise AssertionError(json.dumps(payload, indent=2))
@@ -281,27 +285,38 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("timeline_scroll_widget_resizable"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if "Pick the thing that moves and click Make Helpers once" not in (main.get("parenting_simple_steps_text") or ""):
+    if not main.get("has_parenting_panel"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("create_temp_text") != "Make Helpers":
+    parenting_panel_state = main.get("parenting_panel_state") or {}
+    if parenting_panel_state.get("is_window"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("use_object_text") != "Use Picked Hand / Object":
+    if not parenting_panel_state.get("visible_to_main"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("grab_here_text") != "Swap Here":
+    if (parenting_panel_state.get("size") or [0, 0])[1] < 200:
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("release_here_text") != "Let Go Here":
+    if main.get("parenting_add_object_text") != "Add Picked Object":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("fix_jumps_text") != "Fix Jump Here":
+    if main.get("parenting_remove_object_text") != "Remove Picked Object":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("pickup_text") != "Pickup":
+    if main.get("parenting_pick_parent_text") != "Pick Parent From Selection":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("pass_text") != "Pass":
+    if main.get("parenting_parent_to_picked_text") != "Parent To Picked Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("drop_text") != "Drop":
+    if main.get("parenting_add_parent_text") != "Save Picked Parent In List":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_parent_to_row_text") != "Parent Fully To Picked Row":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_parent_to_world_text") != "Parent To World":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_apply_weights_text") != "Blend Using Shown Weights":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_fix_blend_text") != "Keep Current Blend Here":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("has_parenting_event_list"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_jump_text") != "Jump To Picked Event":
+    if main.get("parenting_jump_text") != "Jump To Picked Switch":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if not main.get("parenting_maintain_offset_checked"):
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("switch_fk_to_ik_text") != "Switch FK -> IK":
         raise AssertionError(json.dumps(payload, indent=2))
@@ -495,6 +510,12 @@ try:
         "workspace_floating": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, query=True, floating=True)) if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True) else None,
         "current_tab": docked_window.tab_widget.tabText(docked_window.tab_widget.currentIndex()),
         "docked_is_window": bool(docked_window.isWindow()),
+        "dock_host_exists": bool(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST),
+        "dock_host_is_window": bool(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST.isWindow()) if maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST else None,
+        "dock_host_object_name": maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST.objectName() if maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST else "",
+        "host_owns_content": bool(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST and getattr(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST, "content_widget", None) is docked_window),
+        "expected_workspace_name": maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME,
+        "expected_dock_host_name": maya_dynamic_parent_pivot.DOCK_HOST_OBJECT_NAME,
         "dock_parent_chain": dock_parent_chain,
     }}
 except Exception:
@@ -515,7 +536,17 @@ except Exception:
         raise AssertionError(json.dumps(dock_payload, indent=2))
     if dock.get("docked_is_window"):
         raise AssertionError(json.dumps(dock_payload, indent=2))
-    if "mayaAnimWorkflowToolsWindowWorkspaceControl" not in (dock.get("dock_parent_chain") or []):
+    if not dock.get("dock_host_exists"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("dock_host_is_window"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("dock_host_object_name") != dock.get("expected_dock_host_name"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if not dock.get("host_owns_content"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("expected_dock_host_name") not in (dock.get("dock_parent_chain") or []):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("expected_workspace_name") not in (dock.get("dock_parent_chain") or []):
         raise AssertionError(json.dumps(dock_payload, indent=2))
 
     ikfk_code = """

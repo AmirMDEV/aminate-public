@@ -184,53 +184,70 @@ def run():
     controller = maya_anim_workflow_tools.MayaAnimWorkflowController()
 
     hand_target, gun_target, driven_a, driven_b = _build_parenting_scene()
+    parenting_controller = controller.dynamic_parenting_controller
+    _assert(parenting_controller is not None, "Dynamic Parenting controller should exist in the combined tool")
     cmds.currentTime(8, edit=True)
     cmds.select([driven_a, driven_b], replace=True)
-    success, message = controller.create_temp_controls()
+    success, message = parenting_controller.add_driven_from_selection()
     _assert(success, message)
-    _assert(len(controller.parenting_setups(from_selection=False)) == 2, "Expected two temp-control setups")
+    payloads = parenting_controller.setup_payloads(from_selection=False)
+    _assert(len(payloads) == 2, "Expected two scene-backed parenting setups")
+    setup_lookup = {item["driven"]: item for item in payloads}
+    success, message = parenting_controller.set_active_setup(setup_lookup[_long_name(driven_a)]["setup_group"])
+    _assert(success, message)
 
-    cmds.select(hand_target, replace=True)
-    success, message = controller.set_driver_from_selection()
+    before_first_switch = _translation(driven_a)
+    cmds.select([driven_a, hand_target], replace=True)
+    success, message = parenting_controller.set_pending_target_from_selection()
     _assert(success, message)
-    _assert(controller.driver_node == _long_name(hand_target), "Stored follow target should come from the picked hand target")
-
-    cmds.select([driven_a, driven_b], replace=True)
-    success, message = controller.add_grab_current(hand_target, event_action="pickup")
+    success, message = parenting_controller.apply_pending_target()
     _assert(success, message)
-    setup_lookup = {item["driven"]: item for item in controller.parenting_setups(from_selection=False)}
-    _assert(_long_name(setup_lookup[_long_name(driven_a)]["current_driver"]) == _long_name(hand_target), "Driven A should start by following the hand target")
-    _assert(_long_name(setup_lookup[_long_name(driven_b)]["current_driver"]) == _long_name(hand_target), "Driven B should start by following the hand target")
+    after_first_switch = _translation(driven_a)
+    _assert(all(abs(before_first_switch[index] - after_first_switch[index]) < 0.01 for index in range(3)), "Switching to the hand target should preserve the driven control position")
+    driven_a_setup = parenting_controller.current_setup()
+    current_weights = parenting_controller.current_weights(driven_a_setup)
+    hand_target_entry = next(target for target in driven_a_setup["targets"] if target["driver"] == _long_name(hand_target))
+    _assert(abs(current_weights.get(hand_target_entry["id"], 0.0) - 1.0) < 0.001, "Driven A should fully follow the hand target after the first switch")
 
     cmds.currentTime(10, edit=True)
     before_switch = _translation(driven_a)
     cmds.select([driven_a, gun_target], replace=True)
-    success, message = controller.add_grab_current(event_action="pass")
+    success, message = parenting_controller.set_pending_target_from_selection()
     _assert(success, message)
-    _assert(_long_name(controller.driver_node) == _long_name(gun_target), "Follow target should auto-switch from the current selection")
+    success, message = parenting_controller.apply_pending_target()
+    _assert(success, message)
     after_switch = _translation(driven_a)
     _assert(all(abs(before_switch[index] - after_switch[index]) < 0.01 for index in range(3)), "Switching targets should preserve the driven control position")
-    driven_a_setup = controller.parenting_setups(from_selection=True)[0]
-    _assert(_long_name(driven_a_setup["current_driver"]) == _long_name(gun_target), "Driven A should now follow the gun target")
+    driven_a_setup = parenting_controller.current_setup()
+    current_weights = parenting_controller.current_weights(driven_a_setup)
+    gun_target_entry = next(target for target in driven_a_setup["targets"] if target["driver"] == _long_name(gun_target))
+    _assert(abs(current_weights.get(gun_target_entry["id"], 0.0) - 1.0) < 0.001, "Driven A should fully follow the gun target after the second switch")
+
+    cmds.currentTime(11, edit=True)
+    success, message = parenting_controller.apply_weight_map(
+        {
+            "world": 0.5,
+            gun_target_entry["id"]: 0.5,
+            hand_target_entry["id"]: 0.0,
+        },
+        action_label="blend",
+    )
+    _assert(success, message)
+    current_weights = parenting_controller.current_weights(parenting_controller.current_setup())
+    _assert(abs(current_weights.get("world", 0.0) - 0.5) < 0.001, "World should be half-on in the blend step")
+    _assert(abs(current_weights.get(gun_target_entry["id"], 0.0) - 0.5) < 0.001, "Gun should be half-on in the blend step")
 
     cmds.currentTime(12, edit=True)
-    cmds.select([driven_a, driven_b], replace=True)
-    success, message = controller.add_release_current("original", event_action="drop")
+    success, message = parenting_controller.parent_to_world()
     _assert(success, message)
-    success, message = controller.normalize_transitions()
-    _assert(success, message)
-    setup_lookup = {item["driven"]: item for item in controller.parenting_setups(from_selection=False)}
-    driven_a_events = setup_lookup[_long_name(driven_a)]["event_log"]
-    _assert(len(driven_a_events) == 3, "Driven A should have hand, gun, and release events saved")
-    _assert(driven_a_events[0]["action"] == "pickup" and _long_name(driven_a_events[0]["target"]) == _long_name(hand_target), "First event should be a pickup onto the hand target")
-    _assert(driven_a_events[1]["action"] == "pass" and _long_name(driven_a_events[1]["target"]) == _long_name(gun_target), "Second event should be a pass onto the gun target")
-    _assert(driven_a_events[2]["action"] == "drop" and driven_a_events[2]["space"] == "world", "Third event should be a drop to world when there is no original parent")
-
-    controller.bake_mode = "keys"
-    controller.bake_range = "playback"
-    success, message = controller.bake_to_rig(clear_after=True)
-    _assert(success, message)
-    _assert(not controller.parenting_setups(from_selection=False), "Temp-control setups should clear after bake")
+    current_weights = parenting_controller.current_weights(parenting_controller.current_setup())
+    _assert(abs(current_weights.get("world", 0.0) - 1.0) < 0.001, "World should be fully on after the world switch")
+    driven_a_events = parenting_controller.event_items(parenting_controller.current_setup())
+    _assert(len(driven_a_events) == 4, "Driven A should have hand, gun, blend, and world events saved")
+    _assert(driven_a_events[0]["display"] == "F8: Switch -> hand_ctrl 1.00", "First dynamic-parenting event should switch to the hand")
+    _assert(driven_a_events[1]["display"] == "F10: Switch -> gun_ctrl 1.00", "Second dynamic-parenting event should switch to the gun")
+    _assert(driven_a_events[2]["display"] == "F11: Blend -> World 0.50, gun_ctrl 0.50", "Third dynamic-parenting event should save the weight blend")
+    _assert(driven_a_events[3]["display"] == "F12: World -> World 1.00", "Fourth dynamic-parenting event should return to world")
 
     pivot_a = cmds.createNode("transform", name="pivotA_ctrl")
     pivot_b = cmds.createNode("transform", name="pivotB_ctrl")

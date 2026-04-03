@@ -12,6 +12,8 @@ import os
 import time
 import traceback
 import hashlib
+import tempfile
+import glob
 
 import maya_shelf_utils
 
@@ -49,6 +51,7 @@ WINDOW_OBJECT_NAME = "mayaOnionSkinWindow"
 WORKSPACE_CONTROL_NAME = WINDOW_OBJECT_NAME + "WorkspaceControl"
 ROOT_GROUP_NAME = "mayaOnionSkinGhosts_GRP"
 PREFIX = "mayaOnionSkin"
+SILHOUETTE_PREFIX = "mayaOnionSilhouette"
 MAX_FRAMES_PER_SIDE = 48
 MAX_FRAME_STEP = 12
 DEFAULT_PAST_FRAMES = 3
@@ -59,6 +62,12 @@ DEFAULT_FALLOFF = 1.35
 DEFAULT_FULL_FIDELITY_SCRUB = False
 DEFAULT_PAST_COLOR = (0.25, 0.7, 1.0)
 DEFAULT_FUTURE_COLOR = (1.0, 0.55, 0.2)
+MODE_3D_GHOST = "3d_ghost"
+MODE_FAST_SILHOUETTE = "fast_silhouette"
+MODE_ITEMS = [
+    ("3D Ghost", MODE_3D_GHOST),
+    ("Fast Silhouette (Live + Refine)", MODE_FAST_SILHOUETTE),
+]
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
@@ -66,6 +75,9 @@ AUTO_UPDATE_INTERVAL_MS = 33
 SCRUB_SETTLE_DELAY_MS = 140
 SCRUB_PREVIEW_MAX_OFFSETS = 8
 SCRUB_PREVIEW_MAX_MESHES = 24
+FAST_SILHOUETTE_LIVE_RESOLUTION = (640, 360)
+FAST_SILHOUETTE_REFINE_RESOLUTION = (1280, 720)
+CAMERA_POLL_INTERVAL_MS = 80
 DEFORMER_NODE_TYPES = set(
     [
         "skinCluster",
@@ -88,6 +100,7 @@ DEFAULT_SHELF_BUTTON_LABEL = "Onion Skin"
 SHELF_BUTTON_DOC_TAG = "mayaOnionSkinShelfButton"
 
 OPTION_KEYS = {
+    "display_mode": "mayaOnionSkin_displayMode",
     "past_frames": "mayaOnionSkin_pastFrames",
     "future_frames": "mayaOnionSkin_futureFrames",
     "frame_step": "mayaOnionSkin_frameStep",
@@ -363,8 +376,90 @@ def _matrix_to_list(matrix):
     return [matrix[index] for index in range(16)]
 
 
+def _active_model_panel(require_focus=False):
+    try:
+        panel = cmds.getPanel(withFocus=True)
+        if panel and cmds.getPanel(typeOf=panel) == "modelPanel":
+            return panel
+    except Exception:
+        pass
+    if require_focus:
+        return ""
+    for panel in cmds.getPanel(type="modelPanel") or []:
+        try:
+            if cmds.modelEditor(panel, query=True, exists=True):
+                return panel
+        except Exception:
+            continue
+    return ""
+
+
+def _active_camera(panel_name=""):
+    panel_name = panel_name or _active_model_panel(require_focus=False)
+    if not panel_name:
+        return ""
+    try:
+        camera_name = cmds.modelEditor(panel_name, query=True, camera=True)
+    except Exception:
+        return ""
+    if not camera_name:
+        return ""
+    if cmds.nodeType(camera_name) == "camera":
+        parents = cmds.listRelatives(camera_name, parent=True, fullPath=True) or []
+        return parents[0] if parents else camera_name
+    return camera_name
+
+
+def _camera_shape(camera_name):
+    if not camera_name or not cmds.objExists(camera_name):
+        return ""
+    if cmds.nodeType(camera_name) == "camera":
+        return camera_name
+    shapes = cmds.listRelatives(camera_name, shapes=True, fullPath=True, type="camera") or []
+    return shapes[0] if shapes else ""
+
+
+def _silhouette_cache_dir():
+    cache_dir = os.path.join(tempfile.gettempdir(), "maya_onion_skin_silhouette")
+    if not os.path.isdir(cache_dir):
+        try:
+            os.makedirs(cache_dir)
+        except OSError:
+            pass
+    return cache_dir
+
+
+def _color_to_rgba_bytes(color, alpha_value):
+    return (
+        int(_clamp(color[0], 0.0, 1.0) * 255.0),
+        int(_clamp(color[1], 0.0, 1.0) * 255.0),
+        int(_clamp(color[2], 0.0, 1.0) * 255.0),
+        int(_clamp(alpha_value, 0.0, 1.0) * 255.0),
+    )
+
+
+def _tint_silhouette_image(source_path, destination_path, color, alpha_value):
+    if not (QtGui and os.path.exists(source_path)):
+        return False
+    image = QtGui.QImage(source_path)
+    if image.isNull():
+        return False
+    output = QtGui.QImage(image.size(), QtGui.QImage.Format_ARGB32)
+    output.fill(QtCore.Qt.transparent)
+    fill_rgba = _color_to_rgba_bytes(color, alpha_value)
+    threshold = 18
+    for y_pos in range(image.height()):
+        for x_pos in range(image.width()):
+            pixel = image.pixelColor(x_pos, y_pos)
+            if pixel.red() <= threshold and pixel.green() <= threshold and pixel.blue() <= threshold:
+                continue
+            output.setPixelColor(x_pos, y_pos, QtGui.QColor(*fill_rgba))
+    return bool(output.save(destination_path, "PNG"))
+
+
 class MayaOnionSkinController(object):
     def __init__(self):
+        self.display_mode = _load_option("display_mode", MODE_3D_GHOST)
         self.past_frames = _load_option("past_frames", DEFAULT_PAST_FRAMES)
         self.future_frames = _load_option("future_frames", DEFAULT_FUTURE_FRAMES)
         self.frame_step = _load_option("frame_step", DEFAULT_FRAME_STEP)
@@ -396,8 +491,14 @@ class MayaOnionSkinController(object):
         self._last_callback_request_at = 0.0
         self._cached_visible_mesh_entries = None
         self._visible_mesh_cache_dirty = True
+        self.silhouette_cache = {}
+        self.silhouette_image_planes = {}
+        self._camera_signature = tuple()
+        self._camera_poll_timer = None
+        self._last_motion_at = 0.0
 
     def save_preferences(self):
+        _save_option("display_mode", self.display_mode)
         _save_option("past_frames", int(self.past_frames))
         _save_option("future_frames", int(self.future_frames))
         _save_option("frame_step", int(self.frame_step))
@@ -419,7 +520,11 @@ class MayaOnionSkinController(object):
         full_fidelity_scrub,
         past_color,
         future_color,
+        display_mode=None,
     ):
+        new_display_mode = display_mode or self.display_mode or MODE_3D_GHOST
+        if new_display_mode not in (MODE_3D_GHOST, MODE_FAST_SILHOUETTE):
+            new_display_mode = MODE_3D_GHOST
         new_past_frames = _clamp(int(past_frames), 0, MAX_FRAMES_PER_SIDE)
         new_future_frames = _clamp(int(future_frames), 0, MAX_FRAMES_PER_SIDE)
         new_frame_step = _clamp(int(frame_step), 1, MAX_FRAME_STEP)
@@ -432,9 +537,12 @@ class MayaOnionSkinController(object):
         new_future_color = tuple(_clamp(channel, 0.0, 1.0) for channel in future_color)
 
         if (
+            new_display_mode != self.display_mode
+            or (
             new_past_frames != self.past_frames
             or new_future_frames != self.future_frames
             or new_frame_step != self.frame_step
+            )
         ):
             self._offset_layout_dirty = True
             self._appearance_dirty = True
@@ -446,6 +554,7 @@ class MayaOnionSkinController(object):
         ):
             self._appearance_dirty = True
 
+        self.display_mode = new_display_mode
         self.past_frames = new_past_frames
         self.future_frames = new_future_frames
         self.frame_step = new_frame_step
@@ -457,6 +566,7 @@ class MayaOnionSkinController(object):
         self.future_color = new_future_color
         if self.full_fidelity_scrub and not was_full_fidelity_scrub:
             self._cancel_scheduled_refresh()
+        self._ensure_camera_polling()
         self.save_preferences()
 
     def _set_attached_roots(self, roots):
@@ -493,8 +603,11 @@ class MayaOnionSkinController(object):
         if clear_scene_nodes:
             self._delete_ghost_group()
             self._delete_materials()
+            self._delete_silhouette_planes()
         self.ghost_cache = {}
         self.material_cache = {}
+        self.silhouette_cache = {}
+        self.silhouette_image_planes = {}
         self._active_offset_signature = tuple()
         self._offset_layout_dirty = True
         self._appearance_dirty = True
@@ -611,45 +724,53 @@ class MayaOnionSkinController(object):
         active_offsets = self._active_offsets_for_reason(reason, desired_offsets)
 
         try:
-            self._ensure_root_group()
-            offset_signature = tuple(desired_offsets)
-            if self._offset_layout_dirty or offset_signature != self._active_offset_signature:
-                self._sync_offset_slots(desired_offsets)
-                self._active_offset_signature = offset_signature
-                self._offset_layout_dirty = False
-                self._appearance_dirty = True
+            if self.display_mode == MODE_FAST_SILHOUETTE:
+                self._delete_ghost_group()
+                self._delete_materials()
+                self.ghost_cache = {}
+                self.material_cache = {}
+                self._refresh_fast_silhouette(active_offsets, current_time)
+            else:
+                self._delete_silhouette_planes()
+                self._ensure_root_group()
+                offset_signature = tuple(desired_offsets)
+                if self._offset_layout_dirty or offset_signature != self._active_offset_signature:
+                    self._sync_offset_slots(desired_offsets)
+                    self._active_offset_signature = offset_signature
+                    self._offset_layout_dirty = False
+                    self._appearance_dirty = True
 
-            if self._appearance_dirty:
-                self._sync_materials(desired_offsets)
-                self._appearance_dirty = False
+                if self._appearance_dirty:
+                    self._sync_materials(desired_offsets)
+                    self._appearance_dirty = False
 
-            preview_mode = active_offsets != desired_offsets
-            visible_mesh_entries = self._visible_mesh_entries(desired_offsets, allow_cached=preview_mode)
-            active_mesh_entries = self._active_mesh_entries_for_reason(reason, visible_mesh_entries, preview_mode)
-            self._set_group_visibility(bool(visible_mesh_entries))
-            self._sync_offset_group_visibility(desired_offsets, active_offsets)
+                preview_mode = active_offsets != desired_offsets
+                visible_mesh_entries = self._visible_mesh_entries(desired_offsets, allow_cached=preview_mode)
+                active_mesh_entries = self._active_mesh_entries_for_reason(reason, visible_mesh_entries, preview_mode)
+                self._set_group_visibility(bool(visible_mesh_entries))
+                self._sync_offset_group_visibility(desired_offsets, active_offsets)
 
-            try:
-                cmds.refresh(suspend=True)
-                refresh_suspended = True
-            except Exception:
-                refresh_suspended = False
-
-            if self._context_sampling_supported:
                 try:
-                    self._refresh_with_context(active_offsets, current_time, active_mesh_entries)
+                    cmds.refresh(suspend=True)
+                    refresh_suspended = True
                 except Exception:
-                    self._context_sampling_supported = False
-                    _warning(
-                        "Context-based sampling failed once. Falling back to timeline stepping. Details: {0}".format(
-                            traceback.format_exc().strip().splitlines()[-1]
+                    refresh_suspended = False
+
+                if self._context_sampling_supported:
+                    try:
+                        self._refresh_with_context(active_offsets, current_time, active_mesh_entries)
+                    except Exception:
+                        self._context_sampling_supported = False
+                        _warning(
+                            "Context-based sampling failed once. Falling back to timeline stepping. Details: {0}".format(
+                                traceback.format_exc().strip().splitlines()[-1]
+                            )
                         )
-                    )
+                        requires_time_restore = True
+                        self._refresh_with_timeline(active_offsets, current_time, active_mesh_entries)
+                else:
                     requires_time_restore = True
                     self._refresh_with_timeline(active_offsets, current_time, active_mesh_entries)
-            else:
-                requires_time_restore = True
-                self._refresh_with_timeline(active_offsets, current_time, active_mesh_entries)
         except Exception as exc:
             return False, "Onion skin refresh failed: {0}".format(exc)
         finally:
@@ -681,7 +802,7 @@ class MayaOnionSkinController(object):
         self._queue_callback_refresh(rebuild=False, reason="callback")
 
     def _queue_callback_refresh(self, rebuild=False, reason="callback"):
-        if self.full_fidelity_scrub and reason == "callback":
+        if self.display_mode == MODE_3D_GHOST and self.full_fidelity_scrub and reason == "callback":
             self._cancel_scheduled_refresh()
             self.refresh(rebuild=rebuild, reason=reason)
             return
@@ -707,6 +828,39 @@ class MayaOnionSkinController(object):
         self._refresh_timer.timeout.connect(self._process_queued_refresh)
         return self._refresh_timer
 
+    def _ensure_camera_polling(self):
+        if not QtCore or not MAYA_AVAILABLE or cmds.about(batch=True):
+            return None
+        if self.display_mode != MODE_FAST_SILHOUETTE or not self.auto_update or not self.attached_roots:
+            if self._camera_poll_timer and self._camera_poll_timer.isActive():
+                self._camera_poll_timer.stop()
+            return self._camera_poll_timer
+        if self._camera_poll_timer is None:
+            self._camera_poll_timer = QtCore.QTimer()
+            self._camera_poll_timer.timeout.connect(self._on_camera_poll)
+        if not self._camera_poll_timer.isActive():
+            self._camera_poll_timer.start(CAMERA_POLL_INTERVAL_MS)
+        return self._camera_poll_timer
+
+    def _current_view_signature(self):
+        panel_name = _active_model_panel(require_focus=False)
+        camera_name = _active_camera(panel_name)
+        current_time = float(cmds.currentTime(query=True))
+        if not camera_name or not cmds.objExists(camera_name):
+            return (panel_name, camera_name, round(current_time, 3))
+        matrix_values = cmds.xform(camera_name, query=True, matrix=True, worldSpace=True) or [0.0] * 16
+        rounded_matrix = tuple(round(float(value), 4) for value in matrix_values)
+        return (panel_name, camera_name, round(current_time, 3), rounded_matrix)
+
+    def _on_camera_poll(self):
+        if self.display_mode != MODE_FAST_SILHOUETTE or not self.auto_update or not self.attached_roots:
+            return
+        current_signature = self._current_view_signature()
+        if current_signature != self._camera_signature:
+            self._camera_signature = current_signature
+            self._last_motion_at = time.perf_counter()
+            self._queue_callback_refresh(rebuild=False, reason="view")
+
     def _process_queued_refresh(self):
         if not self._refresh_pending or self._updating or not self.attached_roots:
             return
@@ -717,7 +871,7 @@ class MayaOnionSkinController(object):
         self._pending_rebuild = False
         self._pending_reason = "callback"
 
-        if self.full_fidelity_scrub and reason == "callback":
+        if self.display_mode == MODE_3D_GHOST and self.full_fidelity_scrub and reason == "callback":
             self.refresh(rebuild=rebuild, reason=reason)
             return
 
@@ -731,12 +885,12 @@ class MayaOnionSkinController(object):
             timer.start(AUTO_UPDATE_INTERVAL_MS)
             return
 
-        if reason == "callback":
+        if reason in ("callback", "view"):
             elapsed_ms = (time.perf_counter() - self._last_callback_request_at) * 1000.0
             if elapsed_ms < SCRUB_SETTLE_DELAY_MS:
                 self._refresh_pending = True
                 self._pending_rebuild = False
-                self._pending_reason = "callback"
+                self._pending_reason = reason
                 remaining_ms = max(int(SCRUB_SETTLE_DELAY_MS - elapsed_ms), AUTO_UPDATE_INTERVAL_MS)
                 timer.start(remaining_ms)
 
@@ -746,9 +900,12 @@ class MayaOnionSkinController(object):
         self._pending_reason = "callback"
         if self._refresh_timer and self._refresh_timer.isActive():
             self._refresh_timer.stop()
+        if self._camera_poll_timer and self._camera_poll_timer.isActive() and self.display_mode != MODE_FAST_SILHOUETTE:
+            self._camera_poll_timer.stop()
 
     def _register_callbacks(self):
         self._remove_callbacks()
+        self._ensure_camera_polling()
         try:
             callback_id = om.MEventMessage.addEventCallback("timeChanged", self._on_time_changed)
             self.callback_ids.append(callback_id)
@@ -773,6 +930,8 @@ class MayaOnionSkinController(object):
             except Exception:
                 pass
         self.script_job_id = None
+        if self._camera_poll_timer and self._camera_poll_timer.isActive():
+            self._camera_poll_timer.stop()
 
     def _discover_mesh_entries(self, roots):
         if isinstance(roots, (str, bytes)):
@@ -1059,6 +1218,8 @@ class MayaOnionSkinController(object):
         return _clamp(self.opacity * math.pow(max(normalized, 0.01), self.falloff), 0.02, 1.0)
 
     def _active_offsets_for_reason(self, reason, desired_offsets):
+        if self.display_mode == MODE_FAST_SILHOUETTE:
+            return desired_offsets
         if reason != "callback" or self.full_fidelity_scrub:
             return desired_offsets
         preview_limit = SCRUB_PREVIEW_MAX_OFFSETS
@@ -1106,6 +1267,223 @@ class MayaOnionSkinController(object):
             if candidate not in chosen:
                 chosen.append(candidate)
         return chosen
+
+    def _fast_silhouette_is_live_preview(self):
+        if self.display_mode != MODE_FAST_SILHOUETTE:
+            return False
+        if not self._last_motion_at:
+            return False
+        return (time.perf_counter() - self._last_motion_at) * 1000.0 < SCRUB_SETTLE_DELAY_MS
+
+    def _fast_silhouette_resolution(self):
+        if self._fast_silhouette_is_live_preview():
+            return FAST_SILHOUETTE_LIVE_RESOLUTION
+        return FAST_SILHOUETTE_REFINE_RESOLUTION
+
+    def _delete_silhouette_planes(self):
+        for entry in list(self.silhouette_image_planes.values()):
+            for node_name in (entry.get("transform"), entry.get("shape")):
+                if node_name and cmds.objExists(node_name):
+                    try:
+                        cmds.delete(node_name)
+                    except Exception:
+                        pass
+        self.silhouette_image_planes = {}
+
+    def _ensure_silhouette_plane(self, offset, camera_shape):
+        entry = self.silhouette_image_planes.get(offset)
+        if entry and cmds.objExists(entry.get("shape", "")):
+            if entry.get("camera") == camera_shape:
+                return entry
+            for node_name in (entry.get("transform"), entry.get("shape")):
+                if node_name and cmds.objExists(node_name):
+                    try:
+                        cmds.delete(node_name)
+                    except Exception:
+                        pass
+        plane_result = cmds.imagePlane(camera=camera_shape, name="{0}_{1:02d}".format(SILHOUETTE_PREFIX, abs(offset)))
+        transform_name = plane_result[0]
+        shape_name = plane_result[1] if len(plane_result) > 1 else (cmds.listRelatives(transform_name, shapes=True, fullPath=True) or [""])[0]
+        try:
+            cmds.setAttr(shape_name + ".displayOnlyIfCurrent", 1)
+        except Exception:
+            pass
+        try:
+            cmds.setAttr(shape_name + ".type", 0)
+        except Exception:
+            pass
+        try:
+            cmds.setAttr(shape_name + ".depth", 5.0 + (abs(offset) * 0.02))
+        except Exception:
+            pass
+        entry = {"transform": transform_name, "shape": shape_name, "camera": camera_shape}
+        self.silhouette_image_planes[offset] = entry
+        return entry
+
+    def _capture_silhouette_image(self, offset, sample_frame, resolution, color, alpha_value):
+        panel_name = _active_model_panel(require_focus=False)
+        camera_name = _active_camera(panel_name)
+        camera_shape = _camera_shape(camera_name)
+        if not panel_name or not camera_name or not camera_shape:
+            raise RuntimeError("Pick an active viewport camera first.")
+
+        cache_dir = _silhouette_cache_dir()
+        suffix = "live" if resolution == FAST_SILHOUETTE_LIVE_RESOLUTION else "refine"
+        base_name = "{0}_{1}_{2:02d}".format(suffix, "past" if offset < 0 else "future", abs(offset))
+        raw_base = os.path.join(cache_dir, base_name + "_raw")
+        raw_path = raw_base + ".png"
+        tinted_path = os.path.join(cache_dir, base_name + ".png")
+
+        current_time = float(cmds.currentTime(query=True))
+        original_selection = cmds.ls(selection=True, long=True) or []
+        isolate_state = False
+        isolate_set = ""
+        isolate_members = []
+        editor_state = {}
+        background_state = {}
+
+        try:
+            for flag_name in ("displayAppearance", "useDefaultMaterial", "displayTextures", "nurbsCurves", "joints", "locators", "manipulators"):
+                try:
+                    editor_state[flag_name] = cmds.modelEditor(panel_name, query=True, **{flag_name: True})
+                except Exception:
+                    pass
+            for color_name in ("background", "backgroundTop", "backgroundBottom"):
+                try:
+                    background_state[color_name] = cmds.displayRGBColor(color_name, query=True)
+                except Exception:
+                    pass
+            try:
+                isolate_state = bool(cmds.isolateSelect(panel_name, query=True, state=True))
+                if isolate_state:
+                    isolate_set = cmds.isolateSelect(panel_name, query=True, viewObjects=True) or ""
+                    if isolate_set and cmds.objExists(isolate_set):
+                        isolate_members = cmds.sets(isolate_set, query=True) or []
+            except Exception:
+                isolate_state = False
+
+            if background_state:
+                for color_name in background_state:
+                    cmds.displayRGBColor(color_name, 0.0, 0.0, 0.0)
+            try:
+                cmds.modelEditor(panel_name, edit=True, displayAppearance="smoothShaded", useDefaultMaterial=True, displayTextures=False, nurbsCurves=False, joints=False, locators=False, manipulators=False)
+            except Exception:
+                pass
+
+            cmds.select(self.attached_roots, replace=True)
+            if not isolate_state:
+                try:
+                    cmds.isolateSelect(panel_name, state=True)
+                except Exception:
+                    pass
+            try:
+                cmds.isolateSelect(panel_name, loadSelected=True)
+            except Exception:
+                pass
+
+            cmds.currentTime(sample_frame, edit=True, update=True)
+            returned_path = cmds.playblast(
+                format="image",
+                compression="png",
+                viewer=False,
+                showOrnaments=False,
+                offScreen=True,
+                forceOverwrite=True,
+                clearCache=True,
+                frame=[sample_frame],
+                widthHeight=list(resolution),
+                editorPanelName=panel_name,
+                filename=raw_base,
+                percent=100,
+            )
+            if returned_path and os.path.exists(returned_path):
+                raw_path = returned_path
+            elif os.path.exists(raw_base):
+                raw_path = raw_base
+            if not os.path.exists(raw_path):
+                matches = sorted(glob.glob(raw_base + "*.png"))
+                if matches:
+                    raw_path = matches[-1]
+            if not os.path.exists(raw_path):
+                raise RuntimeError("Playblast did not create the silhouette image.")
+            if not _tint_silhouette_image(raw_path, tinted_path, color, alpha_value):
+                raise RuntimeError("Could not tint the silhouette image.")
+        finally:
+            try:
+                cmds.currentTime(current_time, edit=True, update=True)
+            except Exception:
+                pass
+            if isolate_state and isolate_set and cmds.objExists(isolate_set):
+                try:
+                    current_members = cmds.sets(isolate_set, query=True) or []
+                    if current_members:
+                        cmds.sets(current_members, remove=isolate_set)
+                except Exception:
+                    pass
+                if isolate_members:
+                    try:
+                        cmds.sets(isolate_members, add=isolate_set)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    cmds.isolateSelect(panel_name, state=False)
+                except Exception:
+                    pass
+            for flag_name, value in editor_state.items():
+                try:
+                    cmds.modelEditor(panel_name, edit=True, **{flag_name: value})
+                except Exception:
+                    pass
+            for color_name, value in background_state.items():
+                try:
+                    cmds.displayRGBColor(color_name, value[0], value[1], value[2])
+                except Exception:
+                    pass
+            if original_selection:
+                try:
+                    cmds.select(original_selection, replace=True)
+                except Exception:
+                    pass
+            else:
+                try:
+                    cmds.select(clear=True)
+                except Exception:
+                    pass
+
+        plane_entry = self._ensure_silhouette_plane(offset, camera_shape)
+        cmds.setAttr(plane_entry["shape"] + ".imageName", tinted_path, type="string")
+        cmds.setAttr(plane_entry["shape"] + ".visibility", 1)
+        self.silhouette_cache[offset] = {
+            "image_path": tinted_path,
+            "resolution": resolution,
+            "camera": camera_shape,
+            "frame": float(sample_frame),
+        }
+
+    def _refresh_fast_silhouette(self, desired_offsets, current_time):
+        panel_name = _active_model_panel(require_focus=False)
+        camera_name = _active_camera(panel_name)
+        camera_shape = _camera_shape(camera_name)
+        if not panel_name or not camera_shape:
+            raise RuntimeError("Click into a Maya viewport first so Fast Silhouette knows which camera to use.")
+        resolution = self._fast_silhouette_resolution()
+        for offset in desired_offsets:
+            sample_frame = float(current_time) + offset
+            self._capture_silhouette_image(
+                offset,
+                sample_frame,
+                resolution,
+                self._offset_color(offset),
+                self._offset_alpha(offset),
+            )
+        active_keys = set(desired_offsets)
+        for offset, entry in list(self.silhouette_image_planes.items()):
+            if offset not in active_keys and cmds.objExists(entry.get("shape", "")):
+                try:
+                    cmds.setAttr(entry["shape"] + ".visibility", 0)
+                except Exception:
+                    pass
 
     def _refresh_with_context(self, desired_offsets, current_time, visible_mesh_entries):
         for offset in desired_offsets:
@@ -1322,6 +1700,12 @@ if QtWidgets:
             form_layout.setLabelAlignment(_qt_flag("AlignmentFlag", "AlignLeft", 0))
             form_layout.setFormAlignment(_qt_flag("AlignmentFlag", "AlignTop", 0))
 
+            self.display_mode_combo = QtWidgets.QComboBox()
+            for label, value in MODE_ITEMS:
+                self.display_mode_combo.addItem(label, value)
+            self.display_mode_combo.setToolTip("3D Ghost keeps real 3D meshes. Fast Silhouette uses a camera-based live preview that refreshes low-res while you move, then sharpens when you stop.")
+            form_layout.addRow("Preview Mode", self.display_mode_combo)
+
             self.past_spin = QtWidgets.QSpinBox()
             self.past_spin.setRange(0, MAX_FRAMES_PER_SIDE)
             self.past_spin.setToolTip("How many frames behind the current frame to show.")
@@ -1416,6 +1800,7 @@ if QtWidgets:
             self.refresh_button.clicked.connect(self._refresh)
             self.clear_button.clicked.connect(self._clear)
             self.donate_button.clicked.connect(self._open_donate_url)
+            self.display_mode_combo.currentIndexChanged.connect(self._settings_changed)
             self.auto_update_check.toggled.connect(self._settings_changed)
             self.full_fidelity_scrub_check.toggled.connect(self._settings_changed)
             self.past_spin.valueChanged.connect(self._settings_changed)
@@ -1429,6 +1814,8 @@ if QtWidgets:
         def _populate_from_controller(self):
             self._syncing_ui = True
             try:
+                mode_index = self.display_mode_combo.findData(self.controller.display_mode)
+                self.display_mode_combo.setCurrentIndex(0 if mode_index < 0 else mode_index)
                 self.past_spin.setValue(self.controller.past_frames)
                 self.future_spin.setValue(self.controller.future_frames)
                 self.frame_step_spin.setValue(self.controller.frame_step)
@@ -1439,11 +1826,13 @@ if QtWidgets:
                 _shape_color(self.past_color_button, self.controller.past_color)
                 _shape_color(self.future_color_button, self.controller.future_color)
                 self.status_label.setText(self.controller.attachment_summary())
+                self.full_fidelity_scrub_check.setEnabled(self.controller.display_mode == MODE_3D_GHOST)
             finally:
                 self._syncing_ui = False
 
         def _current_settings(self):
             return {
+                "display_mode": self.display_mode_combo.currentData(),
                 "past_frames": self.past_spin.value(),
                 "future_frames": self.future_spin.value(),
                 "frame_step": self.frame_step_spin.value(),
@@ -1469,7 +1858,9 @@ if QtWidgets:
                 current["full_fidelity_scrub"],
                 current["past_color"],
                 current["future_color"],
+                current["display_mode"],
             )
+            self.full_fidelity_scrub_check.setEnabled(self.controller.display_mode == MODE_3D_GHOST)
 
         def _settings_changed(self, *args):
             self._apply_settings()

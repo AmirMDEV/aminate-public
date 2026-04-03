@@ -28,17 +28,22 @@ if repo_path not in sys.path:
 try:
     import maya.cmds as cmds
     import maya_anim_workflow_tools
+    import maya_dynamic_parenting_tool
     import maya_dynamic_parent_pivot
 
     importlib.reload(maya_anim_workflow_tools)
+    importlib.reload(maya_dynamic_parenting_tool)
     importlib.reload(maya_dynamic_parent_pivot)
 
     window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(initial_tab="parenting")
     if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
         maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
+    panel = window.parenting_panel
 
     if cmds.objExists("|dynamicParentingReloadVerify_GRP"):
         cmds.delete("|dynamicParentingReloadVerify_GRP")
+    if cmds.objExists("|" + maya_dynamic_parenting_tool.ROOT_GROUP_NAME):
+        cmds.delete("|" + maya_dynamic_parenting_tool.ROOT_GROUP_NAME)
 
     verify_group = cmds.createNode("transform", name="dynamicParentingReloadVerify_GRP")
 
@@ -60,34 +65,52 @@ try:
 
     cmds.currentTime(1, edit=True)
     cmds.select([mag], replace=True)
-    window._create_temp_controls()
+    panel._add_object()
 
     cmds.select([mag, hand], replace=True)
-    window._pickup_here()
-    first_summary = window.parenting_summary.toPlainText()
-    first_status = window.status_label.text()
-    first_driver_line = window.driver_line.text()
-    first_setup = window.controller.parenting_setups(from_selection=False)[0]
+    panel._use_target()
+    first_pick_status = panel.status_label.text()
+    before_first_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
+    panel._parent_to_picked_target()
+    after_first_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
+    first_summary = panel.summary_box.toPlainText()
+    first_status = panel.status_label.text()
+    first_driver_line = panel.target_line.text()
+    first_setup = panel.controller.current_setup()
 
     cmds.currentTime(6, edit=True)
     before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     cmds.select([mag, gun], replace=True)
-    window._pass_here()
+    panel._use_target()
+    second_pick_status = panel.status_label.text()
+    panel._parent_to_picked_target()
     after_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
-    second_summary = window.parenting_summary.toPlainText()
-    second_status = window.status_label.text()
-    second_driver_line = window.driver_line.text()
-    second_setup = window.controller.parenting_setups(from_selection=False)[0]
+    second_summary = panel.summary_box.toPlainText()
+    second_status = panel.status_label.text()
+    second_driver_line = panel.target_line.text()
+    second_setup = panel.controller.current_setup()
+
+    cmds.currentTime(7, edit=True)
+    setup_after_switch = panel.controller.current_setup()
+    target_lookup = {target["label"]: target["id"] for target in setup_after_switch.get("targets") or []}
+    for target_id, spin_box in panel._weight_widgets.items():
+        if target_id == target_lookup.get("World"):
+            spin_box.setValue(0.5)
+        elif target_id == target_lookup.get("reloadGun_CTRL"):
+            spin_box.setValue(0.5)
+        else:
+            spin_box.setValue(0.0)
+    panel._apply_weights()
+    blend_summary = panel.summary_box.toPlainText()
+    blend_status = panel.status_label.text()
 
     cmds.currentTime(9, edit=True)
-    cmds.select([mag], replace=True)
-    window.release_combo.setCurrentText("World")
-    window._drop_here()
-    release_summary = window.parenting_summary.toPlainText()
-    release_status = window.status_label.text()
-    event_items = [window.parenting_event_list.item(index).text() for index in range(window.parenting_event_list.count())]
-    window.parenting_event_list.setCurrentRow(1)
-    window._jump_to_selected_parenting_event()
+    panel._parent_to_world()
+    release_summary = panel.summary_box.toPlainText()
+    release_status = panel.status_label.text()
+    event_items = [panel.event_list.item(index).text() for index in range(panel.event_list.count())]
+    panel.event_list.setCurrentRow(1)
+    panel._jump_to_event()
     jumped_frame = float(cmds.currentTime(query=True))
 
     window.tab_widget.setCurrentWidget(window.parenting_tab)
@@ -99,25 +122,33 @@ try:
 
     result = {
         "ok": True,
-        "create_text": window.create_temp_button.text(),
-        "target_text": window.use_driver_button.text(),
-        "grab_text": window.add_grab_button.text(),
-        "fix_text": window.normalize_button.text(),
-        "pickup_text": window.pickup_button.text(),
-        "pass_text": window.pass_button.text(),
-        "drop_text": window.drop_button.text(),
-        "first_driver": first_setup.get("current_driver", ""),
+        "add_object_text": panel.add_object_button.text(),
+        "pick_parent_text": panel.use_target_button.text(),
+        "parent_to_picked_text": panel.parent_to_picked_button.text(),
+        "save_parent_text": panel.add_target_button.text(),
+        "row_switch_text": panel.parent_to_row_button.text(),
+        "world_text": panel.parent_to_world_button.text(),
+        "blend_text": panel.apply_weights_button.text(),
+        "fix_text": panel.fix_pop_button.text(),
+        "jump_text": panel.jump_button.text(),
+        "first_pick_status": first_pick_status,
+        "second_pick_status": second_pick_status,
+        "first_driver": first_driver_line,
         "first_driver_line": first_driver_line,
         "first_status": first_status,
         "first_summary": first_summary,
-        "second_driver": second_setup.get("current_driver", ""),
+        "second_driver": second_driver_line,
         "second_driver_line": second_driver_line,
         "second_status": second_status,
         "second_summary": second_summary,
+        "blend_status": blend_status,
+        "blend_summary": blend_summary,
         "release_status": release_status,
         "release_summary": release_summary,
         "event_items": event_items,
         "jumped_frame": jumped_frame,
+        "before_first_switch": before_first_switch,
+        "after_first_switch": after_first_switch,
         "before_switch": before_switch,
         "after_switch": after_switch,
         "screenshot_path": screenshot_path,
@@ -134,44 +165,59 @@ except Exception:
     if not result.get("ok"):
         raise AssertionError(json.dumps(payload, indent=2))
 
-    if result.get("create_text") != "Make Helpers":
+    if result.get("add_object_text") != "Add Picked Object":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("target_text") != "Use Picked Hand / Object":
+    if result.get("pick_parent_text") != "Pick Parent From Selection":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("grab_text") != "Swap Here":
+    if result.get("parent_to_picked_text") != "Parent To Picked Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("fix_text") != "Fix Jump Here":
+    if result.get("save_parent_text") != "Save Picked Parent In List":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("pickup_text") != "Pickup":
+    if result.get("row_switch_text") != "Parent Fully To Picked Row":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("pass_text") != "Pass":
+    if result.get("world_text") != "Parent To World":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("drop_text") != "Drop":
+    if result.get("blend_text") != "Blend Using Shown Weights":
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("fix_text") != "Keep Current Blend Here":
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("jump_text") != "Jump To Picked Switch":
+        raise AssertionError(json.dumps(result, indent=2))
+    if "reloadHand_CTRL" not in (result.get("first_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadHand_CTRL" not in (result.get("first_driver") or ""):
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("first_driver_line") != "reloadHand_CTRL":
-        raise AssertionError(json.dumps(result, indent=2))
     if "reloadHand_CTRL" not in (result.get("first_summary") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    if "reloadGun_CTRL" not in (result.get("second_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_driver") or ""):
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("second_driver_line") != "reloadGun_CTRL":
-        raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_summary") or ""):
         raise AssertionError(json.dumps(result, indent=2))
-    if "free in world space" not in (result.get("release_summary") or "").lower():
+    if "World: 0.50" not in (result.get("blend_summary") or "") or "reloadGun_CTRL: 0.50" not in (result.get("blend_summary") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    if "World: 1.00" not in (result.get("release_summary") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     event_items = result.get("event_items") or []
-    if len(event_items) != 3:
+    if len(event_items) != 4:
         raise AssertionError(json.dumps(result, indent=2))
-    if "Pickup reloadMag_CTRL -> reloadHand_CTRL" not in event_items[0]:
+    if "F1: Switch -> reloadHand_CTRL 1.00" not in event_items[0]:
         raise AssertionError(json.dumps(result, indent=2))
-    if "Pass reloadMag_CTRL -> reloadGun_CTRL" not in event_items[1]:
+    if "F6: Switch -> reloadGun_CTRL 1.00" not in event_items[1]:
         raise AssertionError(json.dumps(result, indent=2))
-    if "Drop reloadMag_CTRL -> world" not in event_items[2]:
+    if "F7: Blend -> World 0.50, reloadGun_CTRL 0.50" not in event_items[2]:
+        raise AssertionError(json.dumps(result, indent=2))
+    if "F9: World -> World 1.00" not in event_items[3]:
         raise AssertionError(json.dumps(result, indent=2))
     if abs(float(result.get("jumped_frame", 0.0)) - 6.0) > 0.01:
+        raise AssertionError(json.dumps(result, indent=2))
+
+    before_first_switch = result.get("before_first_switch") or []
+    after_first_switch = result.get("after_first_switch") or []
+    if len(before_first_switch) != 3 or len(after_first_switch) != 3:
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(before_first_switch[index]) - float(after_first_switch[index])) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
 
     before_switch = result.get("before_switch") or []

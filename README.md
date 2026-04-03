@@ -208,11 +208,11 @@ maya_contact_hold.launch_maya_contact_hold()
 `maya_anim_workflow_tools.py` is the canonical combined entrypoint for the new tabbed workflow tool. It currently ships these tabs:
 
 - `Quick Start`: in-tool workflow reminders and troubleshooting notes
-- `Dynamic Parenting`: reload and prop hand-off helpers so one control can swap between hands, props, or world without a pop
+- `Dynamic Parenting`: scene-backed prop and control parenting so one object can switch between hands, props, world, or blended parents without baking
 - `Hand / Foot Hold`: live editable planted-contact helper that can lock chosen world axes over a chosen frame range, save many hold rows per control, then turn specific rows on, off, update them, rename them in the list, or delete them later without baking every frame
 - `Dynamic Pivot`: temporary shared pivot authoring that lets you move the pivot anywhere before applying rotation
 - `Universal IK/FK`: profile-driven FK/IK matching and switching with frame-1 plus current-frame keying, separate FK and IK controller fields, and a stronger first-pass auto-detect that now prefers real animator controls over nearby helper transforms, while still expecting user review
-- `Onion Skin`: the full stepped multi-root mesh ghost preview tool, now available inside the global workflow window as its own tab
+- `Onion Skin`: the full stepped multi-root mesh ghost preview tool, now available inside the global workflow window as its own tab, with both `3D Ghost` and camera-based `Fast Silhouette (Live + Refine)` preview modes
 - `Rotation Doctor`: the rotation diagnosis and cleanup tool, now available inside the global workflow window as its own tab
 - `Skinning Cleanup`: non-destructive bad-scale cleanup for one skinned mesh, with exact vertex-index weight restore and a safe replace step
 - `Rig Scale`: non-destructive export-copy builder that bakes the chosen size into the copied skeleton and meshes for engine export
@@ -261,11 +261,11 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 
 ## Notes
 
-- Maya Dynamic Parenting is meant for reloads, pick-ups, and hand-offs. The simple flow is: pick the thing that moves, click `Make Helpers` once, then pick that control plus the new hand, gun, or prop and click `Swap Here`.
-- Dynamic Parenting now lets the current selection override the old stored target, so swapping from hand to gun or gun to hand is a one-click switch instead of a hidden `driver` workflow.
-- Dynamic Parenting now keeps a visible `Swap History` list in the tab. You can refresh it after changing selection and click an event to jump straight back to that swap frame.
-- The tab also has shortcut buttons for `Pickup`, `Pass`, and `Drop`. These are just clearer labels on top of the same tested swap engine, so they are easier to read without changing the underlying behavior.
-- Maya Onion Skin uses evaluated mesh sampling first and falls back to timeline stepping when Maya cannot provide in-context mesh data.
+- Maya Dynamic Parenting is now a scene-backed setup rather than a bake-and-clear helper. You add the moving object once, add any hand, gun, prop, or world choices it should follow, and those parent choices stay stored in the Maya scene.
+- The simple Dynamic Parenting flow is: click `Add Picked Object`, click `Pick Parent From Selection`, then use `Parent To Picked Parent`, `Parent Fully To Picked Row`, `Parent To World`, or `Blend Using Shown Weights`.
+- Dynamic Parenting keeps a visible `Saved Parent Switches` list in the tab, and clicking a saved row jumps you straight back to that switch frame later.
+- Maya Onion Skin keeps the full user-chosen ghost count in both preview modes. `3D Ghost` is the true mesh mode, while `Fast Silhouette (Live + Refine)` is a camera-based silhouette mode that refreshes at a lower resolution while view motion is active, then sharpens after settle.
+- On the current Amanda scene, the first working `Fast Silhouette` pass is correct and live-tested, but it is still best treated as an alternate view-driven mode rather than the guaranteed faster option on every mesh. The current heavy-mesh win is still more about mode choice and refresh behavior than a magic instant speed-up.
 - Maya Rotation Doctor is intentionally preview-first. It does not auto-change rotate order in V1.
 - Maya Skinning Cleanup currently targets one selected skinned polygon mesh at a time and blocks unsupported extra deformation history such as blendshape stacks.
 - Maya Rig Scale Export is verified for common uniform grouped rigs. Rotated or non-uniform parent groups are warned up front because exact normals can differ after baking scale, so those cases should be checked carefully before Unreal export.

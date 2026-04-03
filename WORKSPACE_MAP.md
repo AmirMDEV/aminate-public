@@ -9,10 +9,11 @@ This folder contains standalone Maya tooling aimed at animator-facing workflows 
 - `maya_shelf_utils.py`: shared shelf installer and shelf-name normalization helpers for Maya tools in this folder
 - `maya_anim_workflow_tools.py`: canonical tabbed entrypoint for dynamic parenting, hand/foot holds, dynamic pivot, universal IK/FK, onion skin, rotation cleanup, skinning cleanup, rig-scale export, video reference, and timeline-note workflows
 - `maya_dynamic_parent_pivot.py`: combined implementation behind the tabbed Anim Workflow UI, including the embedded Hand / Foot Hold, Onion Skin, Rotation Doctor, Skinning Cleanup, Rig Scale, Video Reference, and Timeline Notes tabs
+- `maya_dynamic_parenting_tool.py`: scene-backed dynamic parenting panel for hand/gun/world switching, stored parent choices, and weighted blends inside the combined workflow tool
 - `maya_universal_ikfk_switcher.py`: compatibility launcher that opens the IK/FK tab directly
 - `maya_live_bridge_bootstrap.py`: live Maya bridge bootstrap helper that uses the command-line field after a fresh Maya reopen
 - `maya_contact_hold.py`: keeps picked hand or foot controls planted in place across a chosen frame range
-- `maya_onion_skin.py`: lightweight onion-skin preview tool for multi-part rigs
+- `maya_onion_skin.py`: stepped onion-skin preview tool for multi-part rigs, with both 3D ghost and camera-based fast silhouette modes
 - `maya_rotation_doctor.py`: preview-first rotation diagnosis and repair tool for animated controls
 - `maya_skinning_cleanup.py`: non-destructive skinned-mesh scale cleanup with exact vertex-index skin restore
 - `maya_rig_scale_export.py`: non-destructive export-copy builder for resizing skinned character rigs without exporting joint scale

@@ -101,12 +101,14 @@ if repo_path not in sys.path:
 
 import maya_anim_workflow_tools
 import maya_contact_hold
+import maya_dynamic_parenting_tool
 import maya_dynamic_parent_pivot
 import maya_onion_skin
 import maya_rotation_doctor
 import maya_rig_scale_export
 
 importlib.reload(maya_contact_hold)
+importlib.reload(maya_dynamic_parenting_tool)
 importlib.reload(maya_onion_skin)
 importlib.reload(maya_rotation_doctor)
 importlib.reload(maya_rig_scale_export)
@@ -164,9 +166,13 @@ def _mesh_root_from_scene():
         return len(cmds.listRelatives(node_name, allDescendents=True, type="mesh", fullPath=True) or [])
 
     for node_name in selection:
+        if not cmds.objExists(node_name):
+            continue
         best_candidate = ""
         best_count = 0
         for candidate in _ancestors(node_name):
+            if not cmds.objExists(candidate):
+                continue
             count = _mesh_count(candidate)
             if count >= best_count:
                 best_candidate = candidate
@@ -212,8 +218,12 @@ try:
     root_candidate, mesh_count = _mesh_root_from_scene()
     if not root_candidate:
         raise RuntimeError("Could not find a mesh-bearing root in the open scene.")
+    onion_target = root_candidate
+    if cmds.objExists("Amanda_v_3:body_geo"):
+        onion_target = (cmds.ls("Amanda_v_3:body_geo", long=True) or [onion_target])[0]
     result["scene"]["root_candidate"] = root_candidate
     result["scene"]["root_mesh_count"] = mesh_count
+    result["scene"]["onion_target"] = onion_target
 
     test_group_name = "codexLiveFunctionalVerify_GRP"
     if cmds.objExists(test_group_name):
@@ -226,20 +236,24 @@ try:
     onion_window.frame_step_spin.setValue(2)
     onion_window.auto_update_check.setChecked(True)
     onion_window.full_fidelity_scrub_check.setChecked(False)
-    _select([root_candidate])
+    onion_window.display_mode_combo.setCurrentIndex(onion_window.display_mode_combo.findData(maya_onion_skin.MODE_FAST_SILHOUETTE))
+    _select([onion_target])
     success, message = onion_window.controller.attach_selection(add=False)
     if not success:
         raise RuntimeError("Onion Skin attach failed: {0}".format(message))
     refresh_success, refresh_message = onion_window.controller.manual_refresh()
     if not refresh_success:
         raise RuntimeError("Onion Skin refresh failed: {0}".format(refresh_message))
-    onion_offsets = sorted(onion_window.controller.ghost_cache.keys())
+    onion_offsets = sorted(onion_window.controller.silhouette_image_planes.keys())
     if not onion_offsets:
-        raise RuntimeError("Onion Skin created no ghost offsets.")
+        raise RuntimeError("Onion Skin created no fast silhouette offsets.")
     result["onion_skin"] = {{
         "attached_roots": list(onion_window.controller.attached_roots),
         "mesh_count": len(onion_window.controller.source_meshes),
         "offsets": onion_offsets,
+        "display_mode": onion_window.controller.display_mode,
+        "silhouette_plane_count": len(onion_window.controller.silhouette_image_planes),
+        "ghost_cache_count": len(onion_window.controller.ghost_cache),
         "summary": onion_window.controller.attachment_summary(),
     }}
     onion_window.controller.shutdown()
@@ -299,35 +313,57 @@ try:
 
     anim_window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools()
     controller = anim_window.controller
+    parenting_controller = controller.dynamic_parenting_controller
 
     driven = _create_transform("dynamicDriven_CTRL", parent=test_group, translation=(0.0, 0.0, 0.0))
-    driver = _create_transform("dynamicDriver_CTRL", parent=test_group, translation=(6.0, 0.0, 0.0))
+    hand_driver = _create_transform("dynamicHand_CTRL", parent=test_group, translation=(6.0, 0.0, 0.0))
+    gun_driver = _create_transform("dynamicGun_CTRL", parent=test_group, translation=(10.0, 2.0, 0.0))
+    starting_setup_count = len(parenting_controller.setup_payloads(from_selection=False))
     cmds.currentTime(1, edit=True)
     _select([driven])
-    temp_success, temp_message = controller.create_temp_controls()
-    if not temp_success:
-        raise RuntimeError("Dynamic Parenting create failed: {0}".format(temp_message))
-    controller.driver_node = driver
-    _select([driven])
-    grab_success, grab_message = controller.add_grab_current()
-    if not grab_success:
-        raise RuntimeError("Dynamic Parenting grab failed: {0}".format(grab_message))
-    _select([driven])
-    release_success, release_message = controller.add_release_current("world")
-    if not release_success:
-        raise RuntimeError("Dynamic Parenting release failed: {0}".format(release_message))
-    _select([driven])
-    normalize_success, normalize_message = controller.normalize_transitions()
-    if not normalize_success:
-        raise RuntimeError("Dynamic Parenting normalize failed: {0}".format(normalize_message))
-    controller.bake_mode = "keys"
-    controller.bake_range = "current"
-    bake_success, bake_message = controller.bake_to_rig(clear_after=True)
-    if not bake_success:
-        raise RuntimeError("Dynamic Parenting bake failed: {0}".format(bake_message))
-    remaining_setups = controller.parenting_setups(from_selection=False)
-    if remaining_setups:
-        raise RuntimeError("Dynamic Parenting left temp setups behind after bake + clear.")
+    add_success, add_message = parenting_controller.add_driven_from_selection()
+    if not add_success:
+        raise RuntimeError("Dynamic Parenting add failed: {0}".format(add_message))
+    hand_before = _world_translation(driven)
+    _select([driven, hand_driver])
+    hand_pick_success, hand_pick_message = parenting_controller.set_pending_target_from_selection()
+    if not hand_pick_success:
+        raise RuntimeError("Dynamic Parenting hand pick failed: {0}".format(hand_pick_message))
+    hand_switch_success, hand_switch_message = parenting_controller.apply_pending_target()
+    if not hand_switch_success:
+        raise RuntimeError("Dynamic Parenting hand switch failed: {0}".format(hand_switch_message))
+    hand_after = _world_translation(driven)
+    cmds.currentTime(6, edit=True)
+    before_switch = _world_translation(driven)
+    _select([driven, gun_driver])
+    gun_pick_success, gun_pick_message = parenting_controller.set_pending_target_from_selection()
+    if not gun_pick_success:
+        raise RuntimeError("Dynamic Parenting gun pick failed: {0}".format(gun_pick_message))
+    gun_switch_success, gun_switch_message = parenting_controller.apply_pending_target()
+    if not gun_switch_success:
+        raise RuntimeError("Dynamic Parenting gun switch failed: {0}".format(gun_switch_message))
+    after_switch = _world_translation(driven)
+    current_setup = parenting_controller.current_setup()
+    target_lookup = {target["label"]: target["id"] for target in current_setup.get("targets") or []}
+    cmds.currentTime(7, edit=True)
+    blend_success, blend_message = parenting_controller.apply_weight_map(
+        {
+            "world": 0.5,
+            target_lookup.get("dynamicGun_CTRL", ""): 0.5,
+            target_lookup.get("dynamicHand_CTRL", ""): 0.0,
+        },
+        action_label="blend",
+    )
+    if not blend_success:
+        raise RuntimeError("Dynamic Parenting blend failed: {0}".format(blend_message))
+    blend_weights = parenting_controller.current_weights(parenting_controller.current_setup())
+    cmds.currentTime(9, edit=True)
+    world_success, world_message = parenting_controller.parent_to_world()
+    if not world_success:
+        raise RuntimeError("Dynamic Parenting world switch failed: {0}".format(world_message))
+    world_weights = parenting_controller.current_weights(parenting_controller.current_setup())
+    remaining_setups = parenting_controller.setup_payloads(from_selection=False)
+    event_items = parenting_controller.event_items(parenting_controller.current_setup())
 
     hold_root = _create_transform("contactHoldRoot_CTRL", parent=test_group, translation=(0.0, 1.0, 0.0))
     hold_left_foot = _create_transform("L_contactHoldFoot_CTRL", parent=hold_root, translation=(2.0, 0.0, 0.0))
@@ -609,6 +645,12 @@ try:
     result["anim_workflow"] = {{
         "tabs": [anim_window.tab_widget.tabText(index) for index in range(anim_window.tab_widget.count())],
         "embedded_tools": {{
+            "parenting_add_object_text": anim_window.parenting_panel.add_object_button.text(),
+            "parenting_pick_parent_text": anim_window.parenting_panel.use_target_button.text(),
+            "parenting_parent_to_picked_text": anim_window.parenting_panel.parent_to_picked_button.text(),
+            "parenting_world_text": anim_window.parenting_panel.parent_to_world_button.text(),
+            "parenting_blend_text": anim_window.parenting_panel.apply_weights_button.text(),
+            "parenting_panel_state": _panel_snapshot(anim_window.parenting_tab, anim_window.parenting_panel),
             "contact_hold_apply_text": anim_window.contact_hold_panel.apply_button.text(),
             "contact_hold_enable_text": anim_window.contact_hold_panel.enable_button.text(),
             "contact_hold_disable_text": anim_window.contact_hold_panel.disable_button.text(),
@@ -624,8 +666,23 @@ try:
             "rig_scale_panel_state": _panel_snapshot(anim_window.rig_scale_tab, anim_window.rig_scale_panel),
         }},
         "dynamic_parenting": {{
-            "bake_message": bake_message,
+            "add_message": add_message,
+            "hand_pick_message": hand_pick_message,
+            "hand_switch_message": hand_switch_message,
+            "gun_pick_message": gun_pick_message,
+            "gun_switch_message": gun_switch_message,
+            "blend_message": blend_message,
+            "world_message": world_message,
+            "starting_setups": starting_setup_count,
             "remaining_setups": len(remaining_setups),
+            "hand_before": hand_before,
+            "hand_after": hand_after,
+            "switch_before": before_switch,
+            "switch_after": after_switch,
+            "blend_world_weight": blend_weights.get("world", 0.0),
+            "blend_gun_weight": blend_weights.get(target_lookup.get("dynamicGun_CTRL", ""), 0.0),
+            "world_weight": world_weights.get("world", 0.0),
+            "event_items": [item["display"] for item in event_items],
         }},
         "contact_hold": {{
             "frames": hold_frames,
@@ -704,6 +761,7 @@ finally:
                 pass
         for root_name in (
             getattr(maya_onion_skin, "ROOT_GROUP_NAME", ""),
+            getattr(maya_dynamic_parenting_tool, "ROOT_GROUP_NAME", ""),
             getattr(maya_dynamic_parent_pivot, "ROOT_GROUP_NAME", ""),
         ):
             if root_name and cmds.objExists(root_name):
@@ -743,6 +801,12 @@ result = namespace.get("result")
     onion = result.get("onion_skin") or {}
     if not onion.get("attached_roots") or not onion.get("offsets"):
         raise AssertionError(json.dumps(result, indent=2))
+    if onion.get("display_mode") != "fast_silhouette":
+        raise AssertionError(json.dumps(result, indent=2))
+    if int(onion.get("silhouette_plane_count", 0)) != len(onion.get("offsets") or []):
+        raise AssertionError(json.dumps(result, indent=2))
+    if int(onion.get("ghost_cache_count", 0)) != 0:
+        raise AssertionError(json.dumps(result, indent=2))
 
     rotation = result.get("rotation_doctor") or {}
     if not rotation.get("analyzed_controls"):
@@ -752,6 +816,16 @@ result = namespace.get("result")
     if workflow.get("tabs") != ["Quick Start", "Dynamic Parenting", "Hand / Foot Hold", "Dynamic Pivot", "Universal IK/FK", "Onion Skin", "Rotation Doctor", "Skinning Cleanup", "Rig Scale", "Video Reference", "Timeline Notes"]:
         raise AssertionError(json.dumps(result, indent=2))
     embedded_tools = workflow.get("embedded_tools") or {}
+    if embedded_tools.get("parenting_add_object_text") != "Add Picked Object":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("parenting_pick_parent_text") != "Pick Parent From Selection":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("parenting_parent_to_picked_text") != "Parent To Picked Parent":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("parenting_world_text") != "Parent To World":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("parenting_blend_text") != "Blend Using Shown Weights":
+        raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("contact_hold_apply_text") != "Save New Hold":
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("contact_hold_enable_text") != "Use Hold On Picked":
@@ -768,7 +842,7 @@ result = namespace.get("result")
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("rig_scale_analyze_text") != "Check Setup":
         raise AssertionError(json.dumps(result, indent=2))
-    for key in ("contact_hold_panel_state", "onion_panel_state", "rotation_panel_state", "skin_panel_state", "rig_scale_panel_state"):
+    for key in ("parenting_panel_state", "contact_hold_panel_state", "onion_panel_state", "rotation_panel_state", "skin_panel_state", "rig_scale_panel_state"):
         state = embedded_tools.get(key) or {}
         if state.get("is_window"):
             raise AssertionError(json.dumps(result, indent=2))
@@ -776,7 +850,32 @@ result = namespace.get("result")
             raise AssertionError(json.dumps(result, indent=2))
         if (state.get("size") or [0, 0])[1] < 200:
             raise AssertionError(json.dumps(result, indent=2))
-    if (workflow.get("dynamic_parenting") or {}).get("remaining_setups") != 0:
+    dynamic_parenting = workflow.get("dynamic_parenting") or {}
+    if int(dynamic_parenting.get("remaining_setups", 0)) != int(dynamic_parenting.get("starting_setups", 0)) + 1:
+        raise AssertionError(json.dumps(result, indent=2))
+    if len(dynamic_parenting.get("event_items") or []) != 4:
+        raise AssertionError(json.dumps(result, indent=2))
+    if abs(float(dynamic_parenting.get("blend_world_weight", 0.0)) - 0.5) > 0.001:
+        raise AssertionError(json.dumps(result, indent=2))
+    if abs(float(dynamic_parenting.get("blend_gun_weight", 0.0)) - 0.5) > 0.001:
+        raise AssertionError(json.dumps(result, indent=2))
+    if abs(float(dynamic_parenting.get("world_weight", 0.0)) - 1.0) > 0.001:
+        raise AssertionError(json.dumps(result, indent=2))
+    hand_before = dynamic_parenting.get("hand_before") or []
+    hand_after = dynamic_parenting.get("hand_after") or []
+    if len(hand_before) != 3 or len(hand_after) != 3 or any(abs(float(hand_before[index]) - float(hand_after[index])) > 0.01 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    switch_before = dynamic_parenting.get("switch_before") or []
+    switch_after = dynamic_parenting.get("switch_after") or []
+    if len(switch_before) != 3 or len(switch_after) != 3 or any(abs(float(switch_before[index]) - float(switch_after[index])) > 0.01 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    if dynamic_parenting.get("event_items", [None])[0] != "F1: Switch -> dynamicHand_CTRL 1.00":
+        raise AssertionError(json.dumps(result, indent=2))
+    if dynamic_parenting.get("event_items", [None, None])[1] != "F6: Switch -> dynamicGun_CTRL 1.00":
+        raise AssertionError(json.dumps(result, indent=2))
+    if dynamic_parenting.get("event_items", [None, None, None])[2] != "F7: Blend -> World 0.50, dynamicGun_CTRL 0.50":
+        raise AssertionError(json.dumps(result, indent=2))
+    if dynamic_parenting.get("event_items", [None, None, None, None])[3] != "F9: World -> World 1.00":
         raise AssertionError(json.dumps(result, indent=2))
     contact_hold = workflow.get("contact_hold") or {}
     if len(contact_hold.get("controls") or []) != 2:

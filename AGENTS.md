@@ -14,6 +14,7 @@ This folder is the canonical Windows source-of-truth for standalone Maya animati
 - `maya_shelf_utils.py`
 - `maya_anim_workflow_tools.py`
 - `maya_dynamic_parent_pivot.py`
+- `maya_dynamic_parenting_tool.py`
 - `maya_contact_hold.py`
 - `maya_onion_skin.py`
 - `maya_rotation_doctor.py`
@@ -46,4 +47,5 @@ Keep this folder focused on Maya and animation tooling. Browser automation, NAS,
 - When `maya_tutorial_authoring.py` grows, prefer adding new lanes as explicit modes or internal tabs instead of stacking more full-height sections into one long scrolling page.
 - Treat Guided Practice and Pose Compare as part of the tutorial tool's core scope; update their smoke coverage and scene-persistence docs whenever they change.
 - When embedding sibling Maya tools into the combined Anim Workflow window, make them behave like real child panels inside the tabs instead of leaving them as floating dialog-style widgets.
+- For dockable Maya UIs in this repo, use a real dock host widget with its own object name, let Maya create the `workspaceControl` from that host name, and keep the content widget parented under that host. Do not name the host like the final workspace control or Maya can dock an empty shell while the real UI still floats.
 - When adding a new workflow to the combined tool, update the tabbed UI, README, workspace map, and smoke coverage in the same task so the main entrypoint stays truthful.

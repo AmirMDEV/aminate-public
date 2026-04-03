@@ -13,6 +13,7 @@ import os
 
 import maya_shelf_utils
 import maya_contact_hold
+import maya_dynamic_parenting_tool
 import maya_onion_skin
 import maya_rotation_doctor
 import maya_skinning_cleanup
@@ -52,7 +53,8 @@ except Exception:
 
 
 WINDOW_OBJECT_NAME = "mayaAnimWorkflowToolsWindow"
-WORKSPACE_CONTROL_NAME = WINDOW_OBJECT_NAME + "WorkspaceControl"
+DOCK_HOST_OBJECT_NAME = WINDOW_OBJECT_NAME + "DockHost"
+WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
@@ -83,7 +85,7 @@ TAB_TIMELINE = "Timeline Notes"
 TAB_GUIDE = "Quick Start"
 TAB_HELP_TEXT = {
     TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
-    TAB_PARENTING: "Use this when one control needs to follow different hands, props, or objects without popping. Best for reloads, pickups, passes, and drops.",
+    TAB_PARENTING: "Use this when one prop or control needs to switch between hand, gun, world, or mixed parents without popping. Best for reloads, pickups, passes, and drops.",
     TAB_CONTACT_HOLD: "Use this when a hand or foot should stay planted on chosen world axes while the body keeps moving. The hold stays live, editable, and reversible.",
     TAB_PIVOT: "Use this when you want to turn from a temporary pivot point without changing the real rig pivot.",
     TAB_IKFK: "Use this when you need to switch an arm or leg cleanly between IK and FK and keep the pose matched.",
@@ -139,6 +141,7 @@ SIDE_TOKEN_SETS = {
 
 GLOBAL_CONTROLLER = None
 GLOBAL_WINDOW = None
+GLOBAL_DOCK_HOST = None
 
 
 def _debug(message):
@@ -358,7 +361,7 @@ def _workflow_widgets():
     widgets = []
     for widget in app.allWidgets():
         try:
-            if widget.objectName() == WINDOW_OBJECT_NAME:
+            if widget.objectName() in (WINDOW_OBJECT_NAME, DOCK_HOST_OBJECT_NAME, WORKSPACE_CONTROL_NAME):
                 widgets.append(widget)
         except Exception:
             pass
@@ -379,7 +382,7 @@ def _widget_has_ancestor_object_name(widget, object_name):
 
 def _find_docked_workflow_widget():
     for widget in _workflow_widgets():
-        if _widget_has_ancestor_object_name(widget, WORKSPACE_CONTROL_NAME):
+        if widget.objectName() == WINDOW_OBJECT_NAME and _widget_has_ancestor_object_name(widget, WORKSPACE_CONTROL_NAME):
             return widget
     return None
 
@@ -397,10 +400,17 @@ def _cleanup_duplicate_workflow_widgets(keep_widget=None):
 
 def _close_existing_window():
     global GLOBAL_WINDOW
+    global GLOBAL_DOCK_HOST
     if GLOBAL_WINDOW is not None:
         try:
             GLOBAL_WINDOW.close()
             GLOBAL_WINDOW.deleteLater()
+        except Exception:
+            pass
+    if GLOBAL_DOCK_HOST is not None:
+        try:
+            GLOBAL_DOCK_HOST.close()
+            GLOBAL_DOCK_HOST.deleteLater()
         except Exception:
             pass
     for module in (
@@ -419,6 +429,7 @@ def _close_existing_window():
         except Exception:
             pass
     GLOBAL_WINDOW = None
+    GLOBAL_DOCK_HOST = None
     _delete_workspace_control(WORKSPACE_CONTROL_NAME)
     if not QtWidgets:
         return
@@ -1232,6 +1243,7 @@ class MayaAnimWorkflowController(object):
         self.release_space = "world"
         self.bake_mode = "frames"
         self.bake_range = "playback"
+        self.dynamic_parenting_controller = maya_dynamic_parenting_tool.MayaDynamicParentingController() if MAYA_AVAILABLE else None
         self.contact_hold_controller = maya_contact_hold.MayaContactHoldController() if MAYA_AVAILABLE else None
         self.onion_controller = maya_onion_skin.MayaOnionSkinController() if MAYA_AVAILABLE else None
         self.rotation_controller = maya_rotation_doctor.MayaRotationDoctorController() if MAYA_AVAILABLE else None
@@ -1259,6 +1271,11 @@ class MayaAnimWorkflowController(object):
             _warning(message)
 
     def shutdown(self):
+        if self.dynamic_parenting_controller:
+            try:
+                self.dynamic_parenting_controller.shutdown()
+            except Exception:
+                pass
         if self.contact_hold_controller:
             try:
                 self.contact_hold_controller.shutdown()
@@ -1828,12 +1845,13 @@ if QtWidgets:
     try:
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-        _WindowBase = type("MayaAnimWorkflowBase", (MayaQWidgetDockableMixin, QtWidgets.QWidget), {})
+        _DockBase = type("MayaAnimWorkflowDockBase", (MayaQWidgetDockableMixin, QtWidgets.QWidget), {})
     except Exception:
-        _WindowBase = type("MayaAnimWorkflowBase", (QtWidgets.QWidget,), {})
+        _DockBase = type("MayaAnimWorkflowDockBase", (QtWidgets.QWidget,), {})
+    _ContentBase = type("MayaAnimWorkflowContentBase", (QtWidgets.QWidget,), {})
 
 
-    class MayaAnimWorkflowWindow(_WindowBase):
+    class MayaAnimWorkflowWindow(_ContentBase):
         def __init__(self, controller, parent=None, initial_tab=0):
             super(MayaAnimWorkflowWindow, self).__init__(parent)
             self.controller = controller
@@ -1966,113 +1984,13 @@ if QtWidgets:
 
         def _build_parenting_tab(self):
             layout = QtWidgets.QVBoxLayout(self.parenting_page)
+            layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_PARENTING))
-            self.parenting_simple_steps_label = QtWidgets.QLabel(
-                "Simple flow: 1. Pick the thing that moves and click Make Helpers once. 2. Pick that thing and the new hand or object. 3. Click Swap Here, or use Pickup / Pass / Drop."
+            self.parenting_panel = self._embed_tool_panel(
+                maya_dynamic_parenting_tool.MayaDynamicParentingWindow(self.controller.dynamic_parenting_controller, parent=self.parenting_page),
+                self.parenting_page,
             )
-            self.parenting_simple_steps_label.setWordWrap(True)
-            layout.addWidget(self.parenting_simple_steps_label)
-            driver_row = QtWidgets.QHBoxLayout()
-            self.driver_line = QtWidgets.QLineEdit()
-            self.driver_line.setReadOnly(True)
-            self.driver_line.setPlaceholderText("Nothing picked yet. Pick the next hand, gun, prop, or object.")
-            self.driver_line.setToolTip("This is the next hand, prop, or object the picked control should follow.")
-            self.use_driver_button = QtWidgets.QPushButton("Use Picked Hand / Object")
-            self.use_driver_button.setToolTip("Optional step: pick the moving control and the new hand, gun, prop, or object, then click this to store that next follow target.")
-            driver_row.addWidget(QtWidgets.QLabel("Next Hand / Object"))
-            driver_row.addWidget(self.driver_line, 1)
-            driver_row.addWidget(self.use_driver_button)
-            layout.addLayout(driver_row)
-            options = QtWidgets.QGridLayout()
-            self.release_combo = QtWidgets.QComboBox()
-            self.release_combo.addItems(list(RELEASE_SPACES.keys()))
-            self.release_combo.setToolTip("Choose where the picked control should go when it stops following something.")
-            self.bake_mode_combo = QtWidgets.QComboBox()
-            self.bake_mode_combo.addItems(list(BAKE_MODES.keys()))
-            self.bake_mode_combo.setToolTip("Bake Keys keeps fewer keys. Bake Frames puts a key on every frame in the chosen range.")
-            self.bake_range_combo = QtWidgets.QComboBox()
-            self.bake_range_combo.addItems(list(BAKE_RANGES.keys()))
-            self.bake_range_combo.setToolTip("Choose how much of the timeline to copy back onto the real rig controls.")
-            options.addWidget(QtWidgets.QLabel("When It Lets Go"), 0, 0)
-            options.addWidget(self.release_combo, 0, 1)
-            options.addWidget(QtWidgets.QLabel("Bake Back Style"), 0, 2)
-            options.addWidget(self.bake_mode_combo, 0, 3)
-            options.addWidget(QtWidgets.QLabel("Bake Back Range"), 1, 0)
-            options.addWidget(self.bake_range_combo, 1, 1)
-            layout.addLayout(options)
-            grid = QtWidgets.QGridLayout()
-            self.create_temp_button = QtWidgets.QPushButton("Make Helpers")
-            self.create_temp_button.setToolTip("Make the helper controls for what you picked. Do this once before the first swap.")
-            self.add_grab_button = QtWidgets.QPushButton("Swap Here")
-            self.add_grab_button.setToolTip("On this frame, keep the picked control in place but swap it to the new hand, prop, or object.")
-            self.add_release_button = QtWidgets.QPushButton("Let Go Here")
-            self.add_release_button.setToolTip("On this frame, stop following the current target and send the picked control back to world or its original parent/object.")
-            self.normalize_button = QtWidgets.QPushButton("Fix Jump Here")
-            self.normalize_button.setToolTip("If a swap pops or slides, click this on that frame to smooth it out.")
-            self.bake_button = QtWidgets.QPushButton("Bake Back To Rig")
-            self.bake_button.setToolTip("Copy the helper motion back onto the real rig controls.")
-            self.bake_clear_button = QtWidgets.QPushButton("Bake Back + Clear Helpers")
-            self.bake_clear_button.setToolTip("Copy the motion back to the real rig controls, then remove the helpers.")
-            self.clear_parenting_button = QtWidgets.QPushButton("Clear Helpers")
-            self.clear_parenting_button.setToolTip("Delete the helpers without copying their motion back.")
-            buttons = [self.create_temp_button, self.add_grab_button, self.add_release_button, self.normalize_button, self.bake_button, self.bake_clear_button, self.clear_parenting_button]
-            for index, button in enumerate(buttons):
-                grid.addWidget(button, index // 2, index % 2)
-            layout.addLayout(grid)
-            preset_row = QtWidgets.QHBoxLayout()
-            self.pickup_button = QtWidgets.QPushButton("Pickup")
-            self.pickup_button.setToolTip("Shortcut for the first hand-off: switch the picked control to the picked target and label it as a pickup.")
-            self.pass_button = QtWidgets.QPushButton("Pass")
-            self.pass_button.setToolTip("Shortcut for passing something from one hand, prop, or object to another on this frame.")
-            self.drop_button = QtWidgets.QPushButton("Drop")
-            self.drop_button.setToolTip("Shortcut for letting go on this frame. It uses the 'When It Lets Go' choice above.")
-            preset_row.addWidget(self.pickup_button)
-            preset_row.addWidget(self.pass_button)
-            preset_row.addWidget(self.drop_button)
-            layout.addLayout(preset_row)
-            helper_label = QtWidgets.QLabel(
-                "Example: magazine -> left hand -> right hand -> gun -> world. Use Swap Here for the main switch, then bake it back when it feels right."
-            )
-            helper_label.setWordWrap(True)
-            layout.addWidget(helper_label)
-            events_header = QtWidgets.QHBoxLayout()
-            self.parenting_events_label = QtWidgets.QLabel("Swap History")
-            self.parenting_events_refresh_button = QtWidgets.QPushButton("Refresh History")
-            self.parenting_events_refresh_button.setToolTip("Refresh the swap list after changing selection or editing keys.")
-            events_header.addWidget(self.parenting_events_label)
-            events_header.addStretch(1)
-            events_header.addWidget(self.parenting_events_refresh_button)
-            layout.addLayout(events_header)
-            self.parenting_event_list = QtWidgets.QListWidget()
-            self.parenting_event_list.setToolTip("Shows the saved swap history. Double-click an item to jump to that frame.")
-            layout.addWidget(self.parenting_event_list, 1)
-            event_buttons = QtWidgets.QHBoxLayout()
-            self.parenting_jump_button = QtWidgets.QPushButton("Jump To Picked Event")
-            self.parenting_jump_button.setToolTip("Go to the frame for the picked swap event.")
-            event_buttons.addWidget(self.parenting_jump_button)
-            event_buttons.addStretch(1)
-            layout.addLayout(event_buttons)
-            layout.addWidget(QtWidgets.QLabel("What It Follows Right Now"))
-            self.parenting_summary = QtWidgets.QPlainTextEdit()
-            self.parenting_summary.setReadOnly(True)
-            self.parenting_summary.setToolTip("Shows what each picked object is following right now.")
-            layout.addWidget(self.parenting_summary, 1)
-            self.use_driver_button.clicked.connect(self._use_selected_driver)
-            self.create_temp_button.clicked.connect(self._create_temp_controls)
-            self.add_grab_button.clicked.connect(self._add_grab)
-            self.add_release_button.clicked.connect(self._add_release)
-            self.normalize_button.clicked.connect(self._normalize_transitions)
-            self.bake_button.clicked.connect(self._bake_to_rig)
-            self.bake_clear_button.clicked.connect(self._bake_and_clear)
-            self.clear_parenting_button.clicked.connect(self._clear_parenting)
-            self.pickup_button.clicked.connect(self._pickup_here)
-            self.pass_button.clicked.connect(self._pass_here)
-            self.drop_button.clicked.connect(self._drop_here)
-            self.parenting_events_refresh_button.clicked.connect(self._refresh_parenting_event_list)
-            self.parenting_jump_button.clicked.connect(self._jump_to_selected_parenting_event)
-            self.parenting_event_list.itemDoubleClicked.connect(self._jump_to_selected_parenting_event)
-            self._refresh_parenting_summary()
-            self._refresh_parenting_event_list()
+            layout.addWidget(self.parenting_panel, 1)
 
         def _build_pivot_tab(self):
             layout = QtWidgets.QVBoxLayout(self.pivot_page)
@@ -2304,17 +2222,17 @@ if QtWidgets:
             guide.setReadOnly(True)
             guide.setPlainText(
                 "Dynamic Parenting\n"
-                "- Use this when one thing needs to move from hand to hand, hand to gun, or hand to world without popping.\n"
-                "- Pick the thing that should move, like a magazine control.\n"
-                "- Click Make Helpers once.\n"
-                "- Pick that moving control and the new hand, gun, or prop.\n"
-                "- Click Use Picked Hand / Object if you want to store the next target first.\n"
-                "- On the swap frame, click Swap Here.\n"
-                "- Use Pickup, Pass, and Drop for the common versions of that same move.\n"
-                "- If it should stop following, click Let Go Here.\n"
-                "- If you see a pop, click Fix Jump Here on that frame.\n"
-                "- Use the Swap History list to see the saved hand-offs and jump back to those frames.\n"
-                "- When it looks right, click Bake Back To Rig.\n\n"
+                "- Use this when a prop or control needs to switch between hand, gun, world, or mixed parents without popping.\n"
+                "- Pick the moving thing, like a magazine control, and click Add Picked Object.\n"
+                "- Pick the hand, gun, or other object it should follow and click Pick Parent From Selection.\n"
+                "- Click Parent To Picked Parent if you want to switch to that new parent right away.\n"
+                "- Click Save Picked Parent In List if you want to keep it as a choice for later.\n"
+                "- Leave Keep Current Position When Switching on if it should stay where it is on the switch frame.\n"
+                "- Click Parent Fully To Picked Row when you want it to switch all the way to one parent.\n"
+                "- Click Parent To World when it should stop following everything.\n"
+                "- Change the Weight values and click Blend Using Shown Weights if you want a blend, like half world and half gun.\n"
+                "- Use Keep Current Blend Here if you change parents and want the current frame to stay locked cleanly.\n"
+                "- Use Saved Parent Switches to jump back to the swap frames later.\n\n"
                 "Hand / Foot Hold\n"
                 "- Use this when a planted hand or foot should stay in the same place on chosen world axes while the body keeps moving.\n"
                 "- Pick the hand or foot control.\n"
@@ -2702,6 +2620,19 @@ if QtWidgets:
             super(MayaAnimWorkflowWindow, self).closeEvent(event)
 
 
+    class MayaAnimWorkflowDockHost(_DockBase):
+        def __init__(self, content_widget, parent=None):
+            super(MayaAnimWorkflowDockHost, self).__init__(parent)
+            self.setObjectName(DOCK_HOST_OBJECT_NAME)
+            self.setWindowTitle("Maya Anim Workflow Tools")
+            self.setMinimumSize(760, 520)
+            self.resize(1180, 860)
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(content_widget, 1)
+            self.content_widget = content_widget
+
+
 def _shelf_button_command(repo_path):
     return (
         "import importlib\n"
@@ -2737,6 +2668,7 @@ def install_maya_dynamic_parent_pivot_shelf_button(shelf_name=DEFAULT_SHELF_NAME
 def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
     global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
+    global GLOBAL_DOCK_HOST
     if not MAYA_AVAILABLE:
         raise RuntimeError("maya_dynamic_parent_pivot.launch_maya_dynamic_parent_pivot() must run inside Autodesk Maya.")
     if not QtWidgets:
@@ -2749,22 +2681,18 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
         except Exception:
             pass
     GLOBAL_CONTROLLER = MayaAnimWorkflowController()
-    window_parent = None
-    GLOBAL_WINDOW = MayaAnimWorkflowWindow(GLOBAL_CONTROLLER, parent=window_parent, initial_tab=initial_tab)
+    GLOBAL_WINDOW = MayaAnimWorkflowWindow(GLOBAL_CONTROLLER, parent=None, initial_tab=initial_tab)
     if dock:
+        GLOBAL_DOCK_HOST = MayaAnimWorkflowDockHost(GLOBAL_WINDOW, parent=None)
         try:
-            GLOBAL_WINDOW.show(dockable=True, floating=False, area="right")
+            GLOBAL_DOCK_HOST.show(dockable=True, floating=False, area="right")
         except Exception:
-            GLOBAL_WINDOW.show()
+            GLOBAL_DOCK_HOST.show()
         if app:
             try:
                 app.processEvents()
             except Exception:
                 pass
-        docked_widget = _find_docked_workflow_widget()
-        if docked_widget is not None:
-            GLOBAL_WINDOW = docked_widget
-            _cleanup_duplicate_workflow_widgets(keep_widget=docked_widget)
     else:
         GLOBAL_WINDOW.show()
     try:

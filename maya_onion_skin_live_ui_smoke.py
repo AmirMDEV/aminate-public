@@ -53,6 +53,8 @@ try:
     result = {{
         "ok": True,
         "window_title": window.windowTitle(),
+        "display_mode_count": window.display_mode_combo.count(),
+        "display_mode_items": [window.display_mode_combo.itemText(index) for index in range(window.display_mode_combo.count())],
         "frame_step_min": window.frame_step_spin.minimum(),
         "frame_step_max": window.frame_step_spin.maximum(),
         "add_button_text": window.add_button.text(),
@@ -87,6 +89,10 @@ except Exception:
     if not result.get("ok"):
         raise AssertionError(json.dumps(ui_result, indent=2))
     if result.get("window_title") != "Maya Onion Skin":
+        raise AssertionError(json.dumps(ui_result, indent=2))
+    if result.get("display_mode_count") != 2:
+        raise AssertionError(json.dumps(ui_result, indent=2))
+    if result.get("display_mode_items") != ["3D Ghost", "Fast Silhouette (Live + Refine)"]:
         raise AssertionError(json.dumps(ui_result, indent=2))
     if result.get("frame_step_min") != 1 or result.get("frame_step_max", 0) < 2:
         raise AssertionError(json.dumps(ui_result, indent=2))
