@@ -262,9 +262,10 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 ## Notes
 
 - Maya Dynamic Parenting is now a scene-backed setup rather than a bake-and-clear helper. You add the constrained object once, add any hand, gun, prop, or world choices it should follow, and those parent choices stay stored in the Maya scene.
-- The simple Dynamic Parenting flow is: click `Add Constrained Object`, click `Use Picked Parent`, then use `Switch To Picked Parent`, `Switch To Picked Row`, or `Switch To World`.
-- Regular Dynamic Parenting switches now key the current parent on the current frame and the new parent on the next frame, then move the timeline to that next frame so the switched state is obvious. `Key Shown Blend (Advanced)` stays as the deliberate same-frame blend path.
-- Dynamic Parenting keeps a visible `Saved Parent Switches` list in the tab, and clicking a saved row jumps you straight back to that switch frame later.
+- The simple Dynamic Parenting flow is: click `Add Object`, click `Pick Parent`, then use `Switch`, `Switch Chosen`, or `World`.
+- Regular Dynamic Parenting switches now key the current parent on the current frame and the new parent on the next frame, then move the timeline to that next frame so the switched state is obvious. `Save Mix` inside `More` stays as the deliberate same-frame blend path.
+- The tab now keeps most of the optional parent-management and blend controls inside a collapsed `More` section so the default surface stays focused on the basic switch workflow.
+- Dynamic Parenting keeps a visible `History` list in the `More` section, and clicking a saved row jumps you straight back to that switch frame later.
 - Maya Onion Skin keeps the full user-chosen ghost count in both preview modes. `3D Ghost` is the true mesh mode, while `Fast Silhouette (Live + Refine)` is a camera-based silhouette mode that refreshes at a lower resolution while view motion is active, then sharpens after settle.
 - On the current Amanda scene, the first working `Fast Silhouette` pass is correct and live-tested, but it is still best treated as an alternate view-driven mode rather than the guaranteed faster option on every mesh. The current heavy-mesh win is still more about mode choice and refresh behavior than a magic instant speed-up.
 - Maya Rotation Doctor is intentionally preview-first. It does not auto-change rotate order in V1.

@@ -169,23 +169,23 @@ except Exception:
     if not result.get("ok"):
         raise AssertionError(json.dumps(payload, indent=2))
 
-    if result.get("add_object_text") != "Add Constrained Object":
+    if result.get("add_object_text") != "Add Object":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("pick_parent_text") != "Use Picked Parent":
+    if result.get("pick_parent_text") != "Pick Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("parent_to_picked_text") != "Switch To Picked Parent":
+    if result.get("parent_to_picked_text") != "Switch":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("save_parent_text") != "Add Picked Parent Choice":
+    if result.get("save_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("row_switch_text") != "Switch To Picked Row":
+    if result.get("row_switch_text") != "Switch Chosen":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("world_text") != "Switch To World":
+    if result.get("world_text") != "World":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("blend_text") != "Key Shown Blend (Advanced)":
+    if result.get("blend_text") != "Save Mix":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("fix_text") != "Fix Pop On This Frame":
+    if result.get("fix_text") != "Fix Here":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("jump_text") != "Jump To Picked Switch":
+    if result.get("jump_text") != "Jump To Frame":
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadHand_CTRL" not in (result.get("first_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))

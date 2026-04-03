@@ -917,13 +917,13 @@ class MayaDynamicParentingController(object):
     def summary_text(self, setup=None):
         setup = setup or self.current_setup()
         if not setup:
-            return "Add a constrained object, then add the hands, guns, world, or other objects it should follow."
+            return "Add an object, then add the hands, guns, world, or other things it should follow."
         current_weights = self.current_weights(setup)
         lines = [
-            "Constrained object: {0}".format(setup["label"]),
-            "Real control: {0}".format(setup["driven"]),
-            "Keep Current Position When It Switches: {0}".format("On" if setup["maintain_offset"] else "Off"),
-            "Available parent choices:",
+            "Object: {0}".format(setup["label"]),
+            "Real node: {0}".format(setup["driven"]),
+            "Stay Put: {0}".format("On" if setup["maintain_offset"] else "Off"),
+            "Parents:",
         ]
         for target in setup["targets"]:
             lines.append("- {0}: {1:.2f}".format(target["label"], current_weights.get(target["id"], 0.0)))
@@ -954,24 +954,31 @@ if QtWidgets:
         def _build_ui(self):
             main_layout = QtWidgets.QVBoxLayout(self)
             intro = QtWidgets.QLabel(
-                "Use this when a prop or control needs to switch between hand, gun, world, or mixed parents without baking."
+                "Make one object switch between hand, gun, world, or any other parent."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
 
-            helper_text = QtWidgets.QLabel(
-                "Simple switch buttons keep the old parent on this frame and switch to the new one on the next frame. Use the blend buttons only when you want mixed parent weights."
-            )
-            helper_text.setWordWrap(True)
-            main_layout.addWidget(helper_text)
+            step_box = QtWidgets.QGroupBox("How To Use")
+            step_layout = QtWidgets.QVBoxLayout(step_box)
+            for text in (
+                "1. Pick the object you want to move, then click Add Object.",
+                "2. Pick the hand, gun, or other thing it should follow, then click Pick Parent.",
+                "3. Click Switch or World.",
+                "4. Open More only if you want blends, history, or extra cleanup.",
+            ):
+                label = QtWidgets.QLabel(text)
+                label.setWordWrap(True)
+                step_layout.addWidget(label)
+            main_layout.addWidget(step_box)
 
             object_row = QtWidgets.QHBoxLayout()
             self.objects_line = QtWidgets.QLineEdit()
             self.objects_line.setReadOnly(True)
-            self.objects_line.setPlaceholderText("Pick the prop or control that should switch parents, then add it here.")
-            self.add_object_button = QtWidgets.QPushButton("Add Constrained Object")
-            self.remove_object_button = QtWidgets.QPushButton("Remove Constrained Object")
-            object_row.addWidget(QtWidgets.QLabel("Constrained Object"))
+            self.objects_line.setPlaceholderText("Pick the object that should switch parents, then add it here.")
+            self.add_object_button = QtWidgets.QPushButton("Add Object")
+            self.remove_object_button = QtWidgets.QPushButton("Remove Object")
+            object_row.addWidget(QtWidgets.QLabel("Move Object"))
             object_row.addWidget(self.objects_line, 1)
             object_row.addWidget(self.add_object_button)
             object_row.addWidget(self.remove_object_button)
@@ -979,43 +986,42 @@ if QtWidgets:
 
             list_row = QtWidgets.QHBoxLayout()
             self.object_list = QtWidgets.QListWidget()
-            self.object_list.setToolTip("Every object in the scene that uses this parenting setup.")
+            self.object_list.setToolTip("Every saved object in this scene that uses parent switching.")
             list_row.addWidget(self.object_list, 1)
             name_column = QtWidgets.QVBoxLayout()
             self.list_name_line = QtWidgets.QLineEdit()
-            self.list_name_line.setPlaceholderText("Friendly list name, like Magazine")
-            self.rename_button = QtWidgets.QPushButton("Rename Entry")
-            name_column.addWidget(QtWidgets.QLabel("Friendly List Name"))
+            self.list_name_line.setPlaceholderText("Magazine")
+            self.rename_button = QtWidgets.QPushButton("Rename")
+            name_column.addWidget(QtWidgets.QLabel("Label"))
             name_column.addWidget(self.list_name_line)
             name_column.addWidget(self.rename_button)
             name_column.addStretch(1)
             list_row.addLayout(name_column)
             main_layout.addLayout(list_row)
 
-            self.maintain_offset_check = QtWidgets.QCheckBox("Keep Current Position When It Switches")
+            self.maintain_offset_check = QtWidgets.QCheckBox("Stay Put")
             self.maintain_offset_check.setChecked(True)
-            self.maintain_offset_check.setToolTip("Leave this on if the prop should stay where it is when the new parent turns on. Turn it off if it should snap to the new parent.")
+            self.maintain_offset_check.setToolTip("Leave this on if the object should stay where it is when the new parent turns on. Turn it off if it should snap.")
             main_layout.addWidget(self.maintain_offset_check)
 
             target_row = QtWidgets.QHBoxLayout()
             self.target_line = QtWidgets.QLineEdit()
             self.target_line.setReadOnly(True)
-            self.target_line.setPlaceholderText("Pick a hand, gun, world helper, or other object.")
-            self.use_target_button = QtWidgets.QPushButton("Use Picked Parent")
-            self.use_target_button.setToolTip("Read the extra selected hand, gun, or object into the Next Parent box.")
-            self.parent_to_picked_button = QtWidgets.QPushButton("Switch To Picked Parent")
-            self.parent_to_picked_button.setToolTip("Keep the current parent on this frame, then switch to the picked parent on the next frame. If it is new, it will be added to the list first.")
-            self.add_target_button = QtWidgets.QPushButton("Add Picked Parent Choice")
-            self.add_target_button.setToolTip("Add the picked hand, gun, or object to the parent-choice list without switching to it yet.")
-            target_row.addWidget(QtWidgets.QLabel("Next Parent"))
+            self.target_line.setPlaceholderText("Pick a hand, gun, or other thing to follow.")
+            self.use_target_button = QtWidgets.QPushButton("Pick Parent")
+            self.use_target_button.setToolTip("Read the extra selected hand, gun, or object into the Parent To box.")
+            self.parent_to_picked_button = QtWidgets.QPushButton("Switch")
+            self.parent_to_picked_button.setToolTip("Keep the current parent on this frame, then switch to the picked parent on the next frame.")
+            self.add_target_button = QtWidgets.QPushButton("Add Parent")
+            self.add_target_button.setToolTip("Add the selected hand, gun, or object to the parent-choice list without switching yet.")
+            target_row.addWidget(QtWidgets.QLabel("Parent To"))
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
             target_row.addWidget(self.parent_to_picked_button)
-            target_row.addWidget(self.add_target_button)
             main_layout.addLayout(target_row)
 
             self.targets_table = QtWidgets.QTableWidget(0, 4)
-            self.targets_table.setHorizontalHeaderLabels(["Parent Choice", "Weight", "Now", "Quick"])
+            self.targets_table.setHorizontalHeaderLabels(["Parent", "Weight", "On", "Switch"])
             self.targets_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             self.targets_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
             self.targets_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -1027,33 +1033,52 @@ if QtWidgets:
             main_layout.addWidget(self.targets_table, 1)
 
             action_row = QtWidgets.QHBoxLayout()
-            self.parent_to_row_button = QtWidgets.QPushButton("Switch To Picked Row")
-            self.parent_to_row_button.setToolTip("Keep the current parent on this frame, then switch fully to the picked parent row on the next frame.")
-            self.parent_to_world_button = QtWidgets.QPushButton("Switch To World")
+            self.parent_to_row_button = QtWidgets.QPushButton("Switch Chosen")
+            self.parent_to_row_button.setToolTip("Keep the current parent on this frame, then switch fully to the chosen parent on the next frame.")
+            self.parent_to_world_button = QtWidgets.QPushButton("World")
             self.parent_to_world_button.setToolTip("Keep the current parent on this frame, then switch to World on the next frame.")
-            self.apply_weights_button = QtWidgets.QPushButton("Key Shown Blend (Advanced)")
-            self.apply_weights_button.setToolTip("Key the shown parent weights on this frame when you want a real blend, like half World and half gun.")
-            self.fix_pop_button = QtWidgets.QPushButton("Fix Pop On This Frame")
-            self.fix_pop_button.setToolTip("Rebuild the current parent blend on this frame so the object stays where it is.")
-            self.remove_target_button = QtWidgets.QPushButton("Remove Picked Parent Choice")
             action_row.addWidget(self.parent_to_row_button)
             action_row.addWidget(self.parent_to_world_button)
-            action_row.addWidget(self.apply_weights_button)
-            action_row.addWidget(self.fix_pop_button)
-            action_row.addWidget(self.remove_target_button)
             main_layout.addLayout(action_row)
 
-            history_group = QtWidgets.QGroupBox("Saved Parent Switches")
+            self.advanced_toggle = QtWidgets.QToolButton()
+            self.advanced_toggle.setText("More")
+            self.advanced_toggle.setCheckable(True)
+            self.advanced_toggle.setChecked(False)
+            self.advanced_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+            main_layout.addWidget(self.advanced_toggle)
+
+            self.advanced_widget = QtWidgets.QWidget()
+            self.advanced_widget.setVisible(False)
+            advanced_layout = QtWidgets.QVBoxLayout(self.advanced_widget)
+            advanced_layout.setContentsMargins(0, 0, 0, 0)
+
+            advanced_actions = QtWidgets.QHBoxLayout()
+            self.add_target_button.setParent(self.advanced_widget)
+            self.apply_weights_button = QtWidgets.QPushButton("Save Mix")
+            self.apply_weights_button.setToolTip("Key the shown parent weights on this frame when you want a real blend, like half World and half gun.")
+            self.fix_pop_button = QtWidgets.QPushButton("Fix Here")
+            self.fix_pop_button.setToolTip("Rebuild the current parent blend on this frame so the object stays where it is.")
+            self.remove_target_button = QtWidgets.QPushButton("Remove Parent")
+            advanced_actions.addWidget(self.add_target_button)
+            advanced_actions.addWidget(self.apply_weights_button)
+            advanced_actions.addWidget(self.fix_pop_button)
+            advanced_actions.addWidget(self.remove_target_button)
+            advanced_layout.addLayout(advanced_actions)
+
+            history_group = QtWidgets.QGroupBox("History")
             history_layout = QtWidgets.QVBoxLayout(history_group)
             self.event_list = QtWidgets.QListWidget()
             history_layout.addWidget(self.event_list)
-            self.jump_button = QtWidgets.QPushButton("Jump To Picked Switch")
+            self.jump_button = QtWidgets.QPushButton("Jump To Frame")
             history_layout.addWidget(self.jump_button)
-            main_layout.addWidget(history_group, 1)
+            advanced_layout.addWidget(history_group, 1)
 
             self.summary_box = QtWidgets.QPlainTextEdit()
             self.summary_box.setReadOnly(True)
-            main_layout.addWidget(self.summary_box, 1)
+            self.summary_box.setMaximumHeight(120)
+            advanced_layout.addWidget(self.summary_box)
+            main_layout.addWidget(self.advanced_widget, 1)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
@@ -1085,6 +1110,7 @@ if QtWidgets:
             self.remove_target_button.clicked.connect(self._remove_target)
             self.jump_button.clicked.connect(self._jump_to_event)
             self.event_list.itemDoubleClicked.connect(self._jump_to_event)
+            self.advanced_toggle.toggled.connect(self._toggle_advanced)
 
         def _selected_target_ids(self):
             rows = sorted(set(index.row() for index in self.targets_table.selectionModel().selectedRows()))
@@ -1141,9 +1167,9 @@ if QtWidgets:
                     spin_box.setValue(float(payload["current_weights"].get(target["id"], 0.0)))
                     self.targets_table.setCellWidget(row_index, 1, spin_box)
                     self._weight_widgets[target["id"]] = spin_box
-                    state_item = QtWidgets.QTableWidgetItem("On Now" if payload["current_weights"].get(target["id"], 0.0) > EPSILON else "Off Now")
+                    state_item = QtWidgets.QTableWidgetItem("On" if payload["current_weights"].get(target["id"], 0.0) > EPSILON else "Off")
                     self.targets_table.setItem(row_index, 2, state_item)
-                    quick_button = QtWidgets.QPushButton("Switch Next Frame")
+                    quick_button = QtWidgets.QPushButton("Switch")
                     quick_button.setToolTip("Keep the current parent on this frame, then switch fully to this parent on the next frame.")
                     quick_button.clicked.connect(lambda _checked=False, target_id=target["id"]: self._parent_to_target_id(target_id))
                     self.targets_table.setCellWidget(row_index, 3, quick_button)
@@ -1164,6 +1190,10 @@ if QtWidgets:
             palette.setColor(role, QtGui.QColor("#24A148" if success else "#DA1E28"))
             self.status_label.setPalette(palette)
             self._sync_from_controller()
+
+        def _toggle_advanced(self, enabled):
+            self.advanced_widget.setVisible(bool(enabled))
+            self.advanced_toggle.setText("Less" if enabled else "More")
 
         def _add_object(self):
             success, message = self.controller.add_driven_from_selection()

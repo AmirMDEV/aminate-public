@@ -173,6 +173,8 @@ try:
         "has_parenting_event_list": hasattr(main_window.parenting_panel, "event_list"),
         "parenting_jump_text": main_window.parenting_panel.jump_button.text(),
         "parenting_maintain_offset_checked": main_window.parenting_panel.maintain_offset_check.isChecked(),
+        "parenting_advanced_visible": main_window.parenting_panel.advanced_widget.isVisible(),
+        "parenting_advanced_toggle_text": main_window.parenting_panel.advanced_toggle.text(),
         "switch_fk_to_ik_text": main_window.switch_fk_to_ik_button.text(),
         "has_ik_controls_field": hasattr(main_window, "ik_controls_line"),
         "ik_controls_placeholder": main_window.ik_controls_line.placeholderText(),
@@ -294,29 +296,33 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if (parenting_panel_state.get("size") or [0, 0])[1] < 200:
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_add_object_text") != "Add Constrained Object":
+    if main.get("parenting_add_object_text") != "Add Object":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_remove_object_text") != "Remove Constrained Object":
+    if main.get("parenting_remove_object_text") != "Remove Object":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_pick_parent_text") != "Use Picked Parent":
+    if main.get("parenting_pick_parent_text") != "Pick Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_picked_text") != "Switch To Picked Parent":
+    if main.get("parenting_parent_to_picked_text") != "Switch":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_add_parent_text") != "Add Picked Parent Choice":
+    if main.get("parenting_add_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_row_text") != "Switch To Picked Row":
+    if main.get("parenting_parent_to_row_text") != "Switch Chosen":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_world_text") != "Switch To World":
+    if main.get("parenting_parent_to_world_text") != "World":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_apply_weights_text") != "Key Shown Blend (Advanced)":
+    if main.get("parenting_apply_weights_text") != "Save Mix":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_fix_blend_text") != "Fix Pop On This Frame":
+    if main.get("parenting_fix_blend_text") != "Fix Here":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("has_parenting_event_list"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_jump_text") != "Jump To Picked Switch":
+    if main.get("parenting_jump_text") != "Jump To Frame":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("parenting_maintain_offset_checked"):
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_advanced_visible"):
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_advanced_toggle_text") != "More":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("switch_fk_to_ik_text") != "Switch FK -> IK":
         raise AssertionError(json.dumps(payload, indent=2))
