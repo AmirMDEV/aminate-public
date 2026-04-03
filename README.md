@@ -263,7 +263,8 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 
 - Maya Dynamic Parenting is now a scene-backed setup rather than a bake-and-clear helper. You add the constrained object once, add any hand, gun, prop, or world choices it should follow, and those parent choices stay stored in the Maya scene.
 - The simple Dynamic Parenting flow is: click `Add Object`, click `Pick Parent`, then either click `Snap To Parent` or move the object by hand and use `Maintain Current Offset` before switching.
-- `Switch` keeps the current parent on this frame and turns the picked parent on next frame. `Reparent to Selected Parent` does the same thing for the row you picked in the parent list. `World` lets go on the next frame.
+- `Switch to this Parent` keeps the current parent on this frame and turns the picked parent on next frame. `Reparent to Selected Parent` does the same thing for the row you picked in the parent list. `World` lets go on the next frame.
+- `Snap To Parent` is now scale-safe: it should move the object to the chosen parent's position and rotation without changing the object's scale.
 - Regular Dynamic Parenting switches now key the current parent on the current frame and the new parent on the next frame, then move the timeline to that next frame so the switched state is obvious. `Blend Parents` inside `More` stays as the deliberate same-frame blend path.
 - The tab now keeps most of the optional parent-management and blend controls inside a collapsed `More` section so the default surface stays focused on the basic switch workflow.
 - Dynamic Parenting now includes a built-in gun-and-magazine example right in the tab, plus plain-language help for what the `More` buttons do.

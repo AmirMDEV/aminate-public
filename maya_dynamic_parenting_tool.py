@@ -7,6 +7,7 @@ Simple scene-backed dynamic parenting for props and controls.
 from __future__ import absolute_import, division, print_function
 
 import json
+import math
 import os
 import uuid
 
@@ -49,6 +50,14 @@ DRIVEN_CONSTRAINT_SUFFIX = "_adpDriven_parentConstraint"
 FOLLOW_CONSTRAINT_SUFFIX = "_adpFollow_parentConstraint"
 EPSILON = 1.0e-4
 DEFAULT_SWITCH_STEP = 1.0
+ROTATE_ORDER_TO_EULER = (
+    om.MEulerRotation.kXYZ if om else 0,
+    om.MEulerRotation.kYZX if om else 1,
+    om.MEulerRotation.kZXY if om else 2,
+    om.MEulerRotation.kXZY if om else 3,
+    om.MEulerRotation.kYXZ if om else 4,
+    om.MEulerRotation.kZYX if om else 5,
+)
 
 
 def _debug(message):
@@ -155,6 +164,32 @@ def _matrix_from_node(node_name):
 
 def _set_world_matrix(node_name, matrix):
     cmds.xform(node_name, worldSpace=True, matrix=_matrix_to_list(matrix))
+
+
+def _set_world_translation_rotation_preserve_scale(node_name, matrix):
+    if not om:
+        _set_world_matrix(node_name, matrix)
+        return
+    transform = om.MTransformationMatrix(matrix)
+    translation = transform.translation(om.MSpace.kWorld)
+    rotation = transform.rotation(asQuaternion=True).asEulerRotation()
+    rotate_order = 0
+    if cmds.objExists(node_name + ".rotateOrder"):
+        try:
+            rotate_order = int(cmds.getAttr(node_name + ".rotateOrder"))
+        except Exception:
+            rotate_order = 0
+    rotation.reorderIt(ROTATE_ORDER_TO_EULER[rotate_order])
+    cmds.xform(
+        node_name,
+        worldSpace=True,
+        translation=(translation.x, translation.y, translation.z),
+    )
+    cmds.xform(
+        node_name,
+        worldSpace=True,
+        rotation=tuple(math.degrees(angle) for angle in (rotation.x, rotation.y, rotation.z)),
+    )
 
 
 def _set_keyable_channels(node_name, attrs):
@@ -654,7 +689,7 @@ class MayaDynamicParentingController(object):
         target_matrix = self._target_snap_matrix(target_entry)
         if target_matrix is None:
             return False, "That parent is missing."
-        _set_world_matrix(setup["driven"], target_matrix)
+        _set_world_translation_rotation_preserve_scale(setup["driven"], target_matrix)
         return True, "Snapped {0} onto {1}. Move it if you want, then click Switch.".format(
             setup["label"],
             target_entry["label"],
@@ -1033,21 +1068,43 @@ if QtWidgets:
             step_box = QtWidgets.QGroupBox("How To Use")
             step_layout = QtWidgets.QVBoxLayout(step_box)
             for text in (
-                "1. Pick the thing that moves, like the magazine, then click Add Object.",
-                "2. Pick the thing it should follow, then click Pick Parent.",
-                "3. If you want it to jump onto that parent, click Snap To Parent first.",
-                "4. If you want to place it yourself, move it where you want, leave Maintain Current Offset on, then click Switch.",
-                "5. Click World if it should stop following everything.",
+                "1. Pick the object that should move. Example: the magazine.",
+                "2. Click Add Object.",
+                "3. Pick the new parent. Example: the gun or the hand.",
+                "4. Click Pick Parent.",
+                "5. Choose one of these:",
+                "   - Click Snap To Parent if you want the object to jump onto that parent now.",
+                "   - Or move the object by hand, leave Maintain Current Offset on, and then click Switch to this Parent.",
+                "6. Click World if you want it to stop following everything.",
             ):
                 label = QtWidgets.QLabel(text)
                 label.setWordWrap(True)
                 step_layout.addWidget(label)
             example_label = QtWidgets.QLabel(
                 "Example: Gun + Magazine\n"
-                "- When the magazine is in the gun, use Maintain Current Offset to keep it exactly where it is, then switch it to the gun.\n"
-                "- If you want it to jump onto the gun first, click Snap To Parent, then switch.\n"
-                "- When a hand pulls it out, make it follow the hand.\n"
-                "- When you let go, make it follow World."
+                "Keep it exactly where it is:\n"
+                "1. Pick the magazine.\n"
+                "2. Click Add Object.\n"
+                "3. Pick the gun.\n"
+                "4. Click Pick Parent.\n"
+                "5. Put the magazine exactly where you want it.\n"
+                "6. Leave Maintain Current Offset on.\n"
+                "7. Click Switch to this Parent.\n"
+                "8. On the next frame, it follows the gun but stays in that exact place.\n\n"
+                "Snap it onto the gun first:\n"
+                "1. Pick the magazine.\n"
+                "2. Pick the gun.\n"
+                "3. Click Pick Parent.\n"
+                "4. Click Snap To Parent.\n"
+                "5. If needed, move it a little more.\n"
+                "6. Click Switch to this Parent.\n\n"
+                "Take it out with the hand:\n"
+                "1. Pick the hand.\n"
+                "2. Click Pick Parent.\n"
+                "3. Move the magazine if needed.\n"
+                "4. Click Switch to this Parent.\n\n"
+                "Let go:\n"
+                "1. Click World."
             )
             example_label.setWordWrap(True)
             step_layout.addWidget(example_label)
@@ -1086,7 +1143,8 @@ if QtWidgets:
             main_layout.addWidget(self.maintain_offset_check)
             keep_position_hint = QtWidgets.QLabel(
                 "Maintain Current Offset: keep the object exactly where it is, then switch.\n"
-                "Snap To Parent: move it onto the parent first, then switch."
+                "Snap To Parent: move it onto the parent first, then switch.\n"
+                "Scale Safe: this tool should not change the object's scale."
             )
             keep_position_hint.setWordWrap(True)
             main_layout.addWidget(keep_position_hint)
@@ -1099,7 +1157,7 @@ if QtWidgets:
             self.use_target_button.setToolTip("Take the thing you picked and put it into the Parent To box.")
             self.snap_to_picked_button = QtWidgets.QPushButton("Snap To Parent")
             self.snap_to_picked_button.setToolTip("Move the object onto this parent now. You can still adjust it before you switch.")
-            self.parent_to_picked_button = QtWidgets.QPushButton("Switch")
+            self.parent_to_picked_button = QtWidgets.QPushButton("Switch to this Parent")
             self.parent_to_picked_button.setToolTip("Keep the old parent on this frame, then turn this picked parent on next frame.")
             self.add_target_button = QtWidgets.QPushButton("Add Parent")
             self.add_target_button.setToolTip("Remember this parent so you can switch to it later.")
@@ -1111,7 +1169,7 @@ if QtWidgets:
             main_layout.addLayout(target_row)
 
             switch_hint = QtWidgets.QLabel(
-                "You can also move the object by hand in the viewport before you click Switch. "
+                "You can also move the object by hand in the viewport before you click Switch to this Parent. "
                 "If Maintain Current Offset is on, the switch keeps that exact spot."
             )
             switch_hint.setWordWrap(True)
@@ -1287,7 +1345,7 @@ if QtWidgets:
                     self._weight_widgets[target["id"]] = spin_box
                     state_item = QtWidgets.QTableWidgetItem("On" if payload["current_weights"].get(target["id"], 0.0) > EPSILON else "Off")
                     self.targets_table.setItem(row_index, 2, state_item)
-                    quick_button = QtWidgets.QPushButton("Switch")
+                    quick_button = QtWidgets.QPushButton("Switch to this Parent")
                     quick_button.setToolTip("Keep the current parent on this frame, then switch fully to this parent on the next frame.")
                     quick_button.clicked.connect(lambda _checked=False, target_id=target["id"]: self._parent_to_target_id(target_id))
                     self.targets_table.setCellWidget(row_index, 3, quick_button)

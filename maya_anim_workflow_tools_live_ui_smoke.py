@@ -307,7 +307,7 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_snap_text") != "Snap To Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_picked_text") != "Switch":
+    if main.get("parenting_parent_to_picked_text") != "Switch to this Parent":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_add_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(payload, indent=2))

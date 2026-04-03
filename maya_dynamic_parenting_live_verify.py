@@ -66,6 +66,7 @@ try:
     cmds.currentTime(1, edit=True)
     cmds.select([mag], replace=True)
     panel._add_object()
+    initial_scale = cmds.xform(mag, query=True, relative=True, scale=True)
 
     cmds.select([mag, hand], replace=True)
     panel._use_target()
@@ -86,9 +87,11 @@ try:
     panel._snap_to_picked_target()
     snap_status = panel.status_label.text()
     snapped_position = cmds.xform(mag, query=True, worldSpace=True, translation=True)
+    snapped_scale = cmds.xform(mag, query=True, relative=True, scale=True)
     before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     panel._parent_to_picked_target()
     after_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
+    after_switch_scale = cmds.xform(mag, query=True, relative=True, scale=True)
     second_summary = panel.summary_box.toPlainText()
     second_status = panel.status_label.text()
     second_driver_line = panel.target_line.text()
@@ -150,6 +153,9 @@ try:
         "second_pick_status": second_pick_status,
         "snap_status": snap_status,
         "snapped_position": snapped_position,
+        "initial_scale": initial_scale,
+        "snapped_scale": snapped_scale,
+        "after_switch_scale": after_switch_scale,
         "first_driver": first_driver_line,
         "first_driver_line": first_driver_line,
         "first_status": first_status,
@@ -194,7 +200,7 @@ except Exception:
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("snap_text") != "Snap To Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("parent_to_picked_text") != "Switch":
+    if result.get("parent_to_picked_text") != "Switch to this Parent":
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("save_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(result, indent=2))
@@ -278,6 +284,15 @@ except Exception:
     if len(snapped_position) != 3:
         raise AssertionError(json.dumps(result, indent=2))
     if any(abs(float(snapped_position[index]) - float(before_switch[index])) > 0.01 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    initial_scale = result.get("initial_scale") or []
+    snapped_scale = result.get("snapped_scale") or []
+    after_switch_scale = result.get("after_switch_scale") or []
+    if len(initial_scale) != 3 or len(snapped_scale) != 3 or len(after_switch_scale) != 3:
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(initial_scale[index]) - float(snapped_scale[index])) > 0.001 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(initial_scale[index]) - float(after_switch_scale[index])) > 0.001 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
 
     print("MAYA_DYNAMIC_PARENTING_LIVE_VERIFY: PASS")
