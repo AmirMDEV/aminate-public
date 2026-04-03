@@ -166,6 +166,29 @@ def _set_world_matrix(node_name, matrix):
     cmds.xform(node_name, worldSpace=True, matrix=_matrix_to_list(matrix))
 
 
+def _identity_matrix():
+    if om:
+        return om.MMatrix()
+    return (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+
+
 def _set_world_translation_rotation_preserve_scale(node_name, matrix):
     if not om:
         _set_world_matrix(node_name, matrix)
@@ -338,6 +361,32 @@ def _ensure_root_hierarchy():
     return root_group, world_locator
 
 
+def _is_dynamic_parenting_constraint(constraint_name):
+    if not cmds.objExists(constraint_name):
+        return False
+    short_name = _short_name(constraint_name)
+    if short_name.endswith(DRIVEN_CONSTRAINT_SUFFIX) or short_name.endswith(FOLLOW_CONSTRAINT_SUFFIX):
+        return True
+    try:
+        target_list = cmds.parentConstraint(constraint_name, query=True, targetList=True) or []
+    except Exception:
+        target_list = []
+    for target_name in target_list:
+        if target_name.endswith(TARGET_LOCATOR_SUFFIX):
+            return True
+        if ROOT_GROUP_NAME in target_name:
+            return True
+    return False
+
+
+def _dynamic_parenting_constraints_on_node(node_name):
+    constraints = []
+    for constraint_name in cmds.listConnections(node_name, source=True, destination=False, type="parentConstraint") or []:
+        if _is_dynamic_parenting_constraint(constraint_name):
+            constraints.append(constraint_name)
+    return _dedupe_preserve_order(constraints)
+
+
 def _find_setup_groups():
     if not MAYA_AVAILABLE or not cmds.objExists(ROOT_GROUP_NAME):
         return []
@@ -405,6 +454,7 @@ class MayaDynamicParentingController(object):
         self.active_setup_group = ""
         self.pending_target_node = ""
         self.maintain_offset = True
+        self.keep_current_position_on_add = True
         self.status_callback = None
 
     def set_status_callback(self, callback):
@@ -487,11 +537,14 @@ class MayaDynamicParentingController(object):
         self.maintain_offset = bool(data["maintain_offset"])
         return True, "Now editing {0}.".format(data["label"])
 
-    def _create_world_target_entry(self, driven_node, targets_group):
+    def _create_world_target_entry(self, driven_node, targets_group, start_in_current_position=True):
         locator_name = cmds.spaceLocator(name="{0}_world{1}".format(_safe_node_name(driven_node), TARGET_LOCATOR_SUFFIX))[0]
         locator_name = cmds.parent(locator_name, targets_group)[0]
         cmds.setAttr(locator_name + ".visibility", 0)
-        _set_world_matrix(locator_name, _matrix_from_node(driven_node))
+        if start_in_current_position:
+            _set_world_matrix(locator_name, _matrix_from_node(driven_node))
+        else:
+            _set_world_matrix(locator_name, _identity_matrix())
         return {
             "id": "world",
             "label": "World",
@@ -501,7 +554,7 @@ class MayaDynamicParentingController(object):
             "is_world": True,
         }
 
-    def _ensure_setup(self, driven_node):
+    def _ensure_setup(self, driven_node, start_in_current_position=True):
         driven_node = (cmds.ls(driven_node, long=True) or [driven_node])[0]
         existing = _find_setup_for_driven(driven_node)
         if existing:
@@ -520,7 +573,7 @@ class MayaDynamicParentingController(object):
         _ensure_attr(setup_group, "adpMaintainOffset", "bool", default_value=True)
         cmds.setAttr(setup_group + ".adpMaintainOffset", 1)
 
-        world_entry = self._create_world_target_entry(driven_node, targets_group)
+        world_entry = self._create_world_target_entry(driven_node, targets_group, start_in_current_position=start_in_current_position)
         driven_constraint = cmds.parentConstraint(
             world_entry["locator"],
             driven_node,
@@ -533,15 +586,17 @@ class MayaDynamicParentingController(object):
         data = _load_setup_data(setup_group)
         self.active_setup_group = setup_group
         self.maintain_offset = True
-        return data, True, "Added {0} as a constrained object.".format(_short_name(driven_node))
+        if start_in_current_position:
+            return data, True, "Added {0}. It starts where it is right now.".format(_short_name(driven_node))
+        return data, True, "Added {0}. It starts from World.".format(_short_name(driven_node))
 
-    def add_driven_from_nodes(self, driven_nodes):
+    def add_driven_from_nodes(self, driven_nodes, start_in_current_position=True):
         created = []
         messages = []
         for node_name in _dedupe_preserve_order(driven_nodes or []):
             if not cmds.objExists(node_name):
                 continue
-            data, _was_created, message = self._ensure_setup(node_name)
+            data, _was_created, message = self._ensure_setup(node_name, start_in_current_position=start_in_current_position)
             if data:
                 created.append(data)
             messages.append(message)
@@ -549,21 +604,52 @@ class MayaDynamicParentingController(object):
             return False, "Pick one or more props or controls first."
         self.active_setup_group = created[-1]["setup_group"]
         self.maintain_offset = bool(created[-1]["maintain_offset"])
+        self.keep_current_position_on_add = bool(start_in_current_position)
         return True, "\n".join(messages)
 
-    def add_driven_from_selection(self):
-        return self.add_driven_from_nodes(_selected_transforms())
+    def add_driven_from_selection(self, start_in_current_position=True):
+        return self.add_driven_from_nodes(_selected_transforms(), start_in_current_position=start_in_current_position)
+
+    def _delete_setup_nodes(self, setup):
+        driven_node = setup["driven"]
+        nodes_to_delete = []
+        if setup.get("driven_constraint") and cmds.objExists(setup["driven_constraint"]):
+            nodes_to_delete.append(setup["driven_constraint"])
+        for target in setup.get("targets") or []:
+            if target.get("follow_constraint") and cmds.objExists(target["follow_constraint"]):
+                nodes_to_delete.append(target["follow_constraint"])
+            if target.get("locator") and cmds.objExists(target["locator"]):
+                nodes_to_delete.append(target["locator"])
+        if setup.get("setup_group") and cmds.objExists(setup["setup_group"]):
+            nodes_to_delete.append(setup["setup_group"])
+        for constraint_name in _dynamic_parenting_constraints_on_node(driven_node):
+            nodes_to_delete.append(constraint_name)
+        nodes_to_delete = [node_name for node_name in _dedupe_preserve_order(nodes_to_delete) if cmds.objExists(node_name)]
+        if nodes_to_delete:
+            try:
+                cmds.delete(nodes_to_delete)
+            except Exception:
+                for node_name in nodes_to_delete:
+                    if cmds.objExists(node_name):
+                        try:
+                            cmds.delete(node_name)
+                        except Exception:
+                            pass
+        _set_blend_attr_values(driven_node, {attr_name: 0.0 for attr_name in _dynamic_parent_blend_attrs(driven_node)}, keyframe=False)
+        if cmds.objExists(driven_node):
+            try:
+                cmds.select(driven_node, replace=True)
+            except Exception:
+                pass
 
     def remove_active_setup(self):
         setup = self.current_setup()
         if not setup:
             return False, "Pick a constrained object from the list first."
         label = setup["label"]
-        try:
-            cmds.delete(setup["setup_group"])
-        except Exception:
-            pass
+        self._delete_setup_nodes(setup)
         self.active_setup_group = ""
+        self.pending_target_node = ""
         return True, "Removed {0} from the constrained-object list.".format(label)
 
     def rename_active_setup(self, label_text):
@@ -636,16 +722,18 @@ class MayaDynamicParentingController(object):
             existing = self._target_entry_by_driver(setup, target_node)
             if existing:
                 continue
+            reference_matrix = _matrix_from_node(setup["driven"])
             locator_name = cmds.spaceLocator(name="{0}{1}".format(_safe_node_name(target_node), TARGET_LOCATOR_SUFFIX))[0]
             locator_name = cmds.parent(locator_name, setup["targets_group"])[0]
             cmds.setAttr(locator_name + ".visibility", 0)
-            _set_world_matrix(locator_name, _matrix_from_node(setup["driven"]))
+            _set_world_matrix(locator_name, reference_matrix)
             follow_constraint = cmds.parentConstraint(
                 target_node,
                 locator_name,
                 maintainOffset=True,
                 name="{0}{1}".format(_safe_node_name(target_node), FOLLOW_CONSTRAINT_SUFFIX),
             )[0]
+            _set_world_matrix(locator_name, reference_matrix)
             cmds.parentConstraint(locator_name, setup["driven"], edit=True, weight=0.0)
             target_entry = {
                 "id": uuid.uuid4().hex[:8],
@@ -733,6 +821,7 @@ class MayaDynamicParentingController(object):
         locator_name = target_entry["locator"]
         if not cmds.objExists(locator_name):
             return
+        reference_matrix = reference_matrix or _matrix_from_node(setup["driven"])
         if target_entry["follow_constraint"] and cmds.objExists(target_entry["follow_constraint"]):
             try:
                 cmds.delete(target_entry["follow_constraint"])
@@ -740,16 +829,18 @@ class MayaDynamicParentingController(object):
                 pass
             target_entry["follow_constraint"] = ""
         if target_entry["is_world"] or not target_entry["driver"]:
-            _set_world_matrix(locator_name, reference_matrix or _matrix_from_node(setup["driven"]))
+            _set_world_matrix(locator_name, reference_matrix)
             return
         if maintain_offset:
-            _set_world_matrix(locator_name, reference_matrix or _matrix_from_node(setup["driven"]))
+            _set_world_matrix(locator_name, reference_matrix)
         target_entry["follow_constraint"] = cmds.parentConstraint(
             target_entry["driver"],
             locator_name,
             maintainOffset=bool(maintain_offset),
             name="{0}{1}".format(_safe_node_name(target_entry["driver"]), FOLLOW_CONSTRAINT_SUFFIX),
         )[0]
+        if maintain_offset:
+            _set_world_matrix(locator_name, reference_matrix)
 
     def _record_event(self, setup, action_label, weight_map):
         event_log = list(setup.get("event_log") or [])
@@ -766,6 +857,7 @@ class MayaDynamicParentingController(object):
                 target_labels[target["label"]] = round(weight_value, 4)
         event_log.append(
             {
+                "id": uuid.uuid4().hex[:8],
                 "frame": frame_value,
                 "action": action_label,
                 "weights": target_labels,
@@ -975,7 +1067,7 @@ class MayaDynamicParentingController(object):
         if not setup:
             return []
         results = []
-        for item in setup.get("event_log") or []:
+        for index, item in enumerate(setup.get("event_log") or []):
             frame_value = float(item.get("frame", 0.0))
             weights = item.get("weights") or {}
             weight_text = ", ".join("{0} {1:.2f}".format(name, float(value)) for name, value in sorted(weights.items()))
@@ -983,6 +1075,7 @@ class MayaDynamicParentingController(object):
                 weight_text = "nothing active"
             results.append(
                 {
+                    "id": item.get("id") or "legacy-{0}-{1}".format(index, _frame_display(frame_value)),
                     "frame": frame_value,
                     "display": "F{0}: {1} -> {2}".format(
                         _frame_display(frame_value),
@@ -993,18 +1086,32 @@ class MayaDynamicParentingController(object):
             )
         return results
 
-    def delete_event_frame(self, frame_value):
+    def delete_event(self, event_id, frame_value=None):
         setup = self.current_setup()
         if not setup:
             return False, "Pick a saved object first."
-        frame_value = float(frame_value)
         event_log = list(setup.get("event_log") or [])
-        kept_events = [item for item in event_log if abs(float(item.get("frame", 0.0)) - frame_value) >= EPSILON]
+        kept_events = []
+        deleted_item = None
+        for index, item in enumerate(event_log):
+            current_event_id = item.get("id") or "legacy-{0}-{1}".format(index, _frame_display(float(item.get("frame", 0.0))))
+            if deleted_item is None and current_event_id == event_id:
+                deleted_item = item
+                continue
+            kept_events.append(item)
+        if deleted_item is None and frame_value is not None:
+            frame_value = float(frame_value)
+            for index, item in enumerate(event_log):
+                if abs(float(item.get("frame", 0.0)) - frame_value) < EPSILON:
+                    deleted_item = item
+                    kept_events = event_log[:index] + event_log[index + 1 :]
+                    break
         if len(kept_events) == len(event_log):
             return False, "Pick a saved switch first."
         _save_event_log(setup["setup_group"], kept_events)
         setup["event_log"] = kept_events
-        return True, "Deleted the saved switch on frame {0}.".format(_frame_display(frame_value))
+        deleted_frame = float(deleted_item.get("frame", frame_value or 0.0))
+        return True, "Deleted the saved switch on frame {0}.".format(_frame_display(deleted_frame))
 
     def clear_event_log(self):
         setup = self.current_setup()
@@ -1069,13 +1176,16 @@ if QtWidgets:
             step_layout = QtWidgets.QVBoxLayout(step_box)
             for text in (
                 "1. Pick the object that should move. Example: the magazine.",
-                "2. Click Add Object.",
-                "3. Pick the new parent. Example: the gun or the hand.",
-                "4. Click Pick Parent.",
-                "5. Choose one of these:",
+                "2. Leave Stay In Current Position At Start? on if you want it to stay where it is when you add it.",
+                "3. Click Add Object.",
+                "4. Pick the new parent. Example: the gun or the hand.",
+                "5. Click Pick Parent.",
+                "6. Choose one of these:",
                 "   - Click Snap To Parent if you want the object to jump onto that parent now.",
                 "   - Or move the object by hand, leave Maintain Current Offset on, and then click Switch to this Parent.",
-                "6. Click World if you want it to stop following everything.",
+                "7. Click World if you want it to stop following everything.",
+                "8. If you want to delete one saved switch, open More, pick it in History, and click Delete Picked Switch.",
+                "9. If you want to remove the whole setup, click Remove Object. This deletes this tool's constraints for that object.",
             ):
                 label = QtWidgets.QLabel(text)
                 label.setWordWrap(True)
@@ -1084,27 +1194,33 @@ if QtWidgets:
                 "Example: Gun + Magazine\n"
                 "Keep it exactly where it is:\n"
                 "1. Pick the magazine.\n"
+                "2. Leave Stay In Current Position At Start? on.\n"
+                "3. Click Add Object.\n"
+                "4. Pick the gun.\n"
+                "5. Click Pick Parent.\n"
+                "6. Put the magazine exactly where you want it.\n"
+                "7. Leave Maintain Current Offset on.\n"
+                "8. Click Switch to this Parent.\n"
+                "9. On the next frame, it follows the gun but stays in that exact place.\n\n"
+                "Snap it onto the gun first:\n"
+                "1. Pick the magazine.\n"
                 "2. Click Add Object.\n"
                 "3. Pick the gun.\n"
                 "4. Click Pick Parent.\n"
-                "5. Put the magazine exactly where you want it.\n"
-                "6. Leave Maintain Current Offset on.\n"
-                "7. Click Switch to this Parent.\n"
-                "8. On the next frame, it follows the gun but stays in that exact place.\n\n"
-                "Snap it onto the gun first:\n"
-                "1. Pick the magazine.\n"
-                "2. Pick the gun.\n"
-                "3. Click Pick Parent.\n"
-                "4. Click Snap To Parent.\n"
-                "5. If needed, move it a little more.\n"
-                "6. Click Switch to this Parent.\n\n"
+                "5. Click Snap To Parent.\n"
+                "6. If needed, move it a little more.\n"
+                "7. Click Switch to this Parent.\n\n"
                 "Take it out with the hand:\n"
                 "1. Pick the hand.\n"
                 "2. Click Pick Parent.\n"
                 "3. Move the magazine if needed.\n"
                 "4. Click Switch to this Parent.\n\n"
                 "Let go:\n"
-                "1. Click World."
+                "1. Click World.\n\n"
+                "Delete one switch:\n"
+                "1. Open More.\n"
+                "2. Pick the switch in History.\n"
+                "3. Click Delete Picked Switch."
             )
             example_label.setWordWrap(True)
             step_layout.addWidget(example_label)
@@ -1116,11 +1232,17 @@ if QtWidgets:
             self.objects_line.setPlaceholderText("Pick the object that should switch parents, then add it here.")
             self.add_object_button = QtWidgets.QPushButton("Add Object")
             self.remove_object_button = QtWidgets.QPushButton("Remove Object")
+            self.remove_object_button.setToolTip("Remove this object from Dynamic Parenting. This deletes this tool's constraints and saved switches for it.")
             object_row.addWidget(QtWidgets.QLabel("Move Object"))
             object_row.addWidget(self.objects_line, 1)
             object_row.addWidget(self.add_object_button)
             object_row.addWidget(self.remove_object_button)
             main_layout.addLayout(object_row)
+
+            self.start_in_place_check = QtWidgets.QCheckBox("Stay In Current Position At Start?")
+            self.start_in_place_check.setChecked(True)
+            self.start_in_place_check.setToolTip("Leave this on if Add Object should keep the object exactly where it is right now. Turn it off if you want it to start from World.")
+            main_layout.addWidget(self.start_in_place_check)
 
             list_row = QtWidgets.QHBoxLayout()
             self.object_list = QtWidgets.QListWidget()
@@ -1142,6 +1264,7 @@ if QtWidgets:
             self.maintain_offset_check.setToolTip("Leave this on if the object should stay where it is when the new parent turns on. Turn it off if it should snap.")
             main_layout.addWidget(self.maintain_offset_check)
             keep_position_hint = QtWidgets.QLabel(
+                "Stay In Current Position At Start?: when you first add the object, keep it where it is right now.\n"
                 "Maintain Current Offset: keep the object exactly where it is, then switch.\n"
                 "Snap To Parent: move it onto the parent first, then switch.\n"
                 "Scale Safe: this tool should not change the object's scale."
@@ -1227,7 +1350,8 @@ if QtWidgets:
                 "- Add Parent: remember a parent for later.\n"
                 "- Blend Parents: let two parents share the object on this frame.\n"
                 "- Fix Jump Here: fix a pop on this frame.\n"
-                "- Forget Parent: remove that parent from the list."
+                "- Forget Parent: remove that parent from the list.\n"
+                "- Delete Picked Switch: remove one saved switch from History."
             )
             advanced_help.setWordWrap(True)
             advanced_layout.addWidget(advanced_help)
@@ -1239,8 +1363,8 @@ if QtWidgets:
             history_layout.addWidget(self.event_list)
             history_button_row = QtWidgets.QHBoxLayout()
             self.jump_button = QtWidgets.QPushButton("Jump To Frame")
-            self.delete_switch_button = QtWidgets.QPushButton("Delete Chosen")
-            self.clear_switches_button = QtWidgets.QPushButton("Delete All")
+            self.delete_switch_button = QtWidgets.QPushButton("Delete Picked Switch")
+            self.clear_switches_button = QtWidgets.QPushButton("Delete All Switches")
             history_button_row.addWidget(self.jump_button)
             history_button_row.addWidget(self.delete_switch_button)
             history_button_row.addWidget(self.clear_switches_button)
@@ -1302,7 +1426,19 @@ if QtWidgets:
             item = self.event_list.currentItem()
             if not item:
                 return None
-            return item.data(QtCore.Qt.UserRole)
+            payload = item.data(QtCore.Qt.UserRole) or {}
+            if not isinstance(payload, dict):
+                return payload
+            return payload.get("frame")
+
+        def _selected_event_id(self):
+            item = self.event_list.currentItem()
+            if not item:
+                return ""
+            payload = item.data(QtCore.Qt.UserRole) or {}
+            if not isinstance(payload, dict):
+                return ""
+            return payload.get("id") or ""
 
         def _weight_map_from_ui(self):
             return {target_id: float(spin_box.value()) for target_id, spin_box in self._weight_widgets.items()}
@@ -1351,7 +1487,7 @@ if QtWidgets:
                     self.targets_table.setCellWidget(row_index, 3, quick_button)
                 for event in self.controller.event_items(setup):
                     item = QtWidgets.QListWidgetItem(event["display"])
-                    item.setData(QtCore.Qt.UserRole, event["frame"])
+                    item.setData(QtCore.Qt.UserRole, {"id": event.get("id", ""), "frame": event["frame"]})
                     self.event_list.addItem(item)
                 if self.event_list.count():
                     self.event_list.setCurrentRow(self.event_list.count() - 1)
@@ -1372,10 +1508,26 @@ if QtWidgets:
             self.advanced_toggle.setText("Less" if enabled else "More")
 
         def _add_object(self):
-            success, message = self.controller.add_driven_from_selection()
+            success, message = self.controller.add_driven_from_selection(
+                start_in_current_position=self.start_in_place_check.isChecked()
+            )
             self._set_status(message, success)
 
         def _remove_object(self):
+            current_setup = self.controller.current_setup()
+            if not current_setup:
+                self._set_status("Pick a constrained object from the list first.", False)
+                return
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Remove Object",
+                "Remove {0} from Dynamic Parenting?\n\nThis will delete this tool's constraints, saved parent choices, and saved switches for this object.".format(current_setup["label"]),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No,
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                self._set_status("Kept {0} in Dynamic Parenting.".format(current_setup["label"]), True)
+                return
             success, message = self.controller.remove_active_setup()
             self._set_status(message, success)
 
@@ -1457,11 +1609,12 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _delete_event(self):
+            event_id = self._selected_event_id()
             frame_value = self._selected_event_frame()
-            if frame_value is None:
+            if not event_id and frame_value is None:
                 self._set_status("Pick a saved switch first.", False)
                 return
-            success, message = self.controller.delete_event_frame(frame_value)
+            success, message = self.controller.delete_event(event_id, frame_value=frame_value)
             self._set_status(message, success)
 
         def _clear_events(self):

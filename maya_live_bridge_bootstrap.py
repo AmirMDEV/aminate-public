@@ -36,7 +36,7 @@ def _find_maya_window():
     desktop = Desktop(backend="uia")
     for candidate in desktop.windows():
         title = candidate.window_text() or ""
-        if "Autodesk MAYA 2026" in title or title == "Maya":
+        if "Autodesk MAYA 2026" in title or title == "Maya" or title.startswith("Maya-2026"):
             return candidate
     return None
 

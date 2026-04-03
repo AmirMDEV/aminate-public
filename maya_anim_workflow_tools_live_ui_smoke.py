@@ -163,6 +163,8 @@ try:
         "parenting_panel_state": parenting_panel_state,
         "parenting_add_object_text": main_window.parenting_panel.add_object_button.text(),
         "parenting_remove_object_text": main_window.parenting_panel.remove_object_button.text(),
+        "parenting_start_in_place_text": main_window.parenting_panel.start_in_place_check.text(),
+        "parenting_start_in_place_checked": main_window.parenting_panel.start_in_place_check.isChecked(),
         "parenting_pick_parent_text": main_window.parenting_panel.use_target_button.text(),
         "parenting_snap_text": main_window.parenting_panel.snap_to_picked_button.text(),
         "parenting_parent_to_picked_text": main_window.parenting_panel.parent_to_picked_button.text(),
@@ -303,6 +305,10 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_remove_object_text") != "Remove Object":
         raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_start_in_place_text") != "Stay In Current Position At Start?":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if not main.get("parenting_start_in_place_checked"):
+        raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_pick_parent_text") != "Pick Parent":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_snap_text") != "Snap To Parent":
@@ -323,9 +329,9 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_jump_text") != "Jump To Frame":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_delete_switch_text") != "Delete Chosen":
+    if main.get("parenting_delete_switch_text") != "Delete Picked Switch":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_clear_switches_text") != "Delete All":
+    if main.get("parenting_clear_switches_text") != "Delete All Switches":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("parenting_maintain_offset_checked"):
         raise AssertionError(json.dumps(payload, indent=2))

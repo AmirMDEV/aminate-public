@@ -22,6 +22,7 @@ if THIS_DIR not in sys.path:
 
 import maya_anim_workflow_tools  # noqa: E402
 import maya_contact_hold  # noqa: E402
+import maya_dynamic_parenting_tool  # noqa: E402
 import maya_rig_scale_export  # noqa: E402
 import maya_timeline_notes  # noqa: E402
 import maya_universal_ikfk_switcher  # noqa: E402
@@ -212,10 +213,16 @@ def run():
     _assert(abs(current_weights.get(hand_target_entry["id"], 0.0) - 1.0) < 0.001, "Driven A should fully follow the hand target after the first switch")
 
     cmds.currentTime(10, edit=True)
-    before_switch = _translation(driven_a)
+    snap_target_position = _translation(gun_target)
     cmds.select([driven_a, gun_target], replace=True)
     success, message = parenting_controller.set_pending_target_from_selection()
     _assert(success, message)
+    success, message = parenting_controller.snap_pending_target()
+    _assert(success, message)
+    snapped_position = _translation(driven_a)
+    _assert(all(abs(snapped_position[index] - snap_target_position[index]) < 0.01 for index in range(3)), "Snap To Parent should move the driven control onto the picked parent")
+    cmds.xform(driven_a, worldSpace=True, translation=(15.0, 3.25, -0.5))
+    before_switch = _translation(driven_a)
     success, message = parenting_controller.apply_pending_target()
     _assert(success, message)
     after_switch = _translation(driven_a)
@@ -252,6 +259,33 @@ def run():
     _assert(driven_a_events[1]["display"] == "F11: Switch -> gun_ctrl 1.00", "Second dynamic-parenting event should switch to the gun on the next frame")
     _assert(driven_a_events[2]["display"] == "F12: Blend -> World 0.50, gun_ctrl 0.50", "Third dynamic-parenting event should save the weight blend")
     _assert(driven_a_events[3]["display"] == "F14: World -> World 1.00", "Fourth dynamic-parenting event should return to world on the next frame")
+    success, message = parenting_controller.delete_event(driven_a_events[1]["id"], frame_value=driven_a_events[1]["frame"])
+    _assert(success, message)
+    driven_a_events_after_delete = parenting_controller.event_items(parenting_controller.current_setup())
+    _assert(len(driven_a_events_after_delete) == 3, "Deleting one saved switch should keep the other history rows")
+    _assert(all("F11:" not in item["display"] for item in driven_a_events_after_delete), "Deleting one saved switch should only remove the picked row")
+    success, message = parenting_controller.clear_event_log()
+    _assert(success, message)
+    _assert(not parenting_controller.event_items(parenting_controller.current_setup()), "Clear event log should remove all saved switches")
+    success, message = parenting_controller.remove_active_setup()
+    _assert(success, message)
+    remaining_payloads = parenting_controller.setup_payloads(from_selection=False)
+    _assert(len(remaining_payloads) == 1, "Removing one setup should leave the other constrained object intact")
+    cmds.select([driven_a], replace=True)
+    success, message = parenting_controller.add_driven_from_selection(start_in_current_position=False)
+    _assert(success, message)
+    readded_payload = next(item for item in parenting_controller.setup_payloads(from_selection=False) if item["driven"] == _long_name(driven_a))
+    _assert(len(parenting_controller.setup_payloads(from_selection=False)) == 2, "The removed object should be addable again")
+    success, message = parenting_controller.set_active_setup(readded_payload["setup_group"])
+    _assert(success, message)
+    readded_translation = _translation(driven_a)
+    _assert(all(abs(readded_translation[index]) < 0.01 for index in range(3)), "Turning off Stay In Current Position At Start should begin the setup from World")
+    cmds.currentTime(16, edit=True)
+    cmds.select([driven_a, hand_target], replace=True)
+    success, message = parenting_controller.set_pending_target_from_selection()
+    _assert(success, message)
+    success, message = parenting_controller.apply_pending_target()
+    _assert(success, message)
 
     pivot_a = cmds.createNode("transform", name="pivotA_ctrl")
     pivot_b = cmds.createNode("transform", name="pivotB_ctrl")

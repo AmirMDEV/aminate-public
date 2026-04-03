@@ -66,6 +66,8 @@ try:
     cmds.currentTime(1, edit=True)
     cmds.select([mag], replace=True)
     panel._add_object()
+    start_in_place_text = panel.start_in_place_check.text()
+    start_in_place_checked = panel.start_in_place_check.isChecked()
     initial_scale = cmds.xform(mag, query=True, relative=True, scale=True)
 
     cmds.select([mag, hand], replace=True)
@@ -88,7 +90,8 @@ try:
     snap_status = panel.status_label.text()
     snapped_position = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     snapped_scale = cmds.xform(mag, query=True, relative=True, scale=True)
-    before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
+    cmds.xform(mag, worldSpace=True, translation=(8.75, 2.4, -0.35))
+    placed_position_before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     panel._parent_to_picked_target()
     after_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     after_switch_scale = cmds.xform(mag, query=True, relative=True, scale=True)
@@ -128,6 +131,26 @@ try:
     clear_status = panel.status_label.text()
     event_count_after_clear = panel.event_list.count()
 
+    remove_warning_called = {"value": False}
+    original_question = maya_dynamic_parenting_tool.QtWidgets.QMessageBox.question
+
+    def fake_question(*_args, **_kwargs):
+        remove_warning_called["value"] = True
+        return maya_dynamic_parenting_tool.QtWidgets.QMessageBox.Yes
+
+    maya_dynamic_parenting_tool.QtWidgets.QMessageBox.question = fake_question
+    try:
+        panel._remove_object()
+    finally:
+        maya_dynamic_parenting_tool.QtWidgets.QMessageBox.question = original_question
+    remove_status = panel.status_label.text()
+    object_count_after_remove = panel.object_list.count()
+
+    cmds.select([mag], replace=True)
+    panel._add_object()
+    readd_status = panel.status_label.text()
+    object_count_after_readd = panel.object_list.count()
+
     window.tab_widget.setCurrentWidget(window.parenting_tab)
     if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
         maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
@@ -138,6 +161,8 @@ try:
     result = {
         "ok": True,
         "add_object_text": panel.add_object_button.text(),
+        "start_in_place_text": start_in_place_text,
+        "start_in_place_checked": start_in_place_checked,
         "pick_parent_text": panel.use_target_button.text(),
         "snap_text": panel.snap_to_picked_button.text(),
         "parent_to_picked_text": panel.parent_to_picked_button.text(),
@@ -176,9 +201,14 @@ try:
         "event_items_after_delete": event_items_after_delete,
         "clear_status": clear_status,
         "event_count_after_clear": event_count_after_clear,
+        "remove_warning_called": remove_warning_called["value"],
+        "remove_status": remove_status,
+        "object_count_after_remove": object_count_after_remove,
+        "readd_status": readd_status,
+        "object_count_after_readd": object_count_after_readd,
         "before_first_switch": before_first_switch,
         "after_first_switch": after_first_switch,
-        "before_switch": before_switch,
+        "placed_position_before_switch": placed_position_before_switch,
         "after_switch": after_switch,
         "screenshot_path": screenshot_path,
     }
@@ -195,6 +225,10 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
 
     if result.get("add_object_text") != "Add Object":
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("start_in_place_text") != "Stay In Current Position At Start?":
+        raise AssertionError(json.dumps(result, indent=2))
+    if not result.get("start_in_place_checked"):
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("pick_parent_text") != "Pick Parent":
         raise AssertionError(json.dumps(result, indent=2))
@@ -214,9 +248,9 @@ except Exception:
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("jump_text") != "Jump To Frame":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("delete_text") != "Delete Chosen":
+    if result.get("delete_text") != "Delete Picked Switch":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("clear_text") != "Delete All":
+    if result.get("clear_text") != "Delete All Switches":
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadHand_CTRL" not in (result.get("first_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
@@ -274,7 +308,7 @@ except Exception:
     if any(abs(float(before_first_switch[index]) - float(after_first_switch[index])) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
 
-    before_switch = result.get("before_switch") or []
+    before_switch = result.get("placed_position_before_switch") or []
     after_switch = result.get("after_switch") or []
     if len(before_switch) != 3 or len(after_switch) != 3:
         raise AssertionError(json.dumps(result, indent=2))
@@ -283,7 +317,8 @@ except Exception:
     snapped_position = result.get("snapped_position") or []
     if len(snapped_position) != 3:
         raise AssertionError(json.dumps(result, indent=2))
-    if any(abs(float(snapped_position[index]) - float(before_switch[index])) > 0.01 for index in range(3)):
+    expected_snap = [8.0, 2.0, -1.0]
+    if any(abs(float(snapped_position[index]) - expected_snap[index]) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
     initial_scale = result.get("initial_scale") or []
     snapped_scale = result.get("snapped_scale") or []
@@ -293,6 +328,16 @@ except Exception:
     if any(abs(float(initial_scale[index]) - float(snapped_scale[index])) > 0.001 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
     if any(abs(float(initial_scale[index]) - float(after_switch_scale[index])) > 0.001 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    if not result.get("remove_warning_called"):
+        raise AssertionError(json.dumps(result, indent=2))
+    if "Removed reloadMag_CTRL" not in (result.get("remove_status") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("object_count_after_remove") != 0:
+        raise AssertionError(json.dumps(result, indent=2))
+    if "Added reloadMag_CTRL" not in (result.get("readd_status") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    if result.get("object_count_after_readd") != 1:
         raise AssertionError(json.dumps(result, indent=2))
 
     print("MAYA_DYNAMIC_PARENTING_LIVE_VERIFY: PASS")
