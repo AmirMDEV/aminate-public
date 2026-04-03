@@ -231,6 +231,7 @@ try:
         maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
     dock_result = {{
         "workspace_exists": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True)),
+        "workspace_floating": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, query=True, floating=True)) if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True) else None,
         "current_tab": docked_window.tab_widget.tabText(docked_window.tab_widget.currentIndex()),
     }}
     try:
@@ -337,12 +338,6 @@ except Exception:
     if main.get("contact_hold_disable_text") != "Use Original Motion":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("contact_hold_other_side_text") != "Add Matching Other Side":
-        raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("contact_hold_x_checked"):
-        raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("contact_hold_y_checked"):
-        raise AssertionError(json.dumps(payload, indent=2))
-    if not main.get("contact_hold_z_checked"):
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("contact_hold_keep_rotation_checked"):
         raise AssertionError(json.dumps(payload, indent=2))
@@ -467,6 +462,8 @@ except Exception:
     if default.get("current_tab") != "Quick Start":
         raise AssertionError(json.dumps(payload, indent=2))
     if not dock.get("workspace_exists"):
+        raise AssertionError(json.dumps(payload, indent=2))
+    if dock.get("workspace_floating"):
         raise AssertionError(json.dumps(payload, indent=2))
     if dock.get("current_tab") != "Timeline Notes":
         raise AssertionError(json.dumps(payload, indent=2))

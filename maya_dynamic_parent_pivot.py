@@ -2695,17 +2695,19 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
         raise RuntimeError("PySide is not available in this Maya session.")
     _close_existing_window()
     GLOBAL_CONTROLLER = MayaAnimWorkflowController()
-    GLOBAL_WINDOW = MayaAnimWorkflowWindow(GLOBAL_CONTROLLER, parent=_maya_main_window(), initial_tab=initial_tab)
+    window_parent = None if dock else _maya_main_window()
+    GLOBAL_WINDOW = MayaAnimWorkflowWindow(GLOBAL_CONTROLLER, parent=window_parent, initial_tab=initial_tab)
     if dock:
         try:
-            GLOBAL_WINDOW.show(dockable=True, floating=True, area="right")
+            GLOBAL_WINDOW.show(dockable=True, floating=False, area="right")
         except Exception:
             GLOBAL_WINDOW.show()
     else:
         GLOBAL_WINDOW.show()
     try:
-        GLOBAL_WINDOW.raise_()
-        GLOBAL_WINDOW.activateWindow()
+        if not dock:
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
     except Exception:
         pass
     return GLOBAL_WINDOW

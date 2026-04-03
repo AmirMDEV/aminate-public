@@ -90,6 +90,11 @@ def run():
     anchor_z = {}
     for node_name in (left_foot, right_foot):
         anchor_z[node_name] = float(_world_translation(node_name)[2])
+    cmds.currentTime(3, edit=True)
+    start_rotate_x = float(cmds.getAttr(left_foot + ".rotateX"))
+    cmds.currentTime(6, edit=True)
+    end_rotate_x = float(cmds.getAttr(left_foot + ".rotateX"))
+    _assert(abs(end_rotate_x - start_rotate_x) > 0.01, "The test scene should have visible foot rotation across the planted range")
 
     success, message = controller.apply_hold()
     _assert(success, "Live hold create failed: {0}\n{1}".format(message, controller.report_text()))
@@ -109,6 +114,8 @@ def run():
         for node_name in (left_foot, right_foot):
             held_z = float(_world_translation(node_name)[2])
             _assert(abs(held_z - anchor_z[node_name]) <= 0.001, "{0} should keep the same world Z while the live hold is on".format(node_name))
+    cmds.currentTime(6, edit=True)
+    _assert(abs(float(cmds.getAttr(left_foot + ".rotateX")) - end_rotate_x) <= 0.001, "Live hold should keep the original foot rotation animation when Keep Turn Too is off")
 
     success, message = controller.disable_hold()
     _assert(success, message)

@@ -169,6 +169,10 @@ def _build_contact_hold_scene():
     cmds.setKeyframe(root, attribute="translateX", time=10, value=9.0)
     cmds.setKeyframe(root, attribute="rotateY", time=1, value=0.0)
     cmds.setKeyframe(root, attribute="rotateY", time=10, value=90.0)
+    cmds.setKeyframe(left_foot, attribute="rotateX", time=3, value=0.0)
+    cmds.setKeyframe(left_foot, attribute="rotateX", time=6, value=-35.0)
+    cmds.setKeyframe(right_foot, attribute="rotateX", time=3, value=0.0)
+    cmds.setKeyframe(right_foot, attribute="rotateX", time=6, value=-30.0)
     return root, left_foot, right_foot
 
 
@@ -345,6 +349,11 @@ def run():
         hold_left_foot: float(_translation(hold_left_foot)[0]),
         hold_right_foot: float(_translation(hold_right_foot)[0]),
     }
+    cmds.currentTime(3, edit=True)
+    start_rotate_x = float(cmds.getAttr(hold_left_foot + ".rotateX"))
+    cmds.currentTime(6, edit=True)
+    end_rotate_x = float(cmds.getAttr(hold_left_foot + ".rotateX"))
+    _assert(abs(end_rotate_x - start_rotate_x) > 0.01, "Contact Hold smoke scene should keep visible foot rotation animation")
     success, message = contact_hold_controller.apply_hold()
     _assert(success, "Contact Hold failed: {0}\n{1}".format(message, contact_hold_controller.report_text()))
     for node_name in (hold_left_foot, hold_right_foot):
@@ -362,6 +371,8 @@ def run():
         for node_name, anchor_value in anchor_x.items():
             held_x = float(_translation(node_name)[0])
             _assert(abs(held_x - anchor_value) <= 0.001, "Held control should stay on the same chosen world axis while the live hold is enabled")
+    cmds.currentTime(6, edit=True)
+    _assert(abs(float(cmds.getAttr(hold_left_foot + ".rotateX")) - end_rotate_x) <= 0.001, "Contact Hold should not freeze the original foot rotation when Keep Turn Too is off")
 
     success, message = contact_hold_controller.disable_hold()
     _assert(success, message)

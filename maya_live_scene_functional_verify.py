@@ -336,6 +336,10 @@ try:
     cmds.setKeyframe(hold_root, attribute="translateX", time=10, value=9.0)
     cmds.setKeyframe(hold_root, attribute="rotateY", time=1, value=0.0)
     cmds.setKeyframe(hold_root, attribute="rotateY", time=10, value=90.0)
+    cmds.setKeyframe(hold_left_foot, attribute="rotateX", time=3, value=0.0)
+    cmds.setKeyframe(hold_left_foot, attribute="rotateX", time=6, value=-35.0)
+    cmds.setKeyframe(hold_right_foot, attribute="rotateX", time=3, value=0.0)
+    cmds.setKeyframe(hold_right_foot, attribute="rotateX", time=6, value=-30.0)
     cmds.currentTime(3, edit=True)
     _select([hold_left_foot])
     hold_pick_success, hold_pick_message = controller.contact_hold_controller.set_controls_from_selection()
@@ -355,6 +359,10 @@ try:
         hold_left_foot: float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0]),
         hold_right_foot: float(cmds.xform(hold_right_foot, query=True, worldSpace=True, translation=True)[0]),
     }
+    hold_start_rotate_x = float(cmds.getAttr(hold_left_foot + ".rotateX"))
+    cmds.currentTime(6, edit=True)
+    hold_end_rotate_x = float(cmds.getAttr(hold_left_foot + ".rotateX"))
+    cmds.currentTime(3, edit=True)
     hold_apply_success, hold_apply_message = controller.contact_hold_controller.apply_hold()
     if not hold_apply_success:
         raise RuntimeError("Contact Hold apply failed: {0}".format(hold_apply_message))
@@ -379,6 +387,10 @@ try:
             if abs(anchor_value - held_x) > 0.001:
                 raise RuntimeError("Contact Hold did not keep the chosen world axis locked.")
         hold_frames[frame_value] = frame_axis
+    cmds.currentTime(6, edit=True)
+    hold_rotation_after = float(cmds.getAttr(hold_left_foot + ".rotateX"))
+    if abs(hold_rotation_after - hold_end_rotate_x) > 0.001 or abs(hold_end_rotate_x - hold_start_rotate_x) <= 0.01:
+        raise RuntimeError("Contact Hold broke the original foot rotation while Keep Turn Too was off.")
     hold_disable_success, hold_disable_message = controller.contact_hold_controller.disable_hold()
     if not hold_disable_success:
         raise RuntimeError("Contact Hold disable failed: {0}".format(hold_disable_message))
@@ -619,6 +631,8 @@ try:
             "disabled_x": hold_disabled_x,
             "reenabled_x": hold_reenabled_x,
             "anchor_x": hold_anchor_x[hold_left_foot],
+            "rotation_after": hold_rotation_after,
+            "rotation_expected": hold_end_rotate_x,
             "updated_hold_x": updated_hold_x,
             "updated_release_x": updated_release_x,
         }},
@@ -775,6 +789,8 @@ result = namespace.get("result")
     if abs(float(contact_hold.get("reenabled_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) > 0.001:
         raise AssertionError(json.dumps(result, indent=2))
     if abs(float(contact_hold.get("disabled_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) <= 0.01:
+        raise AssertionError(json.dumps(result, indent=2))
+    if abs(float(contact_hold.get("rotation_after", 0.0)) - float(contact_hold.get("rotation_expected", 0.0))) > 0.001:
         raise AssertionError(json.dumps(result, indent=2))
     if abs(float(contact_hold.get("updated_hold_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) > 0.001:
         raise AssertionError(json.dumps(result, indent=2))

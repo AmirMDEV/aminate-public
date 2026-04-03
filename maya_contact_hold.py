@@ -469,6 +469,12 @@ def _channel_value_attr_name(attribute):
     return "orig{0}Value".format(attribute[0].upper() + attribute[1:])
 
 
+def _has_original_channel_state(locator_node, attribute):
+    source_attr = _channel_source_attr_name(attribute)
+    value_attr = _channel_value_attr_name(attribute)
+    return cmds.attributeQuery(source_attr, node=locator_node, exists=True) or cmds.attributeQuery(value_attr, node=locator_node, exists=True)
+
+
 def _disconnect_destination(plug_name):
     incoming = cmds.listConnections(plug_name, source=True, destination=False, plugs=True) or []
     for source_plug in incoming:
@@ -629,6 +635,8 @@ def _ensure_source_channel(control_node, source_locator, locator_node, attribute
 
 
 def _restore_original_channel(control_node, locator_node, attribute):
+    if not _has_original_channel_state(locator_node, attribute):
+        return
     control_plug = "{0}.{1}".format(control_node, attribute)
     _disconnect_destination(control_plug)
     source_attr = _channel_source_attr_name(attribute)
@@ -694,7 +702,8 @@ def _ensure_translation_hold_network(locator_node, control_node, hold_axes):
 
 def _clear_rotation_hold_network(locator_node, control_node):
     for attribute in ("rotateX", "rotateY", "rotateZ"):
-        _restore_original_channel(control_node, locator_node, attribute)
+        if _has_original_channel_state(locator_node, attribute):
+            _restore_original_channel(control_node, locator_node, attribute)
     _delete_hold_nodes(
         locator_node,
         (
