@@ -170,6 +170,45 @@ def _set_keyable_channels(node_name, attrs):
             pass
 
 
+def _dynamic_parent_blend_attrs(node_name):
+    attrs = []
+    for attr_name in cmds.listAttr(node_name, keyable=True) or []:
+        lower_name = attr_name.lower()
+        if not lower_name.startswith("blend"):
+            continue
+        if "adpdrivenparent" in lower_name or "parent" in lower_name:
+            attrs.append(attr_name)
+    if attrs:
+        return attrs
+    return [attr_name for attr_name in (cmds.listAttr(node_name, keyable=True) or []) if attr_name.lower().startswith("blend")]
+
+
+def _get_blend_attr_values(node_name):
+    values = {}
+    for attr_name in _dynamic_parent_blend_attrs(node_name):
+        plug = "{0}.{1}".format(node_name, attr_name)
+        if not cmds.objExists(plug):
+            continue
+        try:
+            values[attr_name] = float(cmds.getAttr(plug))
+        except Exception:
+            continue
+    return values
+
+
+def _set_blend_attr_values(node_name, values, keyframe=True):
+    for attr_name, value in (values or {}).items():
+        plug = "{0}.{1}".format(node_name, attr_name)
+        if not cmds.objExists(plug):
+            continue
+        try:
+            cmds.setAttr(plug, float(value))
+            if keyframe:
+                cmds.setKeyframe(node_name, attribute=attr_name)
+        except Exception:
+            pass
+
+
 def _ensure_attr(node_name, attr_name, attr_type="string", default_value=None):
     if cmds.attributeQuery(attr_name, node=node_name, exists=True):
         return
@@ -698,6 +737,13 @@ class MayaDynamicParentingController(object):
             if changed_time:
                 cmds.currentTime(original_frame, edit=True)
 
+    def _active_constraint_blend_values(self, setup, active=True):
+        active_value = 1.0 if active else 0.0
+        current_values = _get_blend_attr_values(setup["driven"])
+        if current_values:
+            return {attr_name: active_value for attr_name in current_values}
+        return {}
+
     def apply_weight_map(self, weight_map, action_label="blend"):
         setup = self.current_setup()
         if not setup:
@@ -716,6 +762,7 @@ class MayaDynamicParentingController(object):
             record_event=True,
             reseed_active=True,
         )
+        _set_blend_attr_values(setup["driven"], self._active_constraint_blend_values(setup, active=True), keyframe=True)
         return True, "Saved the parent weights on frame {0}.".format(_frame_display(cmds.currentTime(query=True)))
 
     def switch_weight_map_next_frame(self, weight_map, action_label="switch"):
@@ -730,6 +777,7 @@ class MayaDynamicParentingController(object):
         current_frame = float(cmds.currentTime(query=True))
         target_frame = current_frame + DEFAULT_SWITCH_STEP
         current_weights = self.current_weights(setup)
+        current_blend_values = _get_blend_attr_values(setup["driven"])
         self._key_weight_map_on_frame(
             setup,
             current_weights,
@@ -739,6 +787,13 @@ class MayaDynamicParentingController(object):
             record_event=False,
             reseed_active=False,
         )
+        if current_blend_values:
+            original_frame = float(cmds.currentTime(query=True))
+            cmds.currentTime(current_frame, edit=True)
+            try:
+                _set_blend_attr_values(setup["driven"], current_blend_values, keyframe=True)
+            finally:
+                cmds.currentTime(original_frame, edit=True)
         self._key_weight_map_on_frame(
             setup,
             sanitized,
@@ -748,6 +803,12 @@ class MayaDynamicParentingController(object):
             record_event=True,
             reseed_active=True,
         )
+        original_frame = float(cmds.currentTime(query=True))
+        cmds.currentTime(target_frame, edit=True)
+        try:
+            _set_blend_attr_values(setup["driven"], self._active_constraint_blend_values(setup, active=True), keyframe=True)
+        finally:
+            cmds.currentTime(original_frame, edit=True)
         cmds.currentTime(target_frame, edit=True)
         active_target_names = self._active_target_names(setup, sanitized)
         if len(active_target_names) == 1:

@@ -2627,6 +2627,20 @@ if QtWidgets:
             self.setWindowTitle("Maya Anim Workflow Tools")
             self.setMinimumSize(760, 520)
             self.resize(1180, 860)
+            if QtCore:
+                delete_on_close = _qt_flag("WidgetAttribute", "WA_DeleteOnClose")
+                if delete_on_close is not None:
+                    self.setAttribute(delete_on_close, True)
+            try:
+                content_widget.setParent(self)
+            except Exception:
+                pass
+            widget_flag = _qt_flag("WindowType", "Widget")
+            if widget_flag is not None:
+                try:
+                    content_widget.setWindowFlags(widget_flag)
+                except Exception:
+                    pass
             layout = QtWidgets.QVBoxLayout(self)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(content_widget, 1)
@@ -2688,6 +2702,25 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
             GLOBAL_DOCK_HOST.show(dockable=True, floating=False, area="right")
         except Exception:
             GLOBAL_DOCK_HOST.show()
+        if app:
+            try:
+                app.processEvents()
+            except Exception:
+                pass
+        try:
+            GLOBAL_WINDOW.setParent(GLOBAL_DOCK_HOST)
+        except Exception:
+            pass
+        widget_flag = _qt_flag("WindowType", "Widget")
+        if widget_flag is not None:
+            try:
+                GLOBAL_WINDOW.setWindowFlags(widget_flag)
+            except Exception:
+                pass
+        try:
+            GLOBAL_WINDOW.show()
+        except Exception:
+            pass
         if app:
             try:
                 app.processEvents()

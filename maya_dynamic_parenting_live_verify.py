@@ -77,6 +77,7 @@ try:
     first_status = panel.status_label.text()
     first_driver_line = panel.target_line.text()
     first_setup = panel.controller.current_setup()
+    first_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(mag)
 
     cmds.currentTime(6, edit=True)
     before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
@@ -89,6 +90,7 @@ try:
     second_status = panel.status_label.text()
     second_driver_line = panel.target_line.text()
     second_setup = panel.controller.current_setup()
+    second_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(mag)
 
     cmds.currentTime(8, edit=True)
     setup_after_switch = panel.controller.current_setup()
@@ -137,10 +139,12 @@ try:
         "first_driver_line": first_driver_line,
         "first_status": first_status,
         "first_summary": first_summary,
+        "first_blend_values": first_blend_values,
         "second_driver": second_driver_line,
         "second_driver_line": second_driver_line,
         "second_status": second_status,
         "second_summary": second_summary,
+        "second_blend_values": second_blend_values,
         "blend_status": blend_status,
         "blend_summary": blend_summary,
         "release_status": release_status,
@@ -189,11 +193,17 @@ except Exception:
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadHand_CTRL" not in (result.get("first_summary") or ""):
         raise AssertionError(json.dumps(result, indent=2))
+    first_blend_values = result.get("first_blend_values") or {}
+    if not first_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in first_blend_values.values()):
+        raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_driver") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_summary") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    second_blend_values = result.get("second_blend_values") or {}
+    if not second_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in second_blend_values.values()):
         raise AssertionError(json.dumps(result, indent=2))
     if "World: 0.50" not in (result.get("blend_summary") or "") or "reloadGun_CTRL: 0.50" not in (result.get("blend_summary") or ""):
         raise AssertionError(json.dumps(result, indent=2))

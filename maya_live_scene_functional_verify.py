@@ -333,6 +333,9 @@ try:
     if not hand_switch_success:
         raise RuntimeError("Dynamic Parenting hand switch failed: {0}".format(hand_switch_message))
     hand_after = _world_translation(driven)
+    hand_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(driven)
+    if not hand_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in hand_blend_values.values()):
+        raise RuntimeError("Dynamic Parenting did not turn on the driven blendParent attribute.")
     cmds.currentTime(6, edit=True)
     before_switch = _world_translation(driven)
     _select([driven, gun_driver])
@@ -343,6 +346,9 @@ try:
     if not gun_switch_success:
         raise RuntimeError("Dynamic Parenting gun switch failed: {0}".format(gun_switch_message))
     after_switch = _world_translation(driven)
+    gun_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(driven)
+    if not gun_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in gun_blend_values.values()):
+        raise RuntimeError("Dynamic Parenting did not keep the driven blendParent attribute on after the second switch.")
     current_setup = parenting_controller.current_setup()
     target_lookup = {target["label"]: target["id"] for target in current_setup.get("targets") or []}
     cmds.currentTime(8, edit=True)
@@ -669,8 +675,10 @@ try:
             "add_message": add_message,
             "hand_pick_message": hand_pick_message,
             "hand_switch_message": hand_switch_message,
+            "hand_blend_values": hand_blend_values,
             "gun_pick_message": gun_pick_message,
             "gun_switch_message": gun_switch_message,
+            "gun_blend_values": gun_blend_values,
             "blend_message": blend_message,
             "world_message": world_message,
             "starting_setups": starting_setup_count,
@@ -854,6 +862,12 @@ result = namespace.get("result")
     if int(dynamic_parenting.get("remaining_setups", 0)) != int(dynamic_parenting.get("starting_setups", 0)) + 1:
         raise AssertionError(json.dumps(result, indent=2))
     if len(dynamic_parenting.get("event_items") or []) != 4:
+        raise AssertionError(json.dumps(result, indent=2))
+    if not (dynamic_parenting.get("hand_blend_values") or {}):
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(value) - 1.0) > 0.001 for value in (dynamic_parenting.get("hand_blend_values") or {}).values()):
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(value) - 1.0) > 0.001 for value in (dynamic_parenting.get("gun_blend_values") or {}).values()):
         raise AssertionError(json.dumps(result, indent=2))
     if abs(float(dynamic_parenting.get("blend_world_weight", 0.0)) - 0.5) > 0.001:
         raise AssertionError(json.dumps(result, indent=2))
