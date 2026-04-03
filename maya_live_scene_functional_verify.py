@@ -346,32 +346,65 @@ try:
         raise RuntimeError("Contact Hold other-side pick failed: {0}".format(hold_mirror_message))
     controller.contact_hold_controller.start_frame = 3
     controller.contact_hold_controller.end_frame = 6
-    controller.contact_hold_controller.keep_rotation = True
-    controller.contact_hold_controller.key_before_after = True
+    controller.contact_hold_controller.keep_rotation = False
+    controller.contact_hold_controller.hold_axes = ("x",)
     hold_analyze_success, hold_analyze_message = controller.contact_hold_controller.analyze_setup()
     if not hold_analyze_success:
         raise RuntimeError("Contact Hold analyze failed: {0}".format(hold_analyze_message))
-    hold_anchor_matrices = {
-        hold_left_foot: [float(value) for value in cmds.xform(hold_left_foot, query=True, worldSpace=True, matrix=True)],
-        hold_right_foot: [float(value) for value in cmds.xform(hold_right_foot, query=True, worldSpace=True, matrix=True)],
+    hold_anchor_x = {
+        hold_left_foot: float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0]),
+        hold_right_foot: float(cmds.xform(hold_right_foot, query=True, worldSpace=True, translation=True)[0]),
     }
     hold_apply_success, hold_apply_message = controller.contact_hold_controller.apply_hold()
     if not hold_apply_success:
         raise RuntimeError("Contact Hold apply failed: {0}".format(hold_apply_message))
+    hold_locator = maya_contact_hold._find_hold_locator(hold_left_foot)
+    mirrored_hold_locator = maya_contact_hold._find_hold_locator(hold_right_foot)
+    if not hold_locator or not mirrored_hold_locator:
+        raise RuntimeError("Contact Hold did not save both live hold locators.")
+    hold_payload = maya_contact_hold._hold_payload(hold_locator)
+    mirrored_hold_payload = maya_contact_hold._hold_payload(mirrored_hold_locator)
+    hold_weight_attr = hold_payload.get("enabled_attr")
+    mirrored_hold_weight_attr = mirrored_hold_payload.get("enabled_attr")
+    hold_weight_keys = cmds.keyframe(hold_weight_attr, query=True, timeChange=True) or []
+    mirrored_hold_weight_keys = cmds.keyframe(mirrored_hold_weight_attr, query=True, timeChange=True) or []
+    cmds.setKeyframe(hold_root, attribute="translateX", time=10, value=18.0)
     hold_frames = {}
     for frame_value in range(3, 7):
         cmds.currentTime(frame_value, edit=True)
-        frame_matrices = {}
-        for hold_node, hold_anchor_matrix in hold_anchor_matrices.items():
-            hold_matrix = [float(value) for value in cmds.xform(hold_node, query=True, worldSpace=True, matrix=True)]
-            frame_matrices[hold_node] = hold_matrix
-            if max(abs(hold_anchor_matrix[index] - hold_matrix[index]) for index in range(16)) > 0.001:
-                raise RuntimeError("Contact Hold did not keep the foot in the same world pose.")
-        hold_frames[frame_value] = frame_matrices
-    hold_translate_keys = _key_times(hold_left_foot, "translateX")
-    hold_rotate_keys = _key_times(hold_left_foot, "rotateY")
-    mirrored_hold_translate_keys = _key_times(hold_right_foot, "translateX")
-    mirrored_hold_rotate_keys = _key_times(hold_right_foot, "rotateY")
+        frame_axis = {}
+        for hold_node, anchor_value in hold_anchor_x.items():
+            held_x = float(cmds.xform(hold_node, query=True, worldSpace=True, translation=True)[0])
+            frame_axis[hold_node] = held_x
+            if abs(anchor_value - held_x) > 0.001:
+                raise RuntimeError("Contact Hold did not keep the chosen world axis locked.")
+        hold_frames[frame_value] = frame_axis
+    hold_disable_success, hold_disable_message = controller.contact_hold_controller.disable_hold()
+    if not hold_disable_success:
+        raise RuntimeError("Contact Hold disable failed: {0}".format(hold_disable_message))
+    cmds.currentTime(6, edit=True)
+    hold_disabled_x = float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0])
+    if abs(hold_disabled_x - hold_anchor_x[hold_left_foot]) <= 0.01:
+        raise RuntimeError("Contact Hold disable did not restore the original moving axis motion.")
+    hold_enable_success, hold_enable_message = controller.contact_hold_controller.enable_hold()
+    if not hold_enable_success:
+        raise RuntimeError("Contact Hold enable failed: {0}".format(hold_enable_message))
+    cmds.currentTime(6, edit=True)
+    hold_reenabled_x = float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0])
+    if abs(hold_reenabled_x - hold_anchor_x[hold_left_foot]) > 0.001:
+        raise RuntimeError("Contact Hold enable did not restore the saved held axis motion.")
+    controller.contact_hold_controller.end_frame = 5
+    hold_update_success, hold_update_message = controller.contact_hold_controller.apply_hold()
+    if not hold_update_success:
+        raise RuntimeError("Contact Hold update failed: {0}".format(hold_update_message))
+    cmds.currentTime(5, edit=True)
+    updated_hold_x = float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0])
+    cmds.currentTime(6, edit=True)
+    updated_release_x = float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0])
+    if abs(updated_hold_x - hold_anchor_x[hold_left_foot]) > 0.001:
+        raise RuntimeError("Contact Hold update no longer held inside the new range.")
+    if abs(updated_release_x - hold_anchor_x[hold_left_foot]) <= 0.01:
+        raise RuntimeError("Contact Hold update did not release after the new end frame.")
 
     pivot_a = _create_transform("pivotVerifyA_CTRL", parent=test_group, translation=(1.0, 0.0, 0.0))
     pivot_b = _create_transform("pivotVerifyB_CTRL", parent=test_group, translation=(3.0, 0.0, 0.0))
@@ -559,6 +592,8 @@ try:
         "tabs": [anim_window.tab_widget.tabText(index) for index in range(anim_window.tab_widget.count())],
         "embedded_tools": {{
             "contact_hold_apply_text": anim_window.contact_hold_panel.apply_button.text(),
+            "contact_hold_enable_text": anim_window.contact_hold_panel.enable_button.text(),
+            "contact_hold_disable_text": anim_window.contact_hold_panel.disable_button.text(),
             "contact_hold_other_side_text": anim_window.contact_hold_panel.add_other_side_button.text(),
             "onion_attach_text": anim_window.onion_panel.attach_button.text(),
             "rotation_analyze_text": anim_window.rotation_panel.analyze_button.text(),
@@ -577,10 +612,15 @@ try:
         "contact_hold": {{
             "frames": hold_frames,
             "controls": list(controller.contact_hold_controller.control_nodes),
-            "translate_keys": hold_translate_keys,
-            "rotate_keys": hold_rotate_keys,
-            "mirrored_translate_keys": mirrored_hold_translate_keys,
-            "mirrored_rotate_keys": mirrored_hold_rotate_keys,
+            "axes": list(hold_payload.get("axes") or []),
+            "keep_rotation": bool(hold_payload.get("keep_rotation")),
+            "weight_keys": hold_weight_keys,
+            "mirrored_weight_keys": mirrored_hold_weight_keys,
+            "disabled_x": hold_disabled_x,
+            "reenabled_x": hold_reenabled_x,
+            "anchor_x": hold_anchor_x[hold_left_foot],
+            "updated_hold_x": updated_hold_x,
+            "updated_release_x": updated_release_x,
         }},
         "dynamic_pivot": {{
             "pivot_before": pivot_before,
@@ -692,7 +732,11 @@ result = namespace.get("result")
     if workflow.get("tabs") != ["Quick Start", "Dynamic Parenting", "Hand / Foot Hold", "Dynamic Pivot", "Universal IK/FK", "Onion Skin", "Rotation Doctor", "Skinning Cleanup", "Rig Scale", "Video Reference", "Timeline Notes"]:
         raise AssertionError(json.dumps(result, indent=2))
     embedded_tools = workflow.get("embedded_tools") or {}
-    if embedded_tools.get("contact_hold_apply_text") != "Hold Still":
+    if embedded_tools.get("contact_hold_apply_text") != "Create / Update Hold":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("contact_hold_enable_text") != "Use Hold":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("contact_hold_disable_text") != "Use Original Motion":
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("contact_hold_other_side_text") != "Add Matching Other Side":
         raise AssertionError(json.dumps(result, indent=2))
@@ -717,16 +761,24 @@ result = namespace.get("result")
     contact_hold = workflow.get("contact_hold") or {}
     if len(contact_hold.get("controls") or []) != 2:
         raise AssertionError(json.dumps(result, indent=2))
+    if contact_hold.get("axes") != ["x"]:
+        raise AssertionError(json.dumps(result, indent=2))
+    if contact_hold.get("keep_rotation"):
+        raise AssertionError(json.dumps(result, indent=2))
     for frame_value in ("3", "4", "5", "6"):
         if frame_value not in {str(key) for key in (contact_hold.get("frames") or {}).keys()}:
             raise AssertionError(json.dumps(result, indent=2))
-    if 2.0 not in (contact_hold.get("translate_keys") or []) or 7.0 not in (contact_hold.get("translate_keys") or []):
+    if 2.0 not in (contact_hold.get("weight_keys") or []) or 3.0 not in (contact_hold.get("weight_keys") or []) or 6.0 not in (contact_hold.get("weight_keys") or []) or 7.0 not in (contact_hold.get("weight_keys") or []):
         raise AssertionError(json.dumps(result, indent=2))
-    if 2.0 not in (contact_hold.get("rotate_keys") or []) or 7.0 not in (contact_hold.get("rotate_keys") or []):
+    if 2.0 not in (contact_hold.get("mirrored_weight_keys") or []) or 3.0 not in (contact_hold.get("mirrored_weight_keys") or []) or 6.0 not in (contact_hold.get("mirrored_weight_keys") or []) or 7.0 not in (contact_hold.get("mirrored_weight_keys") or []):
         raise AssertionError(json.dumps(result, indent=2))
-    if 2.0 not in (contact_hold.get("mirrored_translate_keys") or []) or 7.0 not in (contact_hold.get("mirrored_translate_keys") or []):
+    if abs(float(contact_hold.get("reenabled_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) > 0.001:
         raise AssertionError(json.dumps(result, indent=2))
-    if 2.0 not in (contact_hold.get("mirrored_rotate_keys") or []) or 7.0 not in (contact_hold.get("mirrored_rotate_keys") or []):
+    if abs(float(contact_hold.get("disabled_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) <= 0.01:
+        raise AssertionError(json.dumps(result, indent=2))
+    if abs(float(contact_hold.get("updated_hold_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) > 0.001:
+        raise AssertionError(json.dumps(result, indent=2))
+    if abs(float(contact_hold.get("updated_release_x", 0.0)) - float(contact_hold.get("anchor_x", 0.0))) <= 0.01:
         raise AssertionError(json.dumps(result, indent=2))
     skinning_cleanup = workflow.get("skinning_cleanup") or {}
     cleaned_scale_after = skinning_cleanup.get("cleaned_scale_after") or []

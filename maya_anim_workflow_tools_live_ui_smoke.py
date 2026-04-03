@@ -167,7 +167,13 @@ try:
         "has_contact_hold_panel": hasattr(main_window, "contact_hold_panel"),
         "contact_hold_panel_state": contact_hold_panel_state,
         "contact_hold_apply_text": main_window.contact_hold_panel.apply_button.text(),
+        "contact_hold_enable_text": main_window.contact_hold_panel.enable_button.text(),
+        "contact_hold_disable_text": main_window.contact_hold_panel.disable_button.text(),
         "contact_hold_other_side_text": main_window.contact_hold_panel.add_other_side_button.text(),
+        "contact_hold_x_checked": main_window.contact_hold_panel.hold_x_check.isChecked(),
+        "contact_hold_y_checked": main_window.contact_hold_panel.hold_y_check.isChecked(),
+        "contact_hold_z_checked": main_window.contact_hold_panel.hold_z_check.isChecked(),
+        "contact_hold_keep_rotation_checked": main_window.contact_hold_panel.keep_rotation_check.isChecked(),
         "has_onion_panel": hasattr(main_window, "onion_panel"),
         "has_rotation_panel": hasattr(main_window, "rotation_panel"),
         "has_skin_panel": hasattr(main_window, "skin_panel"),
@@ -324,9 +330,21 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if (contact_hold_panel_state.get("size") or [0, 0])[1] < 200:
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("contact_hold_apply_text") != "Hold Still":
+    if main.get("contact_hold_apply_text") != "Create / Update Hold":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_enable_text") != "Use Hold":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_disable_text") != "Use Original Motion":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("contact_hold_other_side_text") != "Add Matching Other Side":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_x_checked"):
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_y_checked"):
+        raise AssertionError(json.dumps(payload, indent=2))
+    if not main.get("contact_hold_z_checked"):
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_keep_rotation_checked"):
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("has_onion_panel"):
         raise AssertionError(json.dumps(payload, indent=2))

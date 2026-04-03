@@ -46,3 +46,5 @@ This folder contains standalone Maya tooling aimed at animator-facing workflows 
 Treat this folder as Maya-specific tooling. If the task is about browser automation, userscripts, NAS deployment, or OpenClaw infrastructure, route back to the appropriate sibling project instead of scanning here.
 
 When the task is about dynamic parenting, hand/foot contact holds, dynamic pivot, IK/FK switching, onion skinning, rotation cleanup, skinning cleanup, rig-scale export, video reference, timeline notes, scene-bound tutorial authoring, guided Maya lessons, or pose-compare ghost snapshots, start with the dedicated module for that workflow first and treat `maya_anim_workflow_tools.py` as the combined-tab entrypoint only when the task explicitly needs the global tabbed window.
+
+For the current house-standard validation anchor, start with `maya_anim_workflow_tools.py`, then use `maya_anim_workflow_tools_live_ui_smoke.py` and `maya_anim_workflow_tools_shelf_install_verify.py` to prove the docked UI and shelf-install path in live Maya.

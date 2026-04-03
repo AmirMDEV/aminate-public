@@ -45,6 +45,12 @@ def _times(node_name, attribute):
     return cmds.keyframe(node_name, attribute=attribute, query=True, timeChange=True) or []
 
 
+def _enabled_times(locator_node):
+    payload = maya_contact_hold._hold_payload(locator_node)
+    _assert(payload and payload.get("enabled_attr"), "Contact Hold should create a live enabled payload")
+    return cmds.keyframe(payload["enabled_attr"], query=True, timeChange=True) or []
+
+
 def _shader_group(shader_name):
     shading_group = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=shader_name + "SG")
     cmds.connectAttr(shader_name + ".outColor", shading_group + ".surfaceShader", force=True)
@@ -331,26 +337,49 @@ def run():
     _assert(contact_hold_controller.control_nodes == expected_hold_controls, "Contact Hold should add the matching other-side foot")
     contact_hold_controller.start_frame = 3
     contact_hold_controller.end_frame = 6
-    contact_hold_controller.keep_rotation = True
-    contact_hold_controller.key_before_after = True
+    contact_hold_controller.keep_rotation = False
+    contact_hold_controller.hold_axes = ("x",)
     success, message = contact_hold_controller.analyze_setup()
     _assert(success, message)
-    anchor_matrices = {
-        hold_left_foot: _matrix(hold_left_foot),
-        hold_right_foot: _matrix(hold_right_foot),
+    anchor_x = {
+        hold_left_foot: float(_translation(hold_left_foot)[0]),
+        hold_right_foot: float(_translation(hold_right_foot)[0]),
     }
     success, message = contact_hold_controller.apply_hold()
     _assert(success, "Contact Hold failed: {0}\n{1}".format(message, contact_hold_controller.report_text()))
+    for node_name in (hold_left_foot, hold_right_foot):
+        locator_node = maya_contact_hold._find_hold_locator(node_name)
+        payload = maya_contact_hold._hold_payload(locator_node)
+        _assert(payload is not None, "Contact Hold should save a live hold payload")
+        _assert(payload["axes"] == ("x",), "Contact Hold should store the chosen world axis")
+        _assert(not payload["keep_rotation"], "Contact Hold should leave rotation free in this test")
+        enabled_times = _enabled_times(locator_node)
+        _assert(2.0 in enabled_times and 3.0 in enabled_times and 6.0 in enabled_times and 7.0 in enabled_times, "Contact Hold should key only the live hold boundary frames")
+
+    cmds.setKeyframe(hold_root, attribute="translateX", time=10, value=18.0)
     for frame_value in range(3, 7):
         cmds.currentTime(frame_value, edit=True)
-        for node_name, anchor_matrix in anchor_matrices.items():
-            held_matrix = _matrix(node_name)
-            _assert(max(abs(float(anchor_matrix[index]) - float(held_matrix[index])) for index in range(16)) <= 0.001, "Held control should stay in the same world pose")
-    for node_name in (hold_left_foot, hold_right_foot):
-        hold_translate_times = _times(node_name, "translateX")
-        hold_rotate_times = _times(node_name, "rotateY")
-        _assert(2.0 in hold_translate_times and 7.0 in hold_translate_times, "Contact Hold should add clean keys before and after the hold")
-        _assert(2.0 in hold_rotate_times and 7.0 in hold_rotate_times, "Contact Hold should key rotation before and after when Keep Turn Too is on")
+        for node_name, anchor_value in anchor_x.items():
+            held_x = float(_translation(node_name)[0])
+            _assert(abs(held_x - anchor_value) <= 0.001, "Held control should stay on the same chosen world axis while the live hold is enabled")
+
+    success, message = contact_hold_controller.disable_hold()
+    _assert(success, message)
+    cmds.currentTime(6, edit=True)
+    _assert(abs(float(_translation(hold_left_foot)[0]) - anchor_x[hold_left_foot]) > 0.01, "Disabling Contact Hold should restore the original moving axis motion")
+
+    success, message = contact_hold_controller.enable_hold()
+    _assert(success, message)
+    cmds.currentTime(6, edit=True)
+    _assert(abs(float(_translation(hold_left_foot)[0]) - anchor_x[hold_left_foot]) <= 0.001, "Re-enabling Contact Hold should restore the saved held axis motion")
+
+    contact_hold_controller.end_frame = 5
+    success, message = contact_hold_controller.apply_hold()
+    _assert(success, message)
+    cmds.currentTime(5, edit=True)
+    _assert(abs(float(_translation(hold_left_foot)[0]) - anchor_x[hold_left_foot]) <= 0.001, "Updated Contact Hold should still keep the chosen axis locked inside the new range")
+    cmds.currentTime(6, edit=True)
+    _assert(abs(float(_translation(hold_left_foot)[0]) - anchor_x[hold_left_foot]) > 0.01, "Updated Contact Hold should stop affecting frames after the new end frame")
 
     _assert(hasattr(maya_rig_scale_export, "launch_maya_rig_scale_export"), "Rig Scale wrapper entrypoint missing")
     _assert(hasattr(maya_universal_ikfk_switcher, "launch_maya_universal_ikfk_switcher"), "IK/FK wrapper entrypoint missing")

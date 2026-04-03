@@ -84,7 +84,7 @@ TAB_GUIDE = "Quick Start"
 TAB_HELP_TEXT = {
     TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
     TAB_PARENTING: "Use this when one control needs to follow different hands, props, or objects without popping. Best for reloads, pickups, passes, and drops.",
-    TAB_CONTACT_HOLD: "Use this when a hand or foot should stay planted in one world-space spot while the body keeps moving.",
+    TAB_CONTACT_HOLD: "Use this when a hand or foot should stay planted on chosen world axes while the body keeps moving. The hold stays live, editable, and reversible.",
     TAB_PIVOT: "Use this when you want to turn from a temporary pivot point without changing the real rig pivot.",
     TAB_IKFK: "Use this when you need to switch an arm or leg cleanly between IK and FK and keep the pose matched.",
     TAB_ONION: "Use this when you want to see ghosted past and future poses to judge spacing, arcs, and timing.",
@@ -2268,14 +2268,15 @@ if QtWidgets:
                 "- Use the Swap History list to see the saved hand-offs and jump back to those frames.\n"
                 "- When it looks right, click Bake Back To Rig.\n\n"
                 "Hand / Foot Hold\n"
-                "- Use this when a planted hand or foot should stay in the same place while the body keeps moving.\n"
+                "- Use this when a planted hand or foot should stay in the same place on chosen world axes while the body keeps moving.\n"
                 "- Pick the hand or foot control.\n"
                 "- If you want both sides, click Add Matching Other Side.\n"
                 "- If you are not sure about the contact range, click Suggest Range first.\n"
-                "- Go to the first frame where it sticks and click Use Current For Start.\n"
-                "- Go to the frame where it stops sticking and click Use Current For End.\n"
-                "- Click Hold Still.\n"
-                "- The tool keys each frame so the control stays in the same world spot while the body keeps moving.\n\n"
+                "- Go to the first frame where it sticks and click Use Current For Contact Start.\n"
+                "- Go to the frame where it stops sticking and click Use Current For Lift End.\n"
+                "- Turn on the world axes you want to keep still, like Z for forward travel.\n"
+                "- Click Create / Update Hold.\n"
+                "- Use Use Hold to turn the saved hold on again, Use Original Motion to turn it off, and Delete Hold to remove it.\n\n"
                 "Dynamic Pivot\n"
                 "- Use this when you want a temporary turn point without changing the real pivot.\n"
                 "- Pick the object or objects.\n"
