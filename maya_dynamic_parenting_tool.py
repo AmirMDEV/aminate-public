@@ -562,6 +562,15 @@ class MayaDynamicParentingController(object):
                 return target
         return None
 
+    def _target_snap_matrix(self, target_entry):
+        if not target_entry:
+            return None
+        if target_entry.get("driver") and cmds.objExists(target_entry["driver"]):
+            return _matrix_from_node(target_entry["driver"])
+        if target_entry.get("locator") and cmds.objExists(target_entry["locator"]):
+            return _matrix_from_node(target_entry["locator"])
+        return None
+
     def _save_targets(self, setup, targets):
         serialized = []
         for target in targets:
@@ -631,7 +640,25 @@ class MayaDynamicParentingController(object):
             return False, "Pick a constrained object from the list first."
         cmds.setAttr(setup["setup_group"] + ".adpMaintainOffset", int(bool(enabled)))
         self.maintain_offset = bool(enabled)
-        return True, "Stay Put is now {0}.".format("on" if enabled else "off")
+        return True, "Maintain Current Offset is now {0}.".format("on" if enabled else "off")
+
+    def snap_to_target_id(self, target_id):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Add or pick the constrained object first."
+        target_entry = self._target_entry_by_id(setup, target_id)
+        if not target_entry:
+            return False, "Pick a parent first."
+        if target_entry.get("is_world"):
+            return False, "World does not have a snap place. Move the object by hand, then switch to World."
+        target_matrix = self._target_snap_matrix(target_entry)
+        if target_matrix is None:
+            return False, "That parent is missing."
+        _set_world_matrix(setup["driven"], target_matrix)
+        return True, "Snapped {0} onto {1}. Move it if you want, then click Switch.".format(
+            setup["label"],
+            target_entry["label"],
+        )
 
     def current_weights(self, setup=None):
         setup = setup or self.current_setup()
@@ -667,7 +694,7 @@ class MayaDynamicParentingController(object):
                 names.append(target["label"])
         return names
 
-    def _reseed_target(self, setup, target_entry, maintain_offset):
+    def _reseed_target(self, setup, target_entry, maintain_offset, reference_matrix=None):
         locator_name = target_entry["locator"]
         if not cmds.objExists(locator_name):
             return
@@ -678,10 +705,10 @@ class MayaDynamicParentingController(object):
                 pass
             target_entry["follow_constraint"] = ""
         if target_entry["is_world"] or not target_entry["driver"]:
-            _set_world_matrix(locator_name, _matrix_from_node(setup["driven"]))
+            _set_world_matrix(locator_name, reference_matrix or _matrix_from_node(setup["driven"]))
             return
         if maintain_offset:
-            _set_world_matrix(locator_name, _matrix_from_node(setup["driven"]))
+            _set_world_matrix(locator_name, reference_matrix or _matrix_from_node(setup["driven"]))
         target_entry["follow_constraint"] = cmds.parentConstraint(
             target_entry["driver"],
             locator_name,
@@ -714,7 +741,7 @@ class MayaDynamicParentingController(object):
         _save_event_log(setup["setup_group"], event_log)
         setup["event_log"] = event_log
 
-    def _key_weight_map_on_frame(self, setup, weight_map, maintain_offset, frame_value, action_label=None, record_event=False, reseed_active=False):
+    def _key_weight_map_on_frame(self, setup, weight_map, maintain_offset, frame_value, action_label=None, record_event=False, reseed_active=False, reference_matrix=None):
         original_frame = float(cmds.currentTime(query=True))
         frame_value = float(frame_value)
         changed_time = abs(original_frame - frame_value) >= EPSILON
@@ -724,7 +751,7 @@ class MayaDynamicParentingController(object):
             if reseed_active:
                 for target in setup["targets"]:
                     if float(weight_map.get(target["id"], 0.0)) > EPSILON:
-                        self._reseed_target(setup, target, maintain_offset)
+                        self._reseed_target(setup, target, maintain_offset, reference_matrix=reference_matrix)
                 self._save_targets(setup, setup["targets"])
             constraint_weights = {}
             for target in setup["targets"]:
@@ -753,6 +780,7 @@ class MayaDynamicParentingController(object):
         sanitized, total = self._sanitize_weight_map(setup, weight_map)
         if total <= EPSILON:
             return False, "Turn at least one parent on before you key the weights."
+        reference_matrix = _matrix_from_node(setup["driven"])
         self._key_weight_map_on_frame(
             setup,
             sanitized,
@@ -761,6 +789,7 @@ class MayaDynamicParentingController(object):
             action_label=action_label,
             record_event=True,
             reseed_active=True,
+            reference_matrix=reference_matrix,
         )
         _set_blend_attr_values(setup["driven"], self._active_constraint_blend_values(setup, active=True), keyframe=True)
         return True, "Saved the parent weights on frame {0}.".format(_frame_display(cmds.currentTime(query=True)))
@@ -776,6 +805,7 @@ class MayaDynamicParentingController(object):
             return False, "Turn at least one parent on before you switch."
         current_frame = float(cmds.currentTime(query=True))
         target_frame = current_frame + DEFAULT_SWITCH_STEP
+        reference_matrix = _matrix_from_node(setup["driven"])
         current_weights = self.current_weights(setup)
         current_blend_values = _get_blend_attr_values(setup["driven"])
         self._key_weight_map_on_frame(
@@ -802,6 +832,7 @@ class MayaDynamicParentingController(object):
             action_label=action_label,
             record_event=True,
             reseed_active=True,
+            reference_matrix=reference_matrix,
         )
         original_frame = float(cmds.currentTime(query=True))
         cmds.currentTime(target_frame, edit=True)
@@ -850,6 +881,22 @@ class MayaDynamicParentingController(object):
             setup = self.current_setup()
             existing = self._target_entry_by_driver(setup, target_node)
         return self.parent_fully_to_target(existing["id"], action_label="switch")
+
+    def snap_pending_target(self):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Add or pick the constrained object first."
+        target_node = self.pending_target_node
+        if not target_node or not cmds.objExists(target_node):
+            return False, "Pick the next hand, gun, prop, or object first."
+        existing = self._target_entry_by_driver(setup, target_node)
+        if not existing:
+            success, message = self.add_targets_from_nodes([target_node])
+            if not success:
+                return success, message
+            setup = self.current_setup()
+            existing = self._target_entry_by_driver(setup, target_node)
+        return self.snap_to_target_id(existing["id"])
 
     def reseed_active_weights(self):
         setup = self.current_setup()
@@ -946,7 +993,7 @@ class MayaDynamicParentingController(object):
         lines = [
             "Object: {0}".format(setup["label"]),
             "Real node: {0}".format(setup["driven"]),
-            "Stay Put: {0}".format("On" if setup["maintain_offset"] else "Off"),
+            "Maintain Current Offset: {0}".format("On" if setup["maintain_offset"] else "Off"),
             "Parents:",
         ]
         for target in setup["targets"]:
@@ -988,16 +1035,17 @@ if QtWidgets:
             for text in (
                 "1. Pick the thing that moves, like the magazine, then click Add Object.",
                 "2. Pick the thing it should follow, then click Pick Parent.",
-                "3. Click Switch to make it follow that thing on the next frame.",
-                "4. Click World if it should stop following everything.",
-                "5. Leave Stay Put on if it should not jump.",
+                "3. If you want it to jump onto that parent, click Snap To Parent first.",
+                "4. If you want to place it yourself, move it where you want, leave Maintain Current Offset on, then click Switch.",
+                "5. Click World if it should stop following everything.",
             ):
                 label = QtWidgets.QLabel(text)
                 label.setWordWrap(True)
                 step_layout.addWidget(label)
             example_label = QtWidgets.QLabel(
                 "Example: Gun + Magazine\n"
-                "- When the magazine is in the gun, make it follow the gun.\n"
+                "- When the magazine is in the gun, use Maintain Current Offset to keep it exactly where it is, then switch it to the gun.\n"
+                "- If you want it to jump onto the gun first, click Snap To Parent, then switch.\n"
                 "- When a hand pulls it out, make it follow the hand.\n"
                 "- When you let go, make it follow World."
             )
@@ -1032,10 +1080,16 @@ if QtWidgets:
             list_row.addLayout(name_column)
             main_layout.addLayout(list_row)
 
-            self.maintain_offset_check = QtWidgets.QCheckBox("Stay Put")
+            self.maintain_offset_check = QtWidgets.QCheckBox("Maintain Current Offset")
             self.maintain_offset_check.setChecked(True)
             self.maintain_offset_check.setToolTip("Leave this on if the object should stay where it is when the new parent turns on. Turn it off if it should snap.")
             main_layout.addWidget(self.maintain_offset_check)
+            keep_position_hint = QtWidgets.QLabel(
+                "Maintain Current Offset: keep the object exactly where it is, then switch.\n"
+                "Snap To Parent: move it onto the parent first, then switch."
+            )
+            keep_position_hint.setWordWrap(True)
+            main_layout.addWidget(keep_position_hint)
 
             target_row = QtWidgets.QHBoxLayout()
             self.target_line = QtWidgets.QLineEdit()
@@ -1043,6 +1097,8 @@ if QtWidgets:
             self.target_line.setPlaceholderText("Pick a hand, gun, or other thing to follow.")
             self.use_target_button = QtWidgets.QPushButton("Pick Parent")
             self.use_target_button.setToolTip("Take the thing you picked and put it into the Parent To box.")
+            self.snap_to_picked_button = QtWidgets.QPushButton("Snap To Parent")
+            self.snap_to_picked_button.setToolTip("Move the object onto this parent now. You can still adjust it before you switch.")
             self.parent_to_picked_button = QtWidgets.QPushButton("Switch")
             self.parent_to_picked_button.setToolTip("Keep the old parent on this frame, then turn this picked parent on next frame.")
             self.add_target_button = QtWidgets.QPushButton("Add Parent")
@@ -1050,8 +1106,16 @@ if QtWidgets:
             target_row.addWidget(QtWidgets.QLabel("Parent To"))
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
+            target_row.addWidget(self.snap_to_picked_button)
             target_row.addWidget(self.parent_to_picked_button)
             main_layout.addLayout(target_row)
+
+            switch_hint = QtWidgets.QLabel(
+                "You can also move the object by hand in the viewport before you click Switch. "
+                "If Maintain Current Offset is on, the switch keeps that exact spot."
+            )
+            switch_hint.setWordWrap(True)
+            main_layout.addWidget(switch_hint)
 
             self.targets_table = QtWidgets.QTableWidget(0, 4)
             self.targets_table.setHorizontalHeaderLabels(["Parent", "Weight", "On", "Switch"])
@@ -1066,7 +1130,7 @@ if QtWidgets:
             main_layout.addWidget(self.targets_table, 1)
 
             action_row = QtWidgets.QHBoxLayout()
-            self.parent_to_row_button = QtWidgets.QPushButton("Switch Chosen")
+            self.parent_to_row_button = QtWidgets.QPushButton("Reparent to Selected Parent")
             self.parent_to_row_button.setToolTip("Use the parent row you picked and switch to it on the next frame.")
             self.parent_to_world_button = QtWidgets.QPushButton("World")
             self.parent_to_world_button.setToolTip("Stop following everything and switch to World on the next frame.")
@@ -1152,6 +1216,7 @@ if QtWidgets:
             self.rename_button.clicked.connect(self._rename_object)
             self.maintain_offset_check.toggled.connect(self._toggle_maintain_offset)
             self.use_target_button.clicked.connect(self._use_target)
+            self.snap_to_picked_button.clicked.connect(self._snap_to_picked_target)
             self.parent_to_picked_button.clicked.connect(self._parent_to_picked_target)
             self.add_target_button.clicked.connect(self._add_target)
             self.parent_to_row_button.clicked.connect(self._parent_to_row)
@@ -1286,6 +1351,15 @@ if QtWidgets:
                     self._set_status(message, success)
                     return
             success, message = self.controller.apply_pending_target()
+            self._set_status(message, success)
+
+        def _snap_to_picked_target(self):
+            if not self.controller.pending_target_node or not cmds.objExists(self.controller.pending_target_node):
+                success, message = self.controller.set_pending_target_from_selection()
+                if not success:
+                    self._set_status(message, success)
+                    return
+            success, message = self.controller.snap_pending_target()
             self._set_status(message, success)
 
         def _parent_to_target_id(self, target_id):

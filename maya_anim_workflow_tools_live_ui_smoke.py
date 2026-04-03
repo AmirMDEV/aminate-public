@@ -164,6 +164,7 @@ try:
         "parenting_add_object_text": main_window.parenting_panel.add_object_button.text(),
         "parenting_remove_object_text": main_window.parenting_panel.remove_object_button.text(),
         "parenting_pick_parent_text": main_window.parenting_panel.use_target_button.text(),
+        "parenting_snap_text": main_window.parenting_panel.snap_to_picked_button.text(),
         "parenting_parent_to_picked_text": main_window.parenting_panel.parent_to_picked_button.text(),
         "parenting_add_parent_text": main_window.parenting_panel.add_target_button.text(),
         "parenting_parent_to_row_text": main_window.parenting_panel.parent_to_row_button.text(),
@@ -304,11 +305,13 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_pick_parent_text") != "Pick Parent":
         raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("parenting_snap_text") != "Snap To Parent":
+        raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_parent_to_picked_text") != "Switch":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_add_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_row_text") != "Switch Chosen":
+    if main.get("parenting_parent_to_row_text") != "Reparent to Selected Parent":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("parenting_parent_to_world_text") != "World":
         raise AssertionError(json.dumps(payload, indent=2))

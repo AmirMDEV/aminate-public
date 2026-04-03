@@ -653,6 +653,7 @@ try:
         "embedded_tools": {{
             "parenting_add_object_text": anim_window.parenting_panel.add_object_button.text(),
             "parenting_pick_parent_text": anim_window.parenting_panel.use_target_button.text(),
+            "parenting_snap_text": anim_window.parenting_panel.snap_to_picked_button.text(),
             "parenting_parent_to_picked_text": anim_window.parenting_panel.parent_to_picked_button.text(),
             "parenting_world_text": anim_window.parenting_panel.parent_to_world_button.text(),
             "parenting_blend_text": anim_window.parenting_panel.apply_weights_button.text(),
@@ -827,6 +828,8 @@ result = namespace.get("result")
     if embedded_tools.get("parenting_add_object_text") != "Add Object":
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("parenting_pick_parent_text") != "Pick Parent":
+        raise AssertionError(json.dumps(result, indent=2))
+    if embedded_tools.get("parenting_snap_text") != "Snap To Parent":
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("parenting_parent_to_picked_text") != "Switch":
         raise AssertionError(json.dumps(result, indent=2))

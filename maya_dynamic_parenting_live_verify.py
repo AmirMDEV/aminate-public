@@ -80,10 +80,13 @@ try:
     first_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(mag)
 
     cmds.currentTime(6, edit=True)
-    before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     cmds.select([mag, gun], replace=True)
     panel._use_target()
     second_pick_status = panel.status_label.text()
+    panel._snap_to_picked_target()
+    snap_status = panel.status_label.text()
+    snapped_position = cmds.xform(mag, query=True, worldSpace=True, translation=True)
+    before_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     panel._parent_to_picked_target()
     after_switch = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     second_summary = panel.summary_box.toPlainText()
@@ -133,6 +136,7 @@ try:
         "ok": True,
         "add_object_text": panel.add_object_button.text(),
         "pick_parent_text": panel.use_target_button.text(),
+        "snap_text": panel.snap_to_picked_button.text(),
         "parent_to_picked_text": panel.parent_to_picked_button.text(),
         "save_parent_text": panel.add_target_button.text(),
         "row_switch_text": panel.parent_to_row_button.text(),
@@ -144,6 +148,8 @@ try:
         "clear_text": panel.clear_switches_button.text(),
         "first_pick_status": first_pick_status,
         "second_pick_status": second_pick_status,
+        "snap_status": snap_status,
+        "snapped_position": snapped_position,
         "first_driver": first_driver_line,
         "first_driver_line": first_driver_line,
         "first_status": first_status,
@@ -186,11 +192,13 @@ except Exception:
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("pick_parent_text") != "Pick Parent":
         raise AssertionError(json.dumps(result, indent=2))
+    if result.get("snap_text") != "Snap To Parent":
+        raise AssertionError(json.dumps(result, indent=2))
     if result.get("parent_to_picked_text") != "Switch":
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("save_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("row_switch_text") != "Switch Chosen":
+    if result.get("row_switch_text") != "Reparent to Selected Parent":
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("world_text") != "World":
         raise AssertionError(json.dumps(result, indent=2))
@@ -214,6 +222,8 @@ except Exception:
     if not first_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in first_blend_values.values()):
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_pick_status") or ""):
+        raise AssertionError(json.dumps(result, indent=2))
+    if "Snapped reloadMag_CTRL onto reloadGun_CTRL" not in (result.get("snap_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     if "reloadGun_CTRL" not in (result.get("second_driver") or ""):
         raise AssertionError(json.dumps(result, indent=2))
@@ -263,6 +273,11 @@ except Exception:
     if len(before_switch) != 3 or len(after_switch) != 3:
         raise AssertionError(json.dumps(result, indent=2))
     if any(abs(float(before_switch[index]) - float(after_switch[index])) > 0.01 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    snapped_position = result.get("snapped_position") or []
+    if len(snapped_position) != 3:
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(snapped_position[index]) - float(before_switch[index])) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
 
     print("MAYA_DYNAMIC_PARENTING_LIVE_VERIFY: PASS")
