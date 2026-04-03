@@ -537,12 +537,12 @@ class MayaDynamicParentingController(object):
         self.maintain_offset = bool(data["maintain_offset"])
         return True, "Now editing {0}.".format(data["label"])
 
-    def _create_world_target_entry(self, driven_node, targets_group, start_in_current_position=True):
+    def _create_world_target_entry(self, driven_node, targets_group, reference_matrix=None, start_in_current_position=True):
         locator_name = cmds.spaceLocator(name="{0}_world{1}".format(_safe_node_name(driven_node), TARGET_LOCATOR_SUFFIX))[0]
         locator_name = cmds.parent(locator_name, targets_group)[0]
         cmds.setAttr(locator_name + ".visibility", 0)
         if start_in_current_position:
-            _set_world_matrix(locator_name, _matrix_from_node(driven_node))
+            _set_world_matrix(locator_name, reference_matrix or _matrix_from_node(driven_node))
         else:
             _set_world_matrix(locator_name, _identity_matrix())
         return {
@@ -556,6 +556,7 @@ class MayaDynamicParentingController(object):
 
     def _ensure_setup(self, driven_node, start_in_current_position=True):
         driven_node = (cmds.ls(driven_node, long=True) or [driven_node])[0]
+        reference_matrix = _matrix_from_node(driven_node)
         existing = _find_setup_for_driven(driven_node)
         if existing:
             data = _load_setup_data(existing)
@@ -573,13 +574,20 @@ class MayaDynamicParentingController(object):
         _ensure_attr(setup_group, "adpMaintainOffset", "bool", default_value=True)
         cmds.setAttr(setup_group + ".adpMaintainOffset", 1)
 
-        world_entry = self._create_world_target_entry(driven_node, targets_group, start_in_current_position=start_in_current_position)
+        world_entry = self._create_world_target_entry(
+            driven_node,
+            targets_group,
+            reference_matrix=reference_matrix,
+            start_in_current_position=start_in_current_position,
+        )
         driven_constraint = cmds.parentConstraint(
             world_entry["locator"],
             driven_node,
-            maintainOffset=False,
+            maintainOffset=bool(start_in_current_position),
             name="{0}{1}".format(safe_name, DRIVEN_CONSTRAINT_SUFFIX),
         )[0]
+        if start_in_current_position:
+            _set_world_translation_rotation_preserve_scale(driven_node, reference_matrix)
         _set_string_attr(setup_group, "adpDrivenConstraint", driven_constraint)
         _save_target_entries(setup_group, [world_entry])
         _save_event_log(setup_group, [])

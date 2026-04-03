@@ -65,7 +65,9 @@ try:
 
     cmds.currentTime(1, edit=True)
     cmds.select([mag], replace=True)
+    before_add = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     panel._add_object()
+    after_add = cmds.xform(mag, query=True, worldSpace=True, translation=True)
     start_in_place_text = panel.start_in_place_check.text()
     start_in_place_checked = panel.start_in_place_check.isChecked()
     initial_scale = cmds.xform(mag, query=True, relative=True, scale=True)
@@ -161,6 +163,8 @@ try:
     result = {
         "ok": True,
         "add_object_text": panel.add_object_button.text(),
+        "before_add": before_add,
+        "after_add": after_add,
         "start_in_place_text": start_in_place_text,
         "start_in_place_checked": start_in_place_checked,
         "pick_parent_text": panel.use_target_button.text(),
@@ -225,6 +229,12 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
 
     if result.get("add_object_text") != "Add Object":
+        raise AssertionError(json.dumps(result, indent=2))
+    before_add = result.get("before_add") or []
+    after_add = result.get("after_add") or []
+    if len(before_add) != 3 or len(after_add) != 3:
+        raise AssertionError(json.dumps(result, indent=2))
+    if any(abs(float(before_add[index]) - float(after_add[index])) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("start_in_place_text") != "Stay In Current Position At Start?":
         raise AssertionError(json.dumps(result, indent=2))

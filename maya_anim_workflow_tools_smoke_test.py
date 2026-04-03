@@ -188,9 +188,12 @@ def run():
     parenting_controller = controller.dynamic_parenting_controller
     _assert(parenting_controller is not None, "Dynamic Parenting controller should exist in the combined tool")
     cmds.currentTime(8, edit=True)
+    before_add = _translation(driven_a)
     cmds.select([driven_a, driven_b], replace=True)
     success, message = parenting_controller.add_driven_from_selection()
     _assert(success, message)
+    after_add = _translation(driven_a)
+    _assert(all(abs(before_add[index] - after_add[index]) < 0.01 for index in range(3)), "Add Object should keep the driven control where it was placed")
     payloads = parenting_controller.setup_payloads(from_selection=False)
     _assert(len(payloads) == 2, "Expected two scene-backed parenting setups")
     setup_lookup = {item["driven"]: item for item in payloads}
