@@ -315,15 +315,19 @@ try:
     controller = anim_window.controller
     parenting_controller = controller.dynamic_parenting_controller
 
-    driven = _create_transform("dynamicDriven_CTRL", parent=test_group, translation=(0.0, 0.0, 0.0))
+    driven = _create_transform("dynamicDriven_CTRL", parent=test_group, translation=(2.0, 1.0, -1.5))
     hand_driver = _create_transform("dynamicHand_CTRL", parent=test_group, translation=(6.0, 0.0, 0.0))
     gun_driver = _create_transform("dynamicGun_CTRL", parent=test_group, translation=(10.0, 2.0, 0.0))
     starting_setup_count = len(parenting_controller.setup_payloads(from_selection=False))
     cmds.currentTime(1, edit=True)
     _select([driven])
+    before_add = _world_translation(driven)
     add_success, add_message = parenting_controller.add_driven_from_selection()
     if not add_success:
         raise RuntimeError("Dynamic Parenting add failed: {0}".format(add_message))
+    after_add = _world_translation(driven)
+    if any(abs(float(before_add[index]) - float(after_add[index])) > 0.01 for index in range(3)):
+        raise RuntimeError("Dynamic Parenting add should keep the driven object in place when the start-position option is on.")
     hand_before = _world_translation(driven)
     _select([driven, hand_driver])
     hand_pick_success, hand_pick_message = parenting_controller.set_pending_target_from_selection()
@@ -673,8 +677,10 @@ try:
             "rig_scale_panel_state": _panel_snapshot(anim_window.rig_scale_tab, anim_window.rig_scale_panel),
         }},
         "dynamic_parenting": {{
-            "add_message": add_message,
-            "hand_pick_message": hand_pick_message,
+        "add_message": add_message,
+        "before_add": before_add,
+        "after_add": after_add,
+        "hand_pick_message": hand_pick_message,
             "hand_switch_message": hand_switch_message,
             "hand_blend_values": hand_blend_values,
             "gun_pick_message": gun_pick_message,
