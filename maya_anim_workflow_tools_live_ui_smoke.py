@@ -294,23 +294,23 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if (parenting_panel_state.get("size") or [0, 0])[1] < 200:
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_add_object_text") != "Add Picked Object":
+    if main.get("parenting_add_object_text") != "Add Constrained Object":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_remove_object_text") != "Remove Picked Object":
+    if main.get("parenting_remove_object_text") != "Remove Constrained Object":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_pick_parent_text") != "Pick Parent From Selection":
+    if main.get("parenting_pick_parent_text") != "Use Picked Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_picked_text") != "Parent To Picked Parent":
+    if main.get("parenting_parent_to_picked_text") != "Switch To Picked Parent":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_add_parent_text") != "Save Picked Parent In List":
+    if main.get("parenting_add_parent_text") != "Add Picked Parent Choice":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_row_text") != "Parent Fully To Picked Row":
+    if main.get("parenting_parent_to_row_text") != "Switch To Picked Row":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_parent_to_world_text") != "Parent To World":
+    if main.get("parenting_parent_to_world_text") != "Switch To World":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_apply_weights_text") != "Blend Using Shown Weights":
+    if main.get("parenting_apply_weights_text") != "Key Shown Blend (Advanced)":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("parenting_fix_blend_text") != "Keep Current Blend Here":
+    if main.get("parenting_fix_blend_text") != "Fix Pop On This Frame":
         raise AssertionError(json.dumps(payload, indent=2))
     if not main.get("has_parenting_event_list"):
         raise AssertionError(json.dumps(payload, indent=2))

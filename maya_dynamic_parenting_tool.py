@@ -48,6 +48,7 @@ TARGET_LOCATOR_SUFFIX = "_adpTarget_LOC"
 DRIVEN_CONSTRAINT_SUFFIX = "_adpDriven_parentConstraint"
 FOLLOW_CONSTRAINT_SUFFIX = "_adpFollow_parentConstraint"
 EPSILON = 1.0e-4
+DEFAULT_SWITCH_STEP = 1.0
 
 
 def _debug(message):
@@ -432,7 +433,7 @@ class MayaDynamicParentingController(object):
         if existing:
             data = _load_setup_data(existing)
             if data:
-                return data, False, "{0} is already in the parenting list.".format(data["label"])
+                return data, False, "{0} is already in the constrained-object list.".format(data["label"])
 
         root_group, _world_locator = _ensure_root_hierarchy()
         safe_name = _safe_node_name(driven_node)
@@ -458,7 +459,7 @@ class MayaDynamicParentingController(object):
         data = _load_setup_data(setup_group)
         self.active_setup_group = setup_group
         self.maintain_offset = True
-        return data, True, "Added {0} to the parenting list.".format(_short_name(driven_node))
+        return data, True, "Added {0} as a constrained object.".format(_short_name(driven_node))
 
     def add_driven_from_nodes(self, driven_nodes):
         created = []
@@ -482,19 +483,19 @@ class MayaDynamicParentingController(object):
     def remove_active_setup(self):
         setup = self.current_setup()
         if not setup:
-            return False, "Pick an object from the list first."
+            return False, "Pick a constrained object from the list first."
         label = setup["label"]
         try:
             cmds.delete(setup["setup_group"])
         except Exception:
             pass
         self.active_setup_group = ""
-        return True, "Removed {0} from the parenting list.".format(label)
+        return True, "Removed {0} from the constrained-object list.".format(label)
 
     def rename_active_setup(self, label_text):
         setup = self.current_setup()
         if not setup:
-            return False, "Pick an object from the list first."
+            return False, "Pick a constrained object from the list first."
         label_text = (label_text or "").strip() or _short_name(setup["driven"])
         _set_string_attr(setup["setup_group"], "adpLabel", label_text)
         return True, "Renamed this list entry to {0}.".format(label_text)
@@ -502,13 +503,13 @@ class MayaDynamicParentingController(object):
     def set_pending_target_from_selection(self):
         setup = self.current_setup()
         if not setup:
-            return False, "Add or pick the object that should switch parents first."
+            return False, "Add or pick the constrained object first."
         for node_name in reversed(_selected_transforms()):
             if node_name == setup["driven"]:
                 continue
             self.pending_target_node = node_name
-            return True, "Picked {0} as the next parent/object.".format(_short_name(node_name))
-        return False, "Pick the prop first, then also pick the hand, gun, or object it should follow."
+            return True, "Picked {0} as the next parent choice.".format(_short_name(node_name))
+        return False, "Pick the constrained object first, then also pick the hand, gun, or object it should follow."
 
     def _target_entry_by_id(self, setup, target_id):
         for target in setup["targets"]:
@@ -540,7 +541,7 @@ class MayaDynamicParentingController(object):
     def add_targets_from_nodes(self, target_nodes):
         setup = self.current_setup()
         if not setup:
-            return False, "Add or pick the prop or object that should switch parents first."
+            return False, "Add or pick the constrained object first."
         targets = list(setup["targets"])
         added_labels = []
         for target_node in _dedupe_preserve_order(target_nodes or []):
@@ -581,17 +582,17 @@ class MayaDynamicParentingController(object):
     def add_targets_from_selection(self):
         setup = self.current_setup()
         if not setup:
-            return False, "Add or pick the prop or object that should switch parents first."
+            return False, "Add or pick the constrained object first."
         target_nodes = [node_name for node_name in _selected_transforms() if node_name != setup["driven"]]
         return self.add_targets_from_nodes(target_nodes)
 
     def set_maintain_offset(self, enabled):
         setup = self.current_setup()
         if not setup:
-            return False, "Pick an object from the list first."
+            return False, "Pick a constrained object from the list first."
         cmds.setAttr(setup["setup_group"] + ".adpMaintainOffset", int(bool(enabled)))
         self.maintain_offset = bool(enabled)
-        return True, "Keep Current Position When Switching is now {0}.".format("on" if enabled else "off")
+        return True, "Keep Current Position When It Switches is now {0}.".format("on" if enabled else "off")
 
     def current_weights(self, setup=None):
         setup = setup or self.current_setup()
@@ -601,6 +602,31 @@ class MayaDynamicParentingController(object):
         for target in setup["targets"]:
             weights[target["id"]] = _constraint_weight(setup["driven_constraint"], target["locator"])
         return weights
+
+    def _sanitize_weight_map(self, setup, weight_map):
+        sanitized = {}
+        total = 0.0
+        for target in setup["targets"]:
+            value = float(weight_map.get(target["id"], 0.0))
+            value = max(0.0, min(1.0, value))
+            sanitized[target["id"]] = value
+            total += value
+        return sanitized, total
+
+    def _active_weight_labels(self, setup, weight_map):
+        labels = []
+        for target in setup["targets"]:
+            weight_value = float(weight_map.get(target["id"], 0.0))
+            if weight_value > EPSILON:
+                labels.append("{0} {1:.2f}".format(target["label"], weight_value))
+        return labels
+
+    def _active_target_names(self, setup, weight_map):
+        names = []
+        for target in setup["targets"]:
+            if float(weight_map.get(target["id"], 0.0)) > EPSILON:
+                names.append(target["label"])
+        return names
 
     def _reseed_target(self, setup, target_entry, maintain_offset):
         locator_name = target_entry["locator"]
@@ -649,43 +675,101 @@ class MayaDynamicParentingController(object):
         _save_event_log(setup["setup_group"], event_log)
         setup["event_log"] = event_log
 
+    def _key_weight_map_on_frame(self, setup, weight_map, maintain_offset, frame_value, action_label=None, record_event=False, reseed_active=False):
+        original_frame = float(cmds.currentTime(query=True))
+        frame_value = float(frame_value)
+        changed_time = abs(original_frame - frame_value) >= EPSILON
+        if changed_time:
+            cmds.currentTime(frame_value, edit=True)
+        try:
+            if reseed_active:
+                for target in setup["targets"]:
+                    if float(weight_map.get(target["id"], 0.0)) > EPSILON:
+                        self._reseed_target(setup, target, maintain_offset)
+                self._save_targets(setup, setup["targets"])
+            constraint_weights = {}
+            for target in setup["targets"]:
+                constraint_weights[target["locator"]] = float(weight_map.get(target["id"], 0.0))
+            _set_constraint_weights(setup["driven_constraint"], constraint_weights, keyframe=True)
+            _set_keyable_channels(setup["driven"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
+            if record_event and action_label:
+                self._record_event(setup, action_label, weight_map)
+        finally:
+            if changed_time:
+                cmds.currentTime(original_frame, edit=True)
+
     def apply_weight_map(self, weight_map, action_label="blend"):
         setup = self.current_setup()
         if not setup:
-            return False, "Add or pick the prop or object that should switch parents first."
+            return False, "Add or pick the constrained object first."
         maintain_offset = bool(self.maintain_offset)
         cmds.setAttr(setup["setup_group"] + ".adpMaintainOffset", int(maintain_offset))
-        sanitized = {}
-        total = 0.0
-        for target in setup["targets"]:
-            value = float(weight_map.get(target["id"], 0.0))
-            value = max(0.0, min(1.0, value))
-            sanitized[target["id"]] = value
-            total += value
+        sanitized, total = self._sanitize_weight_map(setup, weight_map)
         if total <= EPSILON:
             return False, "Turn at least one parent on before you key the weights."
-        for target in setup["targets"]:
-            if sanitized.get(target["id"], 0.0) > EPSILON:
-                self._reseed_target(setup, target, maintain_offset)
-        self._save_targets(setup, setup["targets"])
-        constraint_weights = {}
-        for target in setup["targets"]:
-            constraint_weights[target["locator"]] = sanitized.get(target["id"], 0.0)
-        _set_constraint_weights(setup["driven_constraint"], constraint_weights, keyframe=True)
-        _set_keyable_channels(setup["driven"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
-        self._record_event(setup, action_label, sanitized)
+        self._key_weight_map_on_frame(
+            setup,
+            sanitized,
+            maintain_offset,
+            frame_value=float(cmds.currentTime(query=True)),
+            action_label=action_label,
+            record_event=True,
+            reseed_active=True,
+        )
         return True, "Saved the parent weights on frame {0}.".format(_frame_display(cmds.currentTime(query=True)))
+
+    def switch_weight_map_next_frame(self, weight_map, action_label="switch"):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Add or pick the constrained object first."
+        maintain_offset = bool(self.maintain_offset)
+        cmds.setAttr(setup["setup_group"] + ".adpMaintainOffset", int(maintain_offset))
+        sanitized, total = self._sanitize_weight_map(setup, weight_map)
+        if total <= EPSILON:
+            return False, "Turn at least one parent on before you switch."
+        current_frame = float(cmds.currentTime(query=True))
+        target_frame = current_frame + DEFAULT_SWITCH_STEP
+        current_weights = self.current_weights(setup)
+        self._key_weight_map_on_frame(
+            setup,
+            current_weights,
+            maintain_offset,
+            frame_value=current_frame,
+            action_label=None,
+            record_event=False,
+            reseed_active=False,
+        )
+        self._key_weight_map_on_frame(
+            setup,
+            sanitized,
+            maintain_offset,
+            frame_value=target_frame,
+            action_label=action_label,
+            record_event=True,
+            reseed_active=True,
+        )
+        cmds.currentTime(target_frame, edit=True)
+        active_target_names = self._active_target_names(setup, sanitized)
+        if len(active_target_names) == 1:
+            target_text = active_target_names[0]
+        else:
+            target_text = ", ".join(active_target_names)
+        return True, "Kept the old parent on frame {0} and switched to {1} on frame {2}.".format(
+            _frame_display(current_frame),
+            target_text,
+            _frame_display(target_frame),
+        )
 
     def parent_fully_to_target(self, target_id, action_label="switch"):
         setup = self.current_setup()
         if not setup:
-            return False, "Add or pick the prop or object that should switch parents first."
+            return False, "Add or pick the constrained object first."
         if not self._target_entry_by_id(setup, target_id):
             return False, "Pick a parent row first."
         weight_map = {}
         for target in setup["targets"]:
             weight_map[target["id"]] = 1.0 if target["id"] == target_id else 0.0
-        return self.apply_weight_map(weight_map, action_label=action_label)
+        return self.switch_weight_map_next_frame(weight_map, action_label=action_label)
 
     def parent_to_world(self):
         return self.parent_fully_to_target("world", action_label="world")
@@ -693,7 +777,7 @@ class MayaDynamicParentingController(object):
     def apply_pending_target(self):
         setup = self.current_setup()
         if not setup:
-            return False, "Add or pick the prop or object that should switch parents first."
+            return False, "Add or pick the constrained object first."
         target_node = self.pending_target_node
         if not target_node or not cmds.objExists(target_node):
             return False, "Pick the next hand, gun, prop, or object first."
@@ -709,13 +793,13 @@ class MayaDynamicParentingController(object):
     def reseed_active_weights(self):
         setup = self.current_setup()
         if not setup:
-            return False, "Pick an object from the list first."
+            return False, "Pick a constrained object from the list first."
         return self.apply_weight_map(self.current_weights(setup), action_label="reseed")
 
     def remove_target_ids(self, target_ids):
         setup = self.current_setup()
         if not setup:
-            return False, "Pick an object from the list first."
+            return False, "Pick a constrained object from the list first."
         target_ids = set(target_ids or [])
         targets = []
         removed = []
@@ -772,13 +856,13 @@ class MayaDynamicParentingController(object):
     def summary_text(self, setup=None):
         setup = setup or self.current_setup()
         if not setup:
-            return "Add a prop or control, then add the hands, guns, world, or other objects it should follow."
+            return "Add a constrained object, then add the hands, guns, world, or other objects it should follow."
         current_weights = self.current_weights(setup)
         lines = [
-            "Object: {0}".format(setup["label"]),
+            "Constrained object: {0}".format(setup["label"]),
             "Real control: {0}".format(setup["driven"]),
-            "Keep Current Position When Switching: {0}".format("On" if setup["maintain_offset"] else "Off"),
-            "Possible parents:",
+            "Keep Current Position When It Switches: {0}".format("On" if setup["maintain_offset"] else "Off"),
+            "Available parent choices:",
         ]
         for target in setup["targets"]:
             lines.append("- {0}: {1:.2f}".format(target["label"], current_weights.get(target["id"], 0.0)))
@@ -809,18 +893,24 @@ if QtWidgets:
         def _build_ui(self):
             main_layout = QtWidgets.QVBoxLayout(self)
             intro = QtWidgets.QLabel(
-                "Use this for props like magazines, guns, hats, or anything that needs to switch between hand, gun, world, or mixed parents without baking."
+                "Use this when a prop or control needs to switch between hand, gun, world, or mixed parents without baking."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
+
+            helper_text = QtWidgets.QLabel(
+                "Simple switch buttons keep the old parent on this frame and switch to the new one on the next frame. Use the blend buttons only when you want mixed parent weights."
+            )
+            helper_text.setWordWrap(True)
+            main_layout.addWidget(helper_text)
 
             object_row = QtWidgets.QHBoxLayout()
             self.objects_line = QtWidgets.QLineEdit()
             self.objects_line.setReadOnly(True)
             self.objects_line.setPlaceholderText("Pick the prop or control that should switch parents, then add it here.")
-            self.add_object_button = QtWidgets.QPushButton("Add Picked Object")
-            self.remove_object_button = QtWidgets.QPushButton("Remove Picked Object")
-            object_row.addWidget(QtWidgets.QLabel("Picked Object"))
+            self.add_object_button = QtWidgets.QPushButton("Add Constrained Object")
+            self.remove_object_button = QtWidgets.QPushButton("Remove Constrained Object")
+            object_row.addWidget(QtWidgets.QLabel("Constrained Object"))
             object_row.addWidget(self.objects_line, 1)
             object_row.addWidget(self.add_object_button)
             object_row.addWidget(self.remove_object_button)
@@ -833,7 +923,7 @@ if QtWidgets:
             name_column = QtWidgets.QVBoxLayout()
             self.list_name_line = QtWidgets.QLineEdit()
             self.list_name_line.setPlaceholderText("Friendly list name, like Magazine")
-            self.rename_button = QtWidgets.QPushButton("Rename In List")
+            self.rename_button = QtWidgets.QPushButton("Rename Entry")
             name_column.addWidget(QtWidgets.QLabel("Friendly List Name"))
             name_column.addWidget(self.list_name_line)
             name_column.addWidget(self.rename_button)
@@ -841,22 +931,22 @@ if QtWidgets:
             list_row.addLayout(name_column)
             main_layout.addLayout(list_row)
 
-            self.maintain_offset_check = QtWidgets.QCheckBox("Keep Current Position When Switching")
+            self.maintain_offset_check = QtWidgets.QCheckBox("Keep Current Position When It Switches")
             self.maintain_offset_check.setChecked(True)
-            self.maintain_offset_check.setToolTip("Leave this on if the prop should stay where it is on the switch frame. Turn it off if it should snap to the new parent.")
+            self.maintain_offset_check.setToolTip("Leave this on if the prop should stay where it is when the new parent turns on. Turn it off if it should snap to the new parent.")
             main_layout.addWidget(self.maintain_offset_check)
 
             target_row = QtWidgets.QHBoxLayout()
             self.target_line = QtWidgets.QLineEdit()
             self.target_line.setReadOnly(True)
             self.target_line.setPlaceholderText("Pick a hand, gun, world helper, or other object.")
-            self.use_target_button = QtWidgets.QPushButton("Pick Parent From Selection")
-            self.use_target_button.setToolTip("Read the extra selected hand, gun, or object into the Picked Parent box.")
-            self.parent_to_picked_button = QtWidgets.QPushButton("Parent To Picked Parent")
-            self.parent_to_picked_button.setToolTip("Switch to the picked parent right now and key it. If it is new, it will be added to the list first.")
-            self.add_target_button = QtWidgets.QPushButton("Save Picked Parent In List")
-            self.add_target_button.setToolTip("Add the picked hand, gun, or object to the parent list without switching to it yet.")
-            target_row.addWidget(QtWidgets.QLabel("Picked Parent / Object"))
+            self.use_target_button = QtWidgets.QPushButton("Use Picked Parent")
+            self.use_target_button.setToolTip("Read the extra selected hand, gun, or object into the Next Parent box.")
+            self.parent_to_picked_button = QtWidgets.QPushButton("Switch To Picked Parent")
+            self.parent_to_picked_button.setToolTip("Keep the current parent on this frame, then switch to the picked parent on the next frame. If it is new, it will be added to the list first.")
+            self.add_target_button = QtWidgets.QPushButton("Add Picked Parent Choice")
+            self.add_target_button.setToolTip("Add the picked hand, gun, or object to the parent-choice list without switching to it yet.")
+            target_row.addWidget(QtWidgets.QLabel("Next Parent"))
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
             target_row.addWidget(self.parent_to_picked_button)
@@ -864,7 +954,7 @@ if QtWidgets:
             main_layout.addLayout(target_row)
 
             self.targets_table = QtWidgets.QTableWidget(0, 4)
-            self.targets_table.setHorizontalHeaderLabels(["Parent", "Weight", "State", "Quick"])
+            self.targets_table.setHorizontalHeaderLabels(["Parent Choice", "Weight", "Now", "Quick"])
             self.targets_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             self.targets_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
             self.targets_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -876,15 +966,15 @@ if QtWidgets:
             main_layout.addWidget(self.targets_table, 1)
 
             action_row = QtWidgets.QHBoxLayout()
-            self.parent_to_row_button = QtWidgets.QPushButton("Parent Fully To Picked Row")
-            self.parent_to_row_button.setToolTip("Switch all the way to the picked parent row and turn the others off.")
-            self.parent_to_world_button = QtWidgets.QPushButton("Parent To World")
-            self.parent_to_world_button.setToolTip("Turn World on and turn the other parents off.")
-            self.apply_weights_button = QtWidgets.QPushButton("Blend Using Shown Weights")
-            self.apply_weights_button.setToolTip("Key the shown parent weights so you can blend between World, gun, hands, or anything else.")
-            self.fix_pop_button = QtWidgets.QPushButton("Keep Current Blend Here")
+            self.parent_to_row_button = QtWidgets.QPushButton("Switch To Picked Row")
+            self.parent_to_row_button.setToolTip("Keep the current parent on this frame, then switch fully to the picked parent row on the next frame.")
+            self.parent_to_world_button = QtWidgets.QPushButton("Switch To World")
+            self.parent_to_world_button.setToolTip("Keep the current parent on this frame, then switch to World on the next frame.")
+            self.apply_weights_button = QtWidgets.QPushButton("Key Shown Blend (Advanced)")
+            self.apply_weights_button.setToolTip("Key the shown parent weights on this frame when you want a real blend, like half World and half gun.")
+            self.fix_pop_button = QtWidgets.QPushButton("Fix Pop On This Frame")
             self.fix_pop_button.setToolTip("Rebuild the current parent blend on this frame so the object stays where it is.")
-            self.remove_target_button = QtWidgets.QPushButton("Remove Picked Parent")
+            self.remove_target_button = QtWidgets.QPushButton("Remove Picked Parent Choice")
             action_row.addWidget(self.parent_to_row_button)
             action_row.addWidget(self.parent_to_world_button)
             action_row.addWidget(self.apply_weights_button)
@@ -990,9 +1080,10 @@ if QtWidgets:
                     spin_box.setValue(float(payload["current_weights"].get(target["id"], 0.0)))
                     self.targets_table.setCellWidget(row_index, 1, spin_box)
                     self._weight_widgets[target["id"]] = spin_box
-                    state_item = QtWidgets.QTableWidgetItem("On" if payload["current_weights"].get(target["id"], 0.0) > EPSILON else "Off")
+                    state_item = QtWidgets.QTableWidgetItem("On Now" if payload["current_weights"].get(target["id"], 0.0) > EPSILON else "Off Now")
                     self.targets_table.setItem(row_index, 2, state_item)
-                    quick_button = QtWidgets.QPushButton("Parent Here")
+                    quick_button = QtWidgets.QPushButton("Switch Next Frame")
+                    quick_button.setToolTip("Keep the current parent on this frame, then switch fully to this parent on the next frame.")
                     quick_button.clicked.connect(lambda _checked=False, target_id=target["id"]: self._parent_to_target_id(target_id))
                     self.targets_table.setCellWidget(row_index, 3, quick_button)
                 for event in self.controller.event_items(setup):

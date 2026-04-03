@@ -223,7 +223,7 @@ def run():
     gun_target_entry = next(target for target in driven_a_setup["targets"] if target["driver"] == _long_name(gun_target))
     _assert(abs(current_weights.get(gun_target_entry["id"], 0.0) - 1.0) < 0.001, "Driven A should fully follow the gun target after the second switch")
 
-    cmds.currentTime(11, edit=True)
+    cmds.currentTime(12, edit=True)
     success, message = parenting_controller.apply_weight_map(
         {
             "world": 0.5,
@@ -237,17 +237,17 @@ def run():
     _assert(abs(current_weights.get("world", 0.0) - 0.5) < 0.001, "World should be half-on in the blend step")
     _assert(abs(current_weights.get(gun_target_entry["id"], 0.0) - 0.5) < 0.001, "Gun should be half-on in the blend step")
 
-    cmds.currentTime(12, edit=True)
+    cmds.currentTime(13, edit=True)
     success, message = parenting_controller.parent_to_world()
     _assert(success, message)
     current_weights = parenting_controller.current_weights(parenting_controller.current_setup())
     _assert(abs(current_weights.get("world", 0.0) - 1.0) < 0.001, "World should be fully on after the world switch")
     driven_a_events = parenting_controller.event_items(parenting_controller.current_setup())
     _assert(len(driven_a_events) == 4, "Driven A should have hand, gun, blend, and world events saved")
-    _assert(driven_a_events[0]["display"] == "F8: Switch -> hand_ctrl 1.00", "First dynamic-parenting event should switch to the hand")
-    _assert(driven_a_events[1]["display"] == "F10: Switch -> gun_ctrl 1.00", "Second dynamic-parenting event should switch to the gun")
-    _assert(driven_a_events[2]["display"] == "F11: Blend -> World 0.50, gun_ctrl 0.50", "Third dynamic-parenting event should save the weight blend")
-    _assert(driven_a_events[3]["display"] == "F12: World -> World 1.00", "Fourth dynamic-parenting event should return to world")
+    _assert(driven_a_events[0]["display"] == "F9: Switch -> hand_ctrl 1.00", "First dynamic-parenting event should switch to the hand on the next frame")
+    _assert(driven_a_events[1]["display"] == "F11: Switch -> gun_ctrl 1.00", "Second dynamic-parenting event should switch to the gun on the next frame")
+    _assert(driven_a_events[2]["display"] == "F12: Blend -> World 0.50, gun_ctrl 0.50", "Third dynamic-parenting event should save the weight blend")
+    _assert(driven_a_events[3]["display"] == "F14: World -> World 1.00", "Fourth dynamic-parenting event should return to world on the next frame")
 
     pivot_a = cmds.createNode("transform", name="pivotA_ctrl")
     pivot_b = cmds.createNode("transform", name="pivotB_ctrl")

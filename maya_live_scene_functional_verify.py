@@ -345,7 +345,7 @@ try:
     after_switch = _world_translation(driven)
     current_setup = parenting_controller.current_setup()
     target_lookup = {target["label"]: target["id"] for target in current_setup.get("targets") or []}
-    cmds.currentTime(7, edit=True)
+    cmds.currentTime(8, edit=True)
     blend_success, blend_message = parenting_controller.apply_weight_map(
         {
             "world": 0.5,
@@ -357,7 +357,7 @@ try:
     if not blend_success:
         raise RuntimeError("Dynamic Parenting blend failed: {0}".format(blend_message))
     blend_weights = parenting_controller.current_weights(parenting_controller.current_setup())
-    cmds.currentTime(9, edit=True)
+    cmds.currentTime(10, edit=True)
     world_success, world_message = parenting_controller.parent_to_world()
     if not world_success:
         raise RuntimeError("Dynamic Parenting world switch failed: {0}".format(world_message))
@@ -816,15 +816,15 @@ result = namespace.get("result")
     if workflow.get("tabs") != ["Quick Start", "Dynamic Parenting", "Hand / Foot Hold", "Dynamic Pivot", "Universal IK/FK", "Onion Skin", "Rotation Doctor", "Skinning Cleanup", "Rig Scale", "Video Reference", "Timeline Notes"]:
         raise AssertionError(json.dumps(result, indent=2))
     embedded_tools = workflow.get("embedded_tools") or {}
-    if embedded_tools.get("parenting_add_object_text") != "Add Picked Object":
+    if embedded_tools.get("parenting_add_object_text") != "Add Constrained Object":
         raise AssertionError(json.dumps(result, indent=2))
-    if embedded_tools.get("parenting_pick_parent_text") != "Pick Parent From Selection":
+    if embedded_tools.get("parenting_pick_parent_text") != "Use Picked Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if embedded_tools.get("parenting_parent_to_picked_text") != "Parent To Picked Parent":
+    if embedded_tools.get("parenting_parent_to_picked_text") != "Switch To Picked Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if embedded_tools.get("parenting_world_text") != "Parent To World":
+    if embedded_tools.get("parenting_world_text") != "Switch To World":
         raise AssertionError(json.dumps(result, indent=2))
-    if embedded_tools.get("parenting_blend_text") != "Blend Using Shown Weights":
+    if embedded_tools.get("parenting_blend_text") != "Key Shown Blend (Advanced)":
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("contact_hold_apply_text") != "Save New Hold":
         raise AssertionError(json.dumps(result, indent=2))
@@ -869,13 +869,13 @@ result = namespace.get("result")
     switch_after = dynamic_parenting.get("switch_after") or []
     if len(switch_before) != 3 or len(switch_after) != 3 or any(abs(float(switch_before[index]) - float(switch_after[index])) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
-    if dynamic_parenting.get("event_items", [None])[0] != "F1: Switch -> dynamicHand_CTRL 1.00":
+    if dynamic_parenting.get("event_items", [None])[0] != "F2: Switch -> dynamicHand_CTRL 1.00":
         raise AssertionError(json.dumps(result, indent=2))
-    if dynamic_parenting.get("event_items", [None, None])[1] != "F6: Switch -> dynamicGun_CTRL 1.00":
+    if dynamic_parenting.get("event_items", [None, None])[1] != "F7: Switch -> dynamicGun_CTRL 1.00":
         raise AssertionError(json.dumps(result, indent=2))
-    if dynamic_parenting.get("event_items", [None, None, None])[2] != "F7: Blend -> World 0.50, dynamicGun_CTRL 0.50":
+    if dynamic_parenting.get("event_items", [None, None, None])[2] != "F8: Blend -> World 0.50, dynamicGun_CTRL 0.50":
         raise AssertionError(json.dumps(result, indent=2))
-    if dynamic_parenting.get("event_items", [None, None, None, None])[3] != "F9: World -> World 1.00":
+    if dynamic_parenting.get("event_items", [None, None, None, None])[3] != "F11: World -> World 1.00":
         raise AssertionError(json.dumps(result, indent=2))
     contact_hold = workflow.get("contact_hold") or {}
     if len(contact_hold.get("controls") or []) != 2:

@@ -90,7 +90,7 @@ try:
     second_driver_line = panel.target_line.text()
     second_setup = panel.controller.current_setup()
 
-    cmds.currentTime(7, edit=True)
+    cmds.currentTime(8, edit=True)
     setup_after_switch = panel.controller.current_setup()
     target_lookup = {target["label"]: target["id"] for target in setup_after_switch.get("targets") or []}
     for target_id, spin_box in panel._weight_widgets.items():
@@ -104,7 +104,7 @@ try:
     blend_summary = panel.summary_box.toPlainText()
     blend_status = panel.status_label.text()
 
-    cmds.currentTime(9, edit=True)
+    cmds.currentTime(10, edit=True)
     panel._parent_to_world()
     release_summary = panel.summary_box.toPlainText()
     release_status = panel.status_label.text()
@@ -165,21 +165,21 @@ except Exception:
     if not result.get("ok"):
         raise AssertionError(json.dumps(payload, indent=2))
 
-    if result.get("add_object_text") != "Add Picked Object":
+    if result.get("add_object_text") != "Add Constrained Object":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("pick_parent_text") != "Pick Parent From Selection":
+    if result.get("pick_parent_text") != "Use Picked Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("parent_to_picked_text") != "Parent To Picked Parent":
+    if result.get("parent_to_picked_text") != "Switch To Picked Parent":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("save_parent_text") != "Save Picked Parent In List":
+    if result.get("save_parent_text") != "Add Picked Parent Choice":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("row_switch_text") != "Parent Fully To Picked Row":
+    if result.get("row_switch_text") != "Switch To Picked Row":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("world_text") != "Parent To World":
+    if result.get("world_text") != "Switch To World":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("blend_text") != "Blend Using Shown Weights":
+    if result.get("blend_text") != "Key Shown Blend (Advanced)":
         raise AssertionError(json.dumps(result, indent=2))
-    if result.get("fix_text") != "Keep Current Blend Here":
+    if result.get("fix_text") != "Fix Pop On This Frame":
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("jump_text") != "Jump To Picked Switch":
         raise AssertionError(json.dumps(result, indent=2))
@@ -202,15 +202,15 @@ except Exception:
     event_items = result.get("event_items") or []
     if len(event_items) != 4:
         raise AssertionError(json.dumps(result, indent=2))
-    if "F1: Switch -> reloadHand_CTRL 1.00" not in event_items[0]:
+    if "F2: Switch -> reloadHand_CTRL 1.00" not in event_items[0]:
         raise AssertionError(json.dumps(result, indent=2))
-    if "F6: Switch -> reloadGun_CTRL 1.00" not in event_items[1]:
+    if "F7: Switch -> reloadGun_CTRL 1.00" not in event_items[1]:
         raise AssertionError(json.dumps(result, indent=2))
-    if "F7: Blend -> World 0.50, reloadGun_CTRL 0.50" not in event_items[2]:
+    if "F8: Blend -> World 0.50, reloadGun_CTRL 0.50" not in event_items[2]:
         raise AssertionError(json.dumps(result, indent=2))
-    if "F9: World -> World 1.00" not in event_items[3]:
+    if "F11: World -> World 1.00" not in event_items[3]:
         raise AssertionError(json.dumps(result, indent=2))
-    if abs(float(result.get("jumped_frame", 0.0)) - 6.0) > 0.01:
+    if abs(float(result.get("jumped_frame", 0.0)) - 7.0) > 0.01:
         raise AssertionError(json.dumps(result, indent=2))
 
     before_first_switch = result.get("before_first_switch") or []
