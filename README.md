@@ -209,7 +209,7 @@ maya_contact_hold.launch_maya_contact_hold()
 
 - `Quick Start`: in-tool workflow reminders and troubleshooting notes
 - `Dynamic Parenting`: reload and prop hand-off helpers so one control can swap between hands, props, or world without a pop
-- `Hand / Foot Hold`: live editable planted-contact helper that can lock chosen world axes over a chosen frame range, then be turned on, turned off, or updated later without baking every frame
+- `Hand / Foot Hold`: live editable planted-contact helper that can lock chosen world axes over a chosen frame range, save many hold rows per control, then turn specific rows on, off, update them, rename them in the list, or delete them later without baking every frame
 - `Dynamic Pivot`: temporary shared pivot authoring that lets you move the pivot anywhere before applying rotation
 - `Universal IK/FK`: profile-driven FK/IK matching and switching with frame-1 plus current-frame keying, separate FK and IK controller fields, and a stronger first-pass auto-detect that now prefers real animator controls over nearby helper transforms, while still expecting user review
 - `Onion Skin`: the full stepped multi-root mesh ghost preview tool, now available inside the global workflow window as its own tab
@@ -270,6 +270,9 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 - Maya Skinning Cleanup currently targets one selected skinned polygon mesh at a time and blocks unsupported extra deformation history such as blendshape stacks.
 - Maya Rig Scale Export is verified for common uniform grouped rigs. Rotated or non-uniform parent groups are warned up front because exact normals can differ after baking scale, so those cases should be checked carefully before Unreal export.
 - Maya Hand / Foot Hold is now a live contact tool rather than a bake pass. You choose the contact range, choose which world axis or axes should stay locked, and the tool creates a reversible setup you can turn on or off later.
+- Maya Hand / Foot Hold now keeps a real `Saved Holds In Scene` list. Each saved row remembers the control, frame range, chosen axes, and whether that row is currently using the saved hold or the original motion.
+- You can now save more than one hold row on the same hand or foot, load a picked row back into the frame and axis controls, update picked rows, delete just one row, or delete all rows from the scene.
+- The `List Name` field is only for the saved-hold table. It gives a friendlier label like `Right Foot` across every saved row for that same control without renaming the real rig node.
 - The `Add Matching Other Side` helper is intentionally conservative. It swaps clear left/right name tokens and refuses to guess if more than one opposite-side control matches.
 - Maya Video Reference no longer relies on Maya loading an MP4 directly into an image plane. Movie files are proxied into an image sequence for the current playback range, which avoids the yellow-X "Unable to load the image file" failure seen with direct MP4 image planes.
 - Maya Video Reference still uses the active viewport to place the tracing card, so clicking the view you want first is still the safest workflow.

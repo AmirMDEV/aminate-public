@@ -127,17 +127,49 @@ def run():
     cmds.currentTime(6, edit=True)
     _assert(abs(float(_world_translation(left_foot)[2]) - anchor_z[left_foot]) <= 0.001, "Re-enabling the hold should restore the saved held Z motion")
 
+    controller.set_selected_hold_locators(
+        [
+            maya_contact_hold._find_hold_locator(left_foot),
+            maya_contact_hold._find_hold_locator(right_foot),
+        ]
+    )
     controller.end_frame = 5
-    success, message = controller.apply_hold()
+    success, message = controller.update_selected_hold()
     _assert(success, message)
     cmds.currentTime(5, edit=True)
     _assert(abs(float(_world_translation(left_foot)[2]) - anchor_z[left_foot]) <= 0.001, "Updated hold should still keep the chosen axis locked inside the new range")
     cmds.currentTime(6, edit=True)
     _assert(abs(float(_world_translation(left_foot)[2]) - anchor_z[left_foot]) > 0.01, "Updated hold should stop affecting frames after the new end frame")
 
+    cmds.select(left_foot, replace=True)
+    success, message = controller.set_controls_from_selection()
+    _assert(success, message)
+    controller.start_frame = 8
+    controller.end_frame = 9
+    controller.keep_rotation = False
+    controller.hold_axes = ("z",)
+    success, message = controller.apply_hold()
+    _assert(success, message)
+    left_entries = maya_contact_hold._hold_entries_for_control(left_foot)
+    _assert(len(left_entries) == 2, "Left foot should be able to store more than one saved hold row")
+
+    controller.set_selected_hold_locators(left_entries)
+    success, message = controller.load_selected_hold()
+    _assert(success, message)
+    success, message = controller.set_control_list_name("Left Foot Friendly")
+    _assert(success, message)
+    renamed_payloads = [maya_contact_hold._hold_payload(item) for item in maya_contact_hold._hold_entries_for_control(left_foot)]
+    _assert(all(item["list_name"] == "Left Foot Friendly" for item in renamed_payloads), "Friendly list rename should update every saved row for the same control")
+
+    controller.set_selected_hold_locators([left_entries[0]])
     success, message = controller.delete_hold()
     _assert(success, message)
-    _assert(not maya_contact_hold._find_hold_locator(left_foot), "Deleting the hold should remove the saved locator")
+    _assert(len(maya_contact_hold._hold_entries_for_control(left_foot)) == 1, "Deleting one saved row should leave the other hold rows alone")
+
+    success, message = controller.delete_all_holds()
+    _assert(success, message)
+    _assert(not maya_contact_hold._find_hold_locator(left_foot), "Deleting all holds should remove saved left-foot locators")
+    _assert(not maya_contact_hold._find_hold_locator(right_foot), "Deleting all holds should remove saved right-foot locators")
 
     suggest_controller = maya_contact_hold.MayaContactHoldController()
     cmds.currentTime(6, edit=True)

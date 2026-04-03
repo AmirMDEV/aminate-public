@@ -11,6 +11,7 @@ import math
 import os
 import re
 import traceback
+import uuid
 
 import maya_skinning_cleanup as skin_cleanup
 
@@ -54,13 +55,19 @@ VALUE_EPSILON = 1.0e-5
 DEFAULT_CONTACT_MIN_FRAMES = 3
 CONTACT_HOLD_GROUP_NAME = "amirContactHold_GRP"
 CONTACT_HOLD_MARKER_ATTR = "amirContactHoldMarker"
+CONTACT_HOLD_HUB_MARKER_ATTR = "amirContactHoldHubMarker"
+CONTACT_HOLD_ID_ATTR = "amirContactHoldId"
+CONTACT_HOLD_LABEL_ATTR = "amirContactHoldLabel"
+CONTACT_HOLD_FRIENDLY_NAME_ATTR = "amirContactHoldFriendlyName"
 CONTACT_HOLD_AXES_ATTR = "amirContactHoldAxes"
 CONTACT_HOLD_START_ATTR = "amirContactHoldStartFrame"
 CONTACT_HOLD_END_ATTR = "amirContactHoldEndFrame"
 CONTACT_HOLD_KEEP_ROTATION_ATTR = "amirContactHoldKeepRotation"
 CONTACT_HOLD_ENABLED_ATTR = "amirContactHoldEnabled"
 CONTACT_HOLD_CONTROL_ATTR = "heldControl"
+CONTACT_HOLD_HUB_ATTR = "holdHub"
 CONTACT_HOLD_SOURCE_LOCATOR_ATTR = "holdSourceLocator"
+CONTACT_HOLD_MANAGED_NODES_ATTR = "managedNodes"
 CONTACT_HOLD_WORLD_SOURCE_DECOMP_ATTR = "holdWorldSourceDecompose"
 CONTACT_HOLD_WORLD_ANCHOR_DECOMP_ATTR = "holdWorldAnchorDecompose"
 CONTACT_HOLD_WORLD_BLEND_ATTR = "holdWorldBlend"
@@ -867,9 +874,549 @@ def _format_report(report):
     return "\n".join(lines).strip()
 
 
+def _safe_token(node_name):
+    return re.sub(r"[^A-Za-z0-9_]+", "_", _short_name(node_name))
+
+
+def _control_list_name(control_node):
+    label = _get_string_attr(control_node, CONTACT_HOLD_FRIENDLY_NAME_ATTR, "").strip()
+    return label or _short_name(control_node)
+
+
+def _set_control_list_name(control_node, label):
+    label = (label or "").strip()
+    if not label:
+        if cmds.attributeQuery(CONTACT_HOLD_FRIENDLY_NAME_ATTR, node=control_node, exists=True):
+            try:
+                cmds.deleteAttr("{0}.{1}".format(control_node, CONTACT_HOLD_FRIENDLY_NAME_ATTR))
+            except Exception:
+                _set_string_attr(control_node, CONTACT_HOLD_FRIENDLY_NAME_ATTR, "")
+        return
+    _set_string_attr(control_node, CONTACT_HOLD_FRIENDLY_NAME_ATTR, label)
+
+
+def _hold_locator_name(control_node, hold_id=None):
+    safe_name = _safe_token(control_node)
+    if hold_id:
+        return "amirContactHold_{0}_{1}_LOC".format(safe_name, str(hold_id).replace("-", "_"))
+    return "amirContactHold_{0}_LOC".format(safe_name)
+
+
+def _hold_hub_name(control_node):
+    return "amirContactHold_{0}_HUB".format(_safe_token(control_node))
+
+
+def _ensure_message_multi_attr(node_name, attr_name):
+    if not cmds.attributeQuery(attr_name, node=node_name, exists=True):
+        cmds.addAttr(node_name, longName=attr_name, attributeType="message", multi=True)
+
+
+def _managed_nodes(hub_node):
+    if not hub_node or not cmds.objExists(hub_node) or not cmds.attributeQuery(CONTACT_HOLD_MANAGED_NODES_ATTR, node=hub_node, exists=True):
+        return []
+    nodes = cmds.listConnections("{0}.{1}".format(hub_node, CONTACT_HOLD_MANAGED_NODES_ATTR), source=True, destination=False) or []
+    return _dedupe_preserve_order(_node_long_name(node_name) for node_name in nodes if node_name and cmds.objExists(node_name))
+
+
+def _register_managed_node(hub_node, node_name):
+    if not hub_node or not node_name or not cmds.objExists(hub_node) or not cmds.objExists(node_name):
+        return node_name
+    node_long = _node_long_name(node_name)
+    if node_long in _managed_nodes(hub_node):
+        return node_long
+    _ensure_message_multi_attr(hub_node, CONTACT_HOLD_MANAGED_NODES_ATTR)
+    next_index = int(cmds.getAttr("{0}.{1}".format(hub_node, CONTACT_HOLD_MANAGED_NODES_ATTR), size=True) or 0)
+    cmds.connectAttr(node_long + ".message", "{0}.{1}[{2}]".format(hub_node, CONTACT_HOLD_MANAGED_NODES_ATTR, next_index), force=True)
+    return node_long
+
+
+def _delete_managed_nodes(hub_node):
+    for node_name in _managed_nodes(hub_node):
+        if cmds.objExists(node_name):
+            try:
+                cmds.delete(node_name)
+            except Exception:
+                pass
+
+
+def _all_hold_hubs():
+    root_group = _contact_hold_group(create=False)
+    if not root_group:
+        return []
+    children = cmds.listRelatives(root_group, children=True, type="transform", fullPath=True) or []
+    return [item for item in children if _get_bool_attr(item, CONTACT_HOLD_HUB_MARKER_ATTR, False)]
+
+
+def _all_hold_locators():
+    root_group = _contact_hold_group(create=False)
+    if not root_group:
+        return []
+    children = cmds.listRelatives(root_group, children=True, type="transform", fullPath=True) or []
+    return [item for item in children if _get_bool_attr(item, CONTACT_HOLD_MARKER_ATTR, False) and not _get_bool_attr(item, CONTACT_HOLD_HUB_MARKER_ATTR, False)]
+
+
+def _hold_entries_for_control(control_node):
+    control_long = _node_long_name(control_node)
+    result = []
+    for locator_node in _all_hold_locators():
+        held_control = _connected_source_node(locator_node, CONTACT_HOLD_CONTROL_ATTR)
+        if held_control == control_long:
+            result.append(_node_long_name(locator_node))
+    return _dedupe_preserve_order(result)
+
+
+def _find_hold_hub(control_node):
+    control_long = _node_long_name(control_node)
+    for hub_node in _all_hold_hubs():
+        held_control = _connected_source_node(hub_node, CONTACT_HOLD_CONTROL_ATTR)
+        if held_control == control_long:
+            return _node_long_name(hub_node)
+    return ""
+
+
+def _ensure_hold_hub(control_node):
+    existing = _find_hold_hub(control_node)
+    if existing and cmds.objExists(existing):
+        return existing
+    root_group = _contact_hold_group(create=True)
+    hub_node = cmds.createNode("transform", name=_hold_hub_name(control_node), parent=root_group)
+    hub_node = _node_long_name(hub_node)
+    cmds.setAttr(hub_node + ".visibility", 0)
+    _set_bool_attr(hub_node, CONTACT_HOLD_HUB_MARKER_ATTR, True)
+    _ensure_message_attr(hub_node, CONTACT_HOLD_CONTROL_ATTR)
+    _ensure_message_attr(hub_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
+    _ensure_message_multi_attr(hub_node, CONTACT_HOLD_MANAGED_NODES_ATTR)
+    _connect_message(control_node, hub_node, CONTACT_HOLD_CONTROL_ATTR)
+    return hub_node
+
+
+def _copy_original_channel_state(target_node, source_node, attribute):
+    source_attr = _channel_source_attr_name(attribute)
+    value_attr = _channel_value_attr_name(attribute)
+    if not cmds.attributeQuery(source_attr, node=source_node, exists=True) and not cmds.attributeQuery(value_attr, node=source_node, exists=True):
+        return False
+    _set_string_attr(target_node, source_attr, _get_string_attr(source_node, source_attr, ""))
+    _set_double_attr(target_node, value_attr, _get_double_attr(source_node, value_attr, 0.0))
+    return True
+
+
+def _capture_original_channel_state(storage_node, control_node, attribute, fallback_entries=None):
+    source_attr = _channel_source_attr_name(attribute)
+    if cmds.attributeQuery(source_attr, node=storage_node, exists=True):
+        return
+    for entry_node in fallback_entries or []:
+        if _copy_original_channel_state(storage_node, entry_node, attribute):
+            return
+    control_plug = "{0}.{1}".format(control_node, attribute)
+    incoming = cmds.listConnections(control_plug, source=True, destination=False, plugs=True) or []
+    _set_string_attr(storage_node, source_attr, incoming[0] if incoming else "")
+    _set_double_attr(storage_node, _channel_value_attr_name(attribute), cmds.getAttr(control_plug))
+
+
+def _ensure_source_locator(control_node, hub_node, fallback_entries=None):
+    existing = _connected_source_node(hub_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
+    if existing and cmds.objExists(existing):
+        return existing
+    for entry_node in fallback_entries or []:
+        seeded = _connected_source_node(entry_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
+        if seeded and cmds.objExists(seeded):
+            _connect_message(seeded, hub_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
+            return seeded
+    parent_node = (cmds.listRelatives(control_node, parent=True, fullPath=True) or [None])[0]
+    source_locator = cmds.spaceLocator(name=_source_locator_name(control_node))[0]
+    if parent_node:
+        source_locator = cmds.parent(source_locator, parent_node)[0]
+    source_locator = _node_long_name(source_locator)
+    cmds.setAttr(source_locator + ".visibility", 0)
+    source_shape = (cmds.listRelatives(source_locator, shapes=True, fullPath=True) or [None])[0]
+    if source_shape:
+        for attr_name in ("localScaleX", "localScaleY", "localScaleZ"):
+            try:
+                cmds.setAttr(source_shape + "." + attr_name, 0.2)
+            except Exception:
+                pass
+    _connect_message(source_locator, hub_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
+    return source_locator
+
+
+def _ensure_source_channel(control_node, source_locator, storage_node, attribute, fallback_entries=None):
+    _capture_original_channel_state(storage_node, control_node, attribute, fallback_entries=fallback_entries)
+    source_attr = _channel_source_attr_name(attribute)
+    value_attr = _channel_value_attr_name(attribute)
+    source_plug = _get_string_attr(storage_node, source_attr, "")
+    target_plug = "{0}.{1}".format(source_locator, attribute)
+    _disconnect_destination(target_plug)
+    if source_plug:
+        try:
+            _ensure_connected(source_plug, target_plug)
+            return
+        except Exception:
+            pass
+    cmds.setAttr(target_plug, _get_double_attr(storage_node, value_attr, cmds.getAttr("{0}.{1}".format(control_node, attribute))))
+
+
+def _restore_original_channel(control_node, storage_node, attribute):
+    if not _has_original_channel_state(storage_node, attribute):
+        return
+    control_plug = "{0}.{1}".format(control_node, attribute)
+    _disconnect_destination(control_plug)
+    source_attr = _channel_source_attr_name(attribute)
+    value_attr = _channel_value_attr_name(attribute)
+    source_plug = _get_string_attr(storage_node, source_attr, "")
+    if source_plug:
+        try:
+            cmds.connectAttr(source_plug, control_plug, force=True)
+            return
+        except Exception:
+            pass
+    try:
+        cmds.setAttr(control_plug, _get_double_attr(storage_node, value_attr, cmds.getAttr(control_plug)))
+    except Exception:
+        pass
+
+
+def _clear_legacy_entry_nodes(entry_nodes):
+    node_attrs = (
+        CONTACT_HOLD_WORLD_SOURCE_DECOMP_ATTR,
+        CONTACT_HOLD_WORLD_ANCHOR_DECOMP_ATTR,
+        CONTACT_HOLD_WORLD_BLEND_ATTR,
+        CONTACT_HOLD_LOCAL_POINT_ATTR,
+        CONTACT_HOLD_ROTATE_SOURCE_DECOMP_ATTR,
+        CONTACT_HOLD_ROTATE_ANCHOR_MM_ATTR,
+        CONTACT_HOLD_ROTATE_ANCHOR_DECOMP_ATTR,
+        CONTACT_HOLD_ROTATE_BLEND_ATTR,
+    )
+    for entry_node in entry_nodes:
+        _delete_hold_nodes(entry_node, node_attrs)
+
+
+def _create_hold_locator(control_node):
+    root_group = _contact_hold_group(create=True)
+    hold_id = uuid.uuid4().hex[:8]
+    locator_node = cmds.spaceLocator(name=_hold_locator_name(control_node, hold_id))[0]
+    locator_node = cmds.parent(locator_node, root_group)[0]
+    locator_node = _node_long_name(locator_node)
+    _set_bool_attr(locator_node, CONTACT_HOLD_MARKER_ATTR, True)
+    _set_bool_attr(locator_node, CONTACT_HOLD_ENABLED_ATTR, True)
+    _set_string_attr(locator_node, CONTACT_HOLD_ID_ATTR, hold_id)
+    _ensure_message_attr(locator_node, CONTACT_HOLD_CONTROL_ATTR)
+    _ensure_message_attr(locator_node, CONTACT_HOLD_HUB_ATTR)
+    _connect_message(control_node, locator_node, CONTACT_HOLD_CONTROL_ATTR)
+    locator_shape = (cmds.listRelatives(locator_node, shapes=True, fullPath=True) or [None])[0]
+    if locator_shape:
+        for attr_name in ("localScaleX", "localScaleY", "localScaleZ"):
+            try:
+                cmds.setAttr(locator_shape + "." + attr_name, 0.35)
+            except Exception:
+                pass
+    return locator_node
+
+
+def _hold_enabled_attr(locator_node):
+    return "{0}.{1}".format(locator_node, CONTACT_HOLD_ENABLED_ATTR)
+
+
+def _clear_hold_enabled_keys(locator_node):
+    enabled_attr = _hold_enabled_attr(locator_node)
+    if cmds.keyframe(enabled_attr, query=True, keyframeCount=True):
+        try:
+            cmds.cutKey(enabled_attr, clear=True)
+        except Exception:
+            pass
+
+
+def _set_hold_enabled(locator_node, enabled, start_frame=None, end_frame=None):
+    start = int(start_frame if start_frame is not None else _get_long_attr(locator_node, CONTACT_HOLD_START_ATTR, 1))
+    end = int(end_frame if end_frame is not None else _get_long_attr(locator_node, CONTACT_HOLD_END_ATTR, start))
+    if end < start:
+        start, end = end, start
+    enabled_attr = _hold_enabled_attr(locator_node)
+    _clear_hold_enabled_keys(locator_node)
+    weight_keys = [
+        (start - 1, 0.0),
+        (start, 1.0 if enabled else 0.0),
+        (end, 1.0 if enabled else 0.0),
+        (end + 1, 0.0),
+    ]
+    keyed_frames = set()
+    for frame_value, key_value in weight_keys:
+        frame_key = float(frame_value)
+        if frame_key in keyed_frames:
+            continue
+        _set_step_key(enabled_attr, frame_value, key_value)
+        keyed_frames.add(frame_key)
+    _set_bool_attr(locator_node, CONTACT_HOLD_ENABLED_ATTR, enabled)
+    return True, "Hold turned {0}.".format("on" if enabled else "off")
+
+
+def _hold_payload(locator_node):
+    if not locator_node or not cmds.objExists(locator_node):
+        return None
+    control_node = _connected_source_node(locator_node, CONTACT_HOLD_CONTROL_ATTR)
+    if not control_node:
+        return None
+    hub_node = _connected_source_node(locator_node, CONTACT_HOLD_HUB_ATTR) or _find_hold_hub(control_node)
+    enabled = _get_bool_attr(locator_node, CONTACT_HOLD_ENABLED_ATTR, True)
+    return {
+        "locator": _node_long_name(locator_node),
+        "id": _get_string_attr(locator_node, CONTACT_HOLD_ID_ATTR, _short_name(locator_node)),
+        "control": _node_long_name(control_node),
+        "hub": _node_long_name(hub_node) if hub_node else "",
+        "source_locator": _connected_source_node(hub_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR) if hub_node else "",
+        "enabled_attr": _hold_enabled_attr(locator_node),
+        "start_frame": _get_long_attr(locator_node, CONTACT_HOLD_START_ATTR, 1),
+        "end_frame": _get_long_attr(locator_node, CONTACT_HOLD_END_ATTR, 1),
+        "axes": _normalized_hold_axes(_get_string_attr(locator_node, CONTACT_HOLD_AXES_ATTR, "").split(",")),
+        "keep_rotation": _get_bool_attr(locator_node, CONTACT_HOLD_KEEP_ROTATION_ATTR, False),
+        "enabled": enabled,
+        "list_name": _control_list_name(control_node),
+        "state_text": "Hold" if enabled else "Original Motion",
+    }
+
+
+def _sorted_hold_entries(control_node=None):
+    entry_nodes = _hold_entries_for_control(control_node) if control_node else _all_hold_locators()
+    payloads = []
+    for locator_node in entry_nodes:
+        payload = _hold_payload(locator_node)
+        if payload:
+            payloads.append(payload)
+    payloads.sort(
+        key=lambda item: (
+            item.get("list_name", "").lower(),
+            int(item.get("start_frame", 0)),
+            int(item.get("end_frame", 0)),
+            item.get("id", ""),
+        )
+    )
+    return payloads
+
+
+def _find_hold_locator(control_node):
+    payloads = _sorted_hold_entries(control_node)
+    if not payloads:
+        return ""
+    return payloads[0]["locator"]
+
+
+def _create_entry_blend_node(hub_node, control_node, locator_node, suffix, node_type="blendColors"):
+    hold_id = _get_string_attr(locator_node, CONTACT_HOLD_ID_ATTR, "") or uuid.uuid4().hex[:8]
+    node_name = _ensure_utility_node(node_type, _solver_node_name(control_node, "{0}_{1}".format(hold_id, suffix)))
+    return _register_managed_node(hub_node, node_name)
+
+
+def _rebuild_translation_hold_network(hub_node, control_node, entry_payloads):
+    entry_nodes = [item["locator"] for item in entry_payloads]
+    source_locator = _ensure_source_locator(control_node, hub_node, entry_nodes)
+    for attribute in ("translateX", "translateY", "translateZ"):
+        _ensure_source_channel(control_node, source_locator, hub_node, attribute, fallback_entries=entry_nodes)
+
+    source_decomp = _register_managed_node(hub_node, _ensure_utility_node("decomposeMatrix", _solver_node_name(control_node, "worldSource_dcmp")))
+    point_solver = _register_managed_node(hub_node, _ensure_utility_node("vectorProduct", _solver_node_name(control_node, "localPoint_vp")))
+    _ensure_connected(source_locator + ".worldMatrix[0]", source_decomp + ".inputMatrix")
+    cmds.setAttr(point_solver + ".operation", 4)
+    _ensure_connected(control_node + ".parentInverseMatrix[0]", point_solver + ".matrix")
+
+    current_outputs = {
+        "x": source_decomp + ".outputTranslateX",
+        "y": source_decomp + ".outputTranslateY",
+        "z": source_decomp + ".outputTranslateZ",
+    }
+    axis_map = {"x": ("X", "R"), "y": ("Y", "G"), "z": ("Z", "B")}
+    for payload in entry_payloads:
+        locator_node = payload["locator"]
+        held_axes = set(payload.get("axes") or ())
+        anchor_decomp = _register_managed_node(hub_node, _ensure_utility_node("decomposeMatrix", _solver_node_name(control_node, "{0}_anchor_dcmp".format(payload["id"]))))
+        blend_node = _create_entry_blend_node(hub_node, control_node, locator_node, "worldBlend")
+        _ensure_connected(locator_node + ".worldMatrix[0]", anchor_decomp + ".inputMatrix")
+        _ensure_connected(locator_node + "." + CONTACT_HOLD_ENABLED_ATTR, blend_node + ".blender")
+        next_outputs = {}
+        for axis_name, (axis_suffix, color_suffix) in axis_map.items():
+            previous_output = current_outputs[axis_name]
+            held_output = anchor_decomp + ".outputTranslate" + axis_suffix if axis_name in held_axes else previous_output
+            _ensure_connected(held_output, blend_node + ".color1" + color_suffix)
+            _ensure_connected(previous_output, blend_node + ".color2" + color_suffix)
+            next_outputs[axis_name] = blend_node + ".output" + color_suffix
+        current_outputs = next_outputs
+
+    for axis_name, axis_suffix in (("x", "X"), ("y", "Y"), ("z", "Z")):
+        _ensure_connected(current_outputs[axis_name], point_solver + ".input1" + axis_suffix)
+        _ensure_connected(point_solver + ".output" + axis_suffix, control_node + ".translate" + axis_suffix)
+
+
+def _rebuild_rotation_hold_network(hub_node, control_node, entry_payloads):
+    keep_rotation_entries = [item for item in entry_payloads if item.get("keep_rotation")]
+    if not keep_rotation_entries:
+        for attribute in ("rotateX", "rotateY", "rotateZ"):
+            _restore_original_channel(control_node, hub_node, attribute)
+        return
+
+    entry_nodes = [item["locator"] for item in entry_payloads]
+    source_locator = _ensure_source_locator(control_node, hub_node, entry_nodes)
+    for attribute in ("rotateX", "rotateY", "rotateZ"):
+        _ensure_source_channel(control_node, source_locator, hub_node, attribute, fallback_entries=entry_nodes)
+
+    current_outputs = {
+        "X": source_locator + ".rotateX",
+        "Y": source_locator + ".rotateY",
+        "Z": source_locator + ".rotateZ",
+    }
+    for payload in keep_rotation_entries:
+        locator_node = payload["locator"]
+        anchor_local_mm = _register_managed_node(hub_node, _ensure_utility_node("multMatrix", _solver_node_name(control_node, "{0}_rotateAnchorLocal_mm".format(payload["id"]))))
+        anchor_local_decomp = _register_managed_node(hub_node, _ensure_utility_node("decomposeMatrix", _solver_node_name(control_node, "{0}_rotateAnchorLocal_dcmp".format(payload["id"]))))
+        rotate_blend = _create_entry_blend_node(hub_node, control_node, locator_node, "rotateBlend")
+        _ensure_connected(locator_node + ".worldMatrix[0]", anchor_local_mm + ".matrixIn[0]")
+        _ensure_connected(control_node + ".parentInverseMatrix[0]", anchor_local_mm + ".matrixIn[1]")
+        _ensure_connected(anchor_local_mm + ".matrixSum", anchor_local_decomp + ".inputMatrix")
+        _ensure_connected(locator_node + "." + CONTACT_HOLD_ENABLED_ATTR, rotate_blend + ".blender")
+        for axis_suffix, color_suffix in (("X", "R"), ("Y", "G"), ("Z", "B")):
+            _ensure_connected(anchor_local_decomp + ".outputRotate" + axis_suffix, rotate_blend + ".color1" + color_suffix)
+            _ensure_connected(current_outputs[axis_suffix], rotate_blend + ".color2" + color_suffix)
+            current_outputs[axis_suffix] = rotate_blend + ".output" + color_suffix
+
+    for axis_suffix in ("X", "Y", "Z"):
+        _ensure_connected(current_outputs[axis_suffix], control_node + ".rotate" + axis_suffix)
+
+
+def _rebuild_control_hold_network(control_node):
+    control_long = _node_long_name(control_node)
+    entry_payloads = _sorted_hold_entries(control_long)
+    hub_node = _find_hold_hub(control_long)
+    if not hub_node and not entry_payloads:
+        return
+    hub_node = hub_node or _ensure_hold_hub(control_long)
+    entry_nodes = [item["locator"] for item in entry_payloads]
+    for entry_node in entry_nodes:
+        _connect_message(hub_node, entry_node, CONTACT_HOLD_HUB_ATTR)
+    for attribute in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"):
+        _capture_original_channel_state(hub_node, control_long, attribute, fallback_entries=entry_nodes)
+
+    _clear_legacy_entry_nodes(entry_nodes)
+    _delete_managed_nodes(hub_node)
+    if not entry_payloads:
+        for attribute in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"):
+            _restore_original_channel(control_long, hub_node, attribute)
+        source_locator = _connected_source_node(hub_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
+        if source_locator and cmds.objExists(source_locator):
+            try:
+                cmds.delete(source_locator)
+            except Exception:
+                pass
+        if cmds.objExists(hub_node):
+            try:
+                cmds.delete(hub_node)
+            except Exception:
+                pass
+        root_group = _contact_hold_group(create=False)
+        if root_group and not (cmds.listRelatives(root_group, children=True, fullPath=True) or []):
+            try:
+                cmds.delete(root_group)
+            except Exception:
+                pass
+        return
+
+    _rebuild_translation_hold_network(hub_node, control_long, entry_payloads)
+    _rebuild_rotation_hold_network(hub_node, control_long, entry_payloads)
+
+
+def _remove_hold_entry(locator_node):
+    payload = _hold_payload(locator_node)
+    if not payload:
+        return
+    control_node = payload["control"]
+    if cmds.objExists(locator_node):
+        try:
+            cmds.delete(locator_node)
+        except Exception:
+            pass
+    _rebuild_control_hold_network(control_node)
+
+
+def _delete_all_holds():
+    payloads = _sorted_hold_entries()
+    if not payloads:
+        return 0
+    controls = _dedupe_preserve_order(item["control"] for item in payloads if item.get("control"))
+    for payload in payloads:
+        locator_node = payload["locator"]
+        if cmds.objExists(locator_node):
+            try:
+                cmds.delete(locator_node)
+            except Exception:
+                pass
+    for control_node in controls:
+        _rebuild_control_hold_network(control_node)
+    return len(payloads)
+
+
+def _format_report(report):
+    if not report:
+        return "Pick the hand or foot control, choose the contact frame range, choose the world axis to hold, then click Check Setup."
+
+    lines = [
+        "Controls: {0}".format(len(report.get("controls", []))),
+        "Start Frame: {0}".format(int(report.get("start_frame", 0))),
+        "End Frame: {0}".format(int(report.get("end_frame", 0))),
+        "Held World Axes: {0}".format(_hold_axis_label(report.get("axes", ()))),
+        "Keep Turn Too: {0}".format("Yes" if report.get("keep_rotation", True) else "No"),
+        "",
+    ]
+
+    errors = report.get("errors", [])
+    warnings = report.get("warnings", [])
+    if errors:
+        lines.append("RED")
+        for item in errors:
+            lines.append("- " + item)
+        lines.append("")
+    if warnings:
+        lines.append("YELLOW")
+        for item in warnings:
+            lines.append("- " + item)
+        lines.append("")
+    if not errors and not warnings:
+        lines.append("GREEN")
+        lines.append("- This hold looks ready to create as a live editable setup.")
+        lines.append("")
+
+    if report.get("controls"):
+        lines.append("Picked Controls")
+        for node_name in report["controls"]:
+            lines.append("- " + _control_list_name(node_name))
+
+    existing_setups = report.get("existing_setups", [])
+    if existing_setups:
+        lines.append("")
+        lines.append("Saved Holds In Scene")
+        for item in existing_setups:
+            lines.append(
+                "- {0}: {1}-{2}, axes {3}, {4}".format(
+                    item.get("list_name", _short_name(item["control"])),
+                    int(item["start_frame"]),
+                    int(item["end_frame"]),
+                    _hold_axis_label(item.get("axes", ())),
+                    item.get("state_text", "Hold"),
+                )
+            )
+
+    suggestion = report.get("suggestion")
+    if suggestion:
+        lines.append("")
+        lines.append("Suggested Plant Range")
+        lines.append("- Frames: {0} to {1}".format(int(suggestion["start_frame"]), int(suggestion["end_frame"])))
+        lines.append("- Calm move limit used: {0:.3f}".format(float(suggestion["move_threshold"])))
+        lines.append("- Calm height limit used: {0:.3f}".format(float(suggestion["height_threshold"])))
+        if report.get("keep_rotation") and suggestion.get("rotation_threshold") is not None:
+            lines.append("- Calm turn limit used: {0:.3f}".format(float(suggestion["rotation_threshold"])))
+
+    return "\n".join(lines).strip()
+
+
 class MayaContactHoldController(object):
     def __init__(self):
         self.control_nodes = []
+        self.selected_hold_locators = []
         self.start_frame = 1
         self.end_frame = 1
         self.keep_rotation = False
@@ -911,14 +1458,74 @@ class MayaContactHoldController(object):
         controls = self._resolved_controls()
         if not controls:
             return None
-        payload = _hold_payload(_find_hold_locator(controls[0]))
-        if not payload:
+        payloads = _sorted_hold_entries(controls[0])
+        if not payloads:
             return None
+        payload = payloads[0]
         self.start_frame = int(payload["start_frame"])
         self.end_frame = int(payload["end_frame"])
         self.keep_rotation = bool(payload["keep_rotation"])
         self.hold_axes = tuple(payload.get("axes") or DEFAULT_HOLD_AXES)
         return payload
+
+    def _resolved_selected_hold_locators(self):
+        locators = []
+        for locator_node in self.selected_hold_locators:
+            if locator_node and cmds.objExists(locator_node):
+                payload = _hold_payload(locator_node)
+                if payload:
+                    locators.append(payload["locator"])
+        self.selected_hold_locators = _dedupe_preserve_order(locators)
+        return list(self.selected_hold_locators)
+
+    def hold_entries(self):
+        return _sorted_hold_entries()
+
+    def set_selected_hold_locators(self, locator_nodes):
+        self.selected_hold_locators = []
+        for locator_node in locator_nodes or []:
+            payload = _hold_payload(locator_node)
+            if payload:
+                self.selected_hold_locators.append(payload["locator"])
+        self.selected_hold_locators = _dedupe_preserve_order(self.selected_hold_locators)
+        return list(self.selected_hold_locators)
+
+    def _hold_targets(self):
+        selected_locators = self._resolved_selected_hold_locators()
+        if selected_locators:
+            return selected_locators
+        locators = []
+        for control_node in self._resolved_controls():
+            locators.extend(_hold_entries_for_control(control_node))
+        return _dedupe_preserve_order(locators)
+
+    def selected_hold_payload(self):
+        selected_locators = self._resolved_selected_hold_locators()
+        if not selected_locators:
+            return None
+        return _hold_payload(selected_locators[0])
+
+    def load_selected_hold(self):
+        payload = self.selected_hold_payload()
+        if not payload:
+            return False, "Pick a saved hold in the list first."
+        self.control_nodes = [payload["control"]]
+        self.start_frame = int(payload["start_frame"])
+        self.end_frame = int(payload["end_frame"])
+        self.keep_rotation = bool(payload["keep_rotation"])
+        self.hold_axes = tuple(payload.get("axes") or DEFAULT_HOLD_AXES)
+        return True, "Loaded {0} from frames {1} to {2}.".format(payload["list_name"], self.start_frame, self.end_frame)
+
+    def set_control_list_name(self, label):
+        controls = self._resolved_controls()
+        payload = self.selected_hold_payload()
+        if payload:
+            controls = [payload["control"]]
+        if not controls:
+            return False, "Pick a hand or foot, or pick a saved hold in the list first."
+        for control_node in controls:
+            _set_control_list_name(control_node, label)
+        return True, "Updated the list name for {0} control(s).".format(len(controls))
 
     def set_controls_from_selection(self):
         if not MAYA_AVAILABLE:
@@ -927,12 +1534,18 @@ class MayaContactHoldController(object):
         if not control_nodes:
             return False, "Pick one or more hand or foot controls first."
         self.control_nodes = control_nodes
+        self.selected_hold_locators = []
         self.last_suggestion = None
-        payload = self._load_first_existing_setup()
+        payloads = _sorted_hold_entries(self.control_nodes[0]) if self.control_nodes else []
+        payload = payloads[0] if payloads else None
         if payload:
+            self.start_frame = int(payload["start_frame"])
+            self.end_frame = int(payload["end_frame"])
+            self.keep_rotation = bool(payload["keep_rotation"])
+            self.hold_axes = tuple(payload.get("axes") or DEFAULT_HOLD_AXES)
             return True, "Picked {0} control(s) and loaded the saved hold range from {1}.".format(
                 len(self.control_nodes),
-                _short_name(payload["control"]),
+                payload["list_name"],
             )
         return True, "Picked {0} control(s).".format(len(control_nodes))
 
@@ -1032,9 +1645,7 @@ class MayaContactHoldController(object):
                 errors.append("{0} needs unlocked move channels on X, Y, and Z so the live world-axis hold can solve cleanly.".format(_short_name(node_name)))
             if self.keep_rotation and len([item for item in key_channels if item.startswith("rotate")]) < 3:
                 errors.append("{0} needs unlocked turn channels, or turn off Keep Turn Too.".format(_short_name(node_name)))
-            existing_payload = _hold_payload(_find_hold_locator(node_name))
-            if existing_payload:
-                existing_setups.append(existing_payload)
+            existing_setups.extend(_sorted_hold_entries(node_name))
 
         if int(self.start_frame) == int(self.end_frame):
             warnings.append("Start and End are the same frame, so this will only make a one-frame hold.")
@@ -1073,28 +1684,21 @@ class MayaContactHoldController(object):
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHold")
             cmds.currentTime(start_frame, edit=True)
-            created = 0
-            updated = 0
+            created_locators = []
             for node_name in controls:
-                locator_node = _ensure_hold_locator(node_name)
-                had_existing_setup = bool(_connected_source_node(locator_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR))
+                hub_node = _ensure_hold_hub(node_name)
+                locator_node = _create_hold_locator(node_name)
                 _snap_hold_locator(locator_node, node_name, keep_rotation)
                 _set_string_attr(locator_node, CONTACT_HOLD_AXES_ATTR, ",".join(hold_axes))
                 _set_long_attr(locator_node, CONTACT_HOLD_START_ATTR, start_frame)
                 _set_long_attr(locator_node, CONTACT_HOLD_END_ATTR, end_frame)
                 _set_bool_attr(locator_node, CONTACT_HOLD_KEEP_ROTATION_ATTR, keep_rotation)
-                _ensure_translation_hold_network(locator_node, node_name, hold_axes)
-                if keep_rotation:
-                    _ensure_rotation_hold_network(locator_node, node_name)
-                else:
-                    _clear_rotation_hold_network(locator_node, node_name)
+                _connect_message(hub_node, locator_node, CONTACT_HOLD_HUB_ATTR)
                 success, message = _set_hold_enabled(locator_node, True, start_frame, end_frame)
                 if not success:
                     return False, message
-                if had_existing_setup:
-                    updated += 1
-                else:
-                    created += 1
+                _rebuild_control_hold_network(node_name)
+                created_locators.append(locator_node)
         except Exception as exc:
             _warning(traceback.format_exc())
             return False, "Could not make the hold: {0}".format(exc)
@@ -1109,31 +1713,61 @@ class MayaContactHoldController(object):
                 pass
 
         self.report = None
-        detail_chunks = []
-        if created:
-            detail_chunks.append("created {0}".format(created))
-        if updated:
-            detail_chunks.append("updated {0}".format(updated))
-        detail_text = ", ".join(detail_chunks) if detail_chunks else "updated the live setup"
-        return True, "Created a live editable hold for {0} control(s) from frame {1} to {2} on world axis {3} ({4}).".format(
-            len(controls),
+        self.selected_hold_locators = _dedupe_preserve_order(created_locators)
+        return True, "Saved {0} new live hold(s) from frame {1} to {2} on world axis {3}.".format(
+            len(created_locators),
             start_frame,
             end_frame,
             _hold_axis_label(hold_axes),
-            detail_text,
         )
 
+    def update_selected_hold(self):
+        locator_nodes = self._resolved_selected_hold_locators()
+        if not locator_nodes:
+            return False, "Pick one or more saved hold rows in the list first."
+        hold_axes = _normalized_hold_axes(self.hold_axes)
+        start_frame = int(self.start_frame)
+        end_frame = int(self.end_frame)
+        keep_rotation = bool(self.keep_rotation)
+        current_time = float(cmds.currentTime(query=True))
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldUpdate")
+            cmds.currentTime(start_frame, edit=True)
+            updated = 0
+            for locator_node in locator_nodes:
+                payload = _hold_payload(locator_node)
+                if not payload:
+                    continue
+                _snap_hold_locator(locator_node, payload["control"], keep_rotation)
+                _set_string_attr(locator_node, CONTACT_HOLD_AXES_ATTR, ",".join(hold_axes))
+                _set_long_attr(locator_node, CONTACT_HOLD_START_ATTR, start_frame)
+                _set_long_attr(locator_node, CONTACT_HOLD_END_ATTR, end_frame)
+                _set_bool_attr(locator_node, CONTACT_HOLD_KEEP_ROTATION_ATTR, keep_rotation)
+                success, message = _set_hold_enabled(locator_node, payload["enabled"], start_frame, end_frame)
+                if not success:
+                    return False, message
+                _rebuild_control_hold_network(payload["control"])
+                updated += 1
+        finally:
+            try:
+                cmds.currentTime(current_time, edit=True)
+            except Exception:
+                pass
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self.report = None
+        return True, "Updated {0} picked hold row(s).".format(updated)
+
     def enable_hold(self):
-        controls = self._resolved_controls()
-        if not controls:
-            return False, "Pick the hand or foot control with the saved hold first."
+        locator_nodes = self._hold_targets()
+        if not locator_nodes:
+            return False, "Pick the hand or foot control with the saved hold first, or pick saved rows in the list."
         updated = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldEnable")
-            for node_name in controls:
-                locator_node = _find_hold_locator(node_name)
-                if not locator_node:
-                    continue
+            for locator_node in locator_nodes:
                 success, message = _set_hold_enabled(locator_node, True)
                 if not success:
                     return False, message
@@ -1144,21 +1778,18 @@ class MayaContactHoldController(object):
             except Exception:
                 pass
         if not updated:
-            return False, "I could not find a saved hold for the picked control(s)."
+            return False, "I could not find a saved hold to turn on."
         self.report = None
-        return True, "Turned the saved hold back on for {0} control(s).".format(updated)
+        return True, "Turned the picked saved hold(s) back on for {0} row(s).".format(updated)
 
     def disable_hold(self):
-        controls = self._resolved_controls()
-        if not controls:
-            return False, "Pick the hand or foot control with the saved hold first."
+        locator_nodes = self._hold_targets()
+        if not locator_nodes:
+            return False, "Pick the hand or foot control with the saved hold first, or pick saved rows in the list."
         updated = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldDisable")
-            for node_name in controls:
-                locator_node = _find_hold_locator(node_name)
-                if not locator_node:
-                    continue
+            for locator_node in locator_nodes:
                 success, message = _set_hold_enabled(locator_node, False)
                 if not success:
                     return False, message
@@ -1169,38 +1800,21 @@ class MayaContactHoldController(object):
             except Exception:
                 pass
         if not updated:
-            return False, "I could not find a saved hold for the picked control(s)."
+            return False, "I could not find a saved hold to turn off."
         self.report = None
-        return True, "Switched back to the original motion for {0} control(s).".format(updated)
+        return True, "Switched the picked saved hold(s) back to the original motion for {0} row(s).".format(updated)
 
     def delete_hold(self):
-        controls = self._resolved_controls()
-        if not controls:
-            return False, "Pick the hand or foot control with the saved hold first."
+        locator_nodes = self._hold_targets()
+        if not locator_nodes:
+            return False, "Pick the hand or foot control with the saved hold first, or pick saved rows in the list."
         deleted = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldDelete")
-            for node_name in controls:
-                locator_node = _find_hold_locator(node_name)
-                if not locator_node:
+            for locator_node in locator_nodes:
+                if not _hold_payload(locator_node):
                     continue
-                _clear_rotation_hold_network(locator_node, node_name)
-                for attribute in ("translateX", "translateY", "translateZ"):
-                    _restore_original_channel(node_name, locator_node, attribute)
-                source_locator = _connected_source_node(locator_node, CONTACT_HOLD_SOURCE_LOCATOR_ATTR)
-                _delete_hold_nodes(
-                    locator_node,
-                    (
-                        CONTACT_HOLD_WORLD_SOURCE_DECOMP_ATTR,
-                        CONTACT_HOLD_WORLD_ANCHOR_DECOMP_ATTR,
-                        CONTACT_HOLD_WORLD_BLEND_ATTR,
-                        CONTACT_HOLD_LOCAL_POINT_ATTR,
-                    ),
-                )
-                if source_locator and cmds.objExists(source_locator):
-                    cmds.delete(source_locator)
-                if cmds.objExists(locator_node):
-                    cmds.delete(locator_node)
+                _remove_hold_entry(locator_node)
                 deleted += 1
         finally:
             try:
@@ -1208,9 +1822,25 @@ class MayaContactHoldController(object):
             except Exception:
                 pass
         if not deleted:
-            return False, "I could not find a saved hold for the picked control(s)."
+            return False, "I could not find a saved hold to delete."
         self.report = None
-        return True, "Deleted {0} saved hold setup(s).".format(deleted)
+        self.selected_hold_locators = []
+        return True, "Deleted {0} saved hold row(s).".format(deleted)
+
+    def delete_all_holds(self):
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldDeleteAll")
+            deleted = _delete_all_holds()
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        if not deleted:
+            return False, "There are no saved holds to delete yet."
+        self.report = None
+        self.selected_hold_locators = []
+        return True, "Deleted all {0} saved hold rows from the scene.".format(deleted)
 
 
 class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
@@ -1223,6 +1853,7 @@ if QtWidgets:
             super(MayaContactHoldWindow, self).__init__(parent or _maya_main_window())
             self.controller = controller
             self.controller.set_status_callback(self._set_status)
+            self._syncing_table = False
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Hand / Foot Hold")
             self.setMinimumWidth(640)
@@ -1234,7 +1865,8 @@ if QtWidgets:
             main_layout = QtWidgets.QVBoxLayout(self)
             intro = QtWidgets.QLabel(
                 "Make a live hand or foot hold that stays editable. "
-                "Pick the control, choose the contact range, choose which world axis should stay locked, and the tool builds a reversible setup instead of baking every frame."
+                "Pick the control, choose the contact range, choose which world axis should stay locked, and the tool builds a reversible setup instead of baking every frame. "
+                "Each saved hold shows up in the list below so you can tweak or remove it later."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
@@ -1252,6 +1884,17 @@ if QtWidgets:
             controls_row.addWidget(self.use_selection_button)
             controls_row.addWidget(self.add_other_side_button)
             main_layout.addLayout(controls_row)
+
+            alias_row = QtWidgets.QHBoxLayout()
+            self.list_name_line = QtWidgets.QLineEdit()
+            self.list_name_line.setPlaceholderText("Friendly list name, like Right Foot")
+            self.list_name_line.setToolTip("This changes the label shown in the saved hold list. It does not rename the real rig control.")
+            self.rename_button = QtWidgets.QPushButton("Rename In List")
+            self.rename_button.setToolTip("Save a friendlier list name for the picked control or the picked saved hold.")
+            alias_row.addWidget(QtWidgets.QLabel("List Name"))
+            alias_row.addWidget(self.list_name_line, 1)
+            alias_row.addWidget(self.rename_button)
+            main_layout.addLayout(alias_row)
 
             frame_grid = QtWidgets.QGridLayout()
             self.start_spin = QtWidgets.QSpinBox()
@@ -1293,23 +1936,51 @@ if QtWidgets:
             self.keep_rotation_check.setToolTip("Turn this on only if the hand or foot should also keep the same world rotation. Leave it off if the foot needs to roll while planted.")
             main_layout.addWidget(self.keep_rotation_check)
 
-            button_row = QtWidgets.QHBoxLayout()
+            create_row = QtWidgets.QHBoxLayout()
             self.analyze_button = QtWidgets.QPushButton("Check Setup")
             self.analyze_button.setToolTip("Check that the picked controls, frame range, and chosen axes are ready.")
-            self.apply_button = QtWidgets.QPushButton("Create / Update Hold")
-            self.apply_button.setToolTip("Build or refresh the live hold setup. This stays editable and does not bake every frame.")
-            self.enable_button = QtWidgets.QPushButton("Use Hold")
-            self.enable_button.setToolTip("Turn the saved live hold back on so the hand or foot follows the stored contact.")
-            self.disable_button = QtWidgets.QPushButton("Use Original Motion")
-            self.disable_button.setToolTip("Turn the live hold off and go back to the original animation.")
-            self.delete_button = QtWidgets.QPushButton("Delete Hold")
-            self.delete_button.setToolTip("Remove the saved live hold setup completely.")
-            button_row.addWidget(self.analyze_button)
-            button_row.addWidget(self.apply_button)
-            button_row.addWidget(self.enable_button)
-            button_row.addWidget(self.disable_button)
-            button_row.addWidget(self.delete_button)
-            main_layout.addLayout(button_row)
+            self.apply_button = QtWidgets.QPushButton("Save New Hold")
+            self.apply_button.setToolTip("Save a brand-new hold row for the picked controls. This does not overwrite older hold rows.")
+            self.update_button = QtWidgets.QPushButton("Update Picked Hold")
+            self.update_button.setToolTip("Refresh the picked saved hold row using the current frame range, axes, and Keep Turn Too setting.")
+            create_row.addWidget(self.analyze_button)
+            create_row.addWidget(self.apply_button)
+            create_row.addWidget(self.update_button)
+            main_layout.addLayout(create_row)
+
+            hold_group = QtWidgets.QGroupBox("Saved Holds In Scene")
+            hold_layout = QtWidgets.QVBoxLayout(hold_group)
+            self.holds_table = QtWidgets.QTableWidget(0, 6)
+            self.holds_table.setHorizontalHeaderLabels(["Name", "Control", "Frames", "Axes", "Turn", "State"])
+            self.holds_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+            self.holds_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+            self.holds_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            self.holds_table.setAlternatingRowColors(True)
+            self.holds_table.setToolTip("Pick a saved row to load it back into the frame and axis boxes. You can multi-pick rows to turn them on, turn them off, or delete them together.")
+            header = self.holds_table.horizontalHeader()
+            header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+            header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
+            hold_layout.addWidget(self.holds_table, 1)
+
+            manage_row = QtWidgets.QHBoxLayout()
+            self.enable_button = QtWidgets.QPushButton("Use Hold On Picked")
+            self.enable_button.setToolTip("Turn the picked saved hold rows back on.")
+            self.disable_button = QtWidgets.QPushButton("Use Original Motion On Picked")
+            self.disable_button.setToolTip("Turn the picked saved hold rows off so those ranges follow the original animation again.")
+            self.delete_button = QtWidgets.QPushButton("Delete Picked Hold")
+            self.delete_button.setToolTip("Remove just the picked saved hold rows.")
+            self.delete_all_button = QtWidgets.QPushButton("Delete All Holds")
+            self.delete_all_button.setToolTip("Remove every saved hand and foot hold from the whole scene.")
+            manage_row.addWidget(self.enable_button)
+            manage_row.addWidget(self.disable_button)
+            manage_row.addWidget(self.delete_button)
+            manage_row.addWidget(self.delete_all_button)
+            hold_layout.addLayout(manage_row)
+            main_layout.addWidget(hold_group, 1)
 
             self.report_box = QtWidgets.QPlainTextEdit()
             self.report_box.setReadOnly(True)
@@ -1335,6 +2006,7 @@ if QtWidgets:
 
             self.use_selection_button.clicked.connect(self._use_selection)
             self.add_other_side_button.clicked.connect(self._add_other_side)
+            self.rename_button.clicked.connect(self._rename_list_name)
             self.use_start_button.clicked.connect(self._use_start_frame)
             self.use_end_button.clicked.connect(self._use_end_frame)
             self.suggest_range_button.clicked.connect(self._suggest_range)
@@ -1346,12 +2018,55 @@ if QtWidgets:
             self.end_spin.valueChanged.connect(self._sync_to_controller)
             self.analyze_button.clicked.connect(self._analyze)
             self.apply_button.clicked.connect(self._apply)
+            self.update_button.clicked.connect(self._update_hold)
             self.enable_button.clicked.connect(self._enable_hold)
             self.disable_button.clicked.connect(self._disable_hold)
             self.delete_button.clicked.connect(self._delete_hold)
+            self.delete_all_button.clicked.connect(self._delete_all_holds)
+            self.holds_table.itemSelectionChanged.connect(self._on_hold_selection_changed)
+            self.holds_table.itemDoubleClicked.connect(self._load_picked_hold)
+
+        def _selected_table_locators(self):
+            rows = sorted(set(index.row() for index in self.holds_table.selectionModel().selectedRows()))
+            locator_nodes = []
+            for row_index in rows:
+                item = self.holds_table.item(row_index, 0)
+                locator_node = item.data(QtCore.Qt.UserRole) if item else ""
+                if locator_node:
+                    locator_nodes.append(locator_node)
+            return locator_nodes
+
+        def _refresh_hold_table(self):
+            selected_locators = set(self.controller._resolved_selected_hold_locators())
+            payloads = self.controller.hold_entries()
+            self._syncing_table = True
+            self.holds_table.setRowCount(len(payloads))
+            for row_index, payload in enumerate(payloads):
+                row_values = [
+                    payload.get("list_name", ""),
+                    _short_name(payload.get("control", "")),
+                    "{0}-{1}".format(int(payload.get("start_frame", 0)), int(payload.get("end_frame", 0))),
+                    _hold_axis_label(payload.get("axes", ())),
+                    "Keep Turn" if payload.get("keep_rotation") else "Keep Original Turn",
+                    payload.get("state_text", "Hold"),
+                ]
+                for column_index, value in enumerate(row_values):
+                    item = QtWidgets.QTableWidgetItem(str(value))
+                    if column_index == 0:
+                        item.setData(QtCore.Qt.UserRole, payload["locator"])
+                    self.holds_table.setItem(row_index, column_index, item)
+                if payload["locator"] in selected_locators:
+                    self.holds_table.selectRow(row_index)
+            self._syncing_table = False
 
         def _sync_from_controller(self):
-            self.controls_line.setText(", ".join(_short_name(node_name) for node_name in self.controller.control_nodes))
+            self.controls_line.setText(", ".join(_control_list_name(node_name) for node_name in self.controller.control_nodes))
+            self.start_spin.blockSignals(True)
+            self.end_spin.blockSignals(True)
+            self.keep_rotation_check.blockSignals(True)
+            self.hold_x_check.blockSignals(True)
+            self.hold_y_check.blockSignals(True)
+            self.hold_z_check.blockSignals(True)
             self.start_spin.setValue(int(self.controller.start_frame))
             self.end_spin.setValue(int(self.controller.end_frame))
             self.keep_rotation_check.setChecked(bool(self.controller.keep_rotation))
@@ -1359,6 +2074,20 @@ if QtWidgets:
             self.hold_x_check.setChecked("x" in hold_axes)
             self.hold_y_check.setChecked("y" in hold_axes)
             self.hold_z_check.setChecked("z" in hold_axes)
+            self.start_spin.blockSignals(False)
+            self.end_spin.blockSignals(False)
+            self.keep_rotation_check.blockSignals(False)
+            self.hold_x_check.blockSignals(False)
+            self.hold_y_check.blockSignals(False)
+            self.hold_z_check.blockSignals(False)
+            payload = self.controller.selected_hold_payload()
+            if payload:
+                self.list_name_line.setText(payload["list_name"])
+            elif self.controller.control_nodes:
+                self.list_name_line.setText(_control_list_name(self.controller.control_nodes[0]))
+            else:
+                self.list_name_line.clear()
+            self._refresh_hold_table()
             self.report_box.setPlainText(self.controller.report_text())
 
         def _sync_to_controller(self):
@@ -1374,12 +2103,29 @@ if QtWidgets:
                 axes.append("z")
             self.controller.hold_axes = tuple(axes)
 
+        def _on_hold_selection_changed(self):
+            if self._syncing_table:
+                return
+            locator_nodes = self._selected_table_locators()
+            self.controller.set_selected_hold_locators(locator_nodes)
+            if len(locator_nodes) == 1:
+                self.controller.load_selected_hold()
+            self._sync_from_controller()
+
+        def _load_picked_hold(self, *_args):
+            locator_nodes = self._selected_table_locators()
+            self.controller.set_selected_hold_locators(locator_nodes)
+            success, message = self.controller.load_selected_hold()
+            self._sync_from_controller()
+            self._set_status(message, success)
+
         def _set_status(self, message, success=True):
             self.status_label.setText(message)
             palette = self.status_label.palette()
             role = self.status_label.foregroundRole()
             palette.setColor(role, QtGui.QColor("#24A148" if success else "#DA1E28"))
             self.status_label.setPalette(palette)
+            self._refresh_hold_table()
             self.report_box.setPlainText(self.controller.report_text())
 
         def _use_selection(self):
@@ -1389,6 +2135,11 @@ if QtWidgets:
 
         def _add_other_side(self):
             success, message = self.controller.add_matching_other_side()
+            self._sync_from_controller()
+            self._set_status(message, success)
+
+        def _rename_list_name(self):
+            success, message = self.controller.set_control_list_name(self.list_name_line.text())
             self._sync_from_controller()
             self._set_status(message, success)
 
@@ -1420,6 +2171,12 @@ if QtWidgets:
             self._sync_from_controller()
             self._set_status(message, success)
 
+        def _update_hold(self):
+            self._sync_to_controller()
+            success, message = self.controller.update_selected_hold()
+            self._sync_from_controller()
+            self._set_status(message, success)
+
         def _enable_hold(self):
             self._sync_to_controller()
             success, message = self.controller.enable_hold()
@@ -1435,6 +2192,12 @@ if QtWidgets:
         def _delete_hold(self):
             self._sync_to_controller()
             success, message = self.controller.delete_hold()
+            self._sync_from_controller()
+            self._set_status(message, success)
+
+        def _delete_all_holds(self):
+            self._sync_to_controller()
+            success, message = self.controller.delete_all_holds()
             self._sync_from_controller()
             self._set_status(message, success)
 

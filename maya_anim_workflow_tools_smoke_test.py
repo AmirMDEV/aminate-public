@@ -384,8 +384,14 @@ def run():
     cmds.currentTime(6, edit=True)
     _assert(abs(float(_translation(hold_left_foot)[0]) - anchor_x[hold_left_foot]) <= 0.001, "Re-enabling Contact Hold should restore the saved held axis motion")
 
+    contact_hold_controller.set_selected_hold_locators(
+        [
+            maya_contact_hold._find_hold_locator(hold_left_foot),
+            maya_contact_hold._find_hold_locator(hold_right_foot),
+        ]
+    )
     contact_hold_controller.end_frame = 5
-    success, message = contact_hold_controller.apply_hold()
+    success, message = contact_hold_controller.update_selected_hold()
     _assert(success, message)
     cmds.currentTime(5, edit=True)
     _assert(abs(float(_translation(hold_left_foot)[0]) - anchor_x[hold_left_foot]) <= 0.001, "Updated Contact Hold should still keep the chosen axis locked inside the new range")

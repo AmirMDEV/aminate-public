@@ -405,8 +405,14 @@ try:
     hold_reenabled_x = float(cmds.xform(hold_left_foot, query=True, worldSpace=True, translation=True)[0])
     if abs(hold_reenabled_x - hold_anchor_x[hold_left_foot]) > 0.001:
         raise RuntimeError("Contact Hold enable did not restore the saved held axis motion.")
+    controller.contact_hold_controller.set_selected_hold_locators(
+        [
+            maya_contact_hold._find_hold_locator(hold_left_foot),
+            maya_contact_hold._find_hold_locator(hold_right_foot),
+        ]
+    )
     controller.contact_hold_controller.end_frame = 5
-    hold_update_success, hold_update_message = controller.contact_hold_controller.apply_hold()
+    hold_update_success, hold_update_message = controller.contact_hold_controller.update_selected_hold()
     if not hold_update_success:
         raise RuntimeError("Contact Hold update failed: {0}".format(hold_update_message))
     cmds.currentTime(5, edit=True)
@@ -746,11 +752,11 @@ result = namespace.get("result")
     if workflow.get("tabs") != ["Quick Start", "Dynamic Parenting", "Hand / Foot Hold", "Dynamic Pivot", "Universal IK/FK", "Onion Skin", "Rotation Doctor", "Skinning Cleanup", "Rig Scale", "Video Reference", "Timeline Notes"]:
         raise AssertionError(json.dumps(result, indent=2))
     embedded_tools = workflow.get("embedded_tools") or {}
-    if embedded_tools.get("contact_hold_apply_text") != "Create / Update Hold":
+    if embedded_tools.get("contact_hold_apply_text") != "Save New Hold":
         raise AssertionError(json.dumps(result, indent=2))
-    if embedded_tools.get("contact_hold_enable_text") != "Use Hold":
+    if embedded_tools.get("contact_hold_enable_text") != "Use Hold On Picked":
         raise AssertionError(json.dumps(result, indent=2))
-    if embedded_tools.get("contact_hold_disable_text") != "Use Original Motion":
+    if embedded_tools.get("contact_hold_disable_text") != "Use Original Motion On Picked":
         raise AssertionError(json.dumps(result, indent=2))
     if embedded_tools.get("contact_hold_other_side_text") != "Add Matching Other Side":
         raise AssertionError(json.dumps(result, indent=2))

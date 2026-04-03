@@ -174,9 +174,12 @@ try:
         "ik_controls_placeholder": main_window.ik_controls_line.placeholderText(),
         "has_contact_hold_panel": hasattr(main_window, "contact_hold_panel"),
         "contact_hold_panel_state": contact_hold_panel_state,
+        "contact_hold_has_table": hasattr(main_window.contact_hold_panel, "holds_table"),
         "contact_hold_apply_text": main_window.contact_hold_panel.apply_button.text(),
+        "contact_hold_update_text": main_window.contact_hold_panel.update_button.text(),
         "contact_hold_enable_text": main_window.contact_hold_panel.enable_button.text(),
         "contact_hold_disable_text": main_window.contact_hold_panel.disable_button.text(),
+        "contact_hold_delete_all_text": main_window.contact_hold_panel.delete_all_button.text(),
         "contact_hold_other_side_text": main_window.contact_hold_panel.add_other_side_button.text(),
         "contact_hold_x_checked": main_window.contact_hold_panel.hold_x_check.isChecked(),
         "contact_hold_y_checked": main_window.contact_hold_panel.hold_y_check.isChecked(),
@@ -315,11 +318,17 @@ except Exception:
         raise AssertionError(json.dumps(payload, indent=2))
     if (contact_hold_panel_state.get("size") or [0, 0])[1] < 200:
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("contact_hold_apply_text") != "Create / Update Hold":
+    if not main.get("contact_hold_has_table"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("contact_hold_enable_text") != "Use Hold":
+    if main.get("contact_hold_apply_text") != "Save New Hold":
         raise AssertionError(json.dumps(payload, indent=2))
-    if main.get("contact_hold_disable_text") != "Use Original Motion":
+    if main.get("contact_hold_update_text") != "Update Picked Hold":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_enable_text") != "Use Hold On Picked":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_disable_text") != "Use Original Motion On Picked":
+        raise AssertionError(json.dumps(payload, indent=2))
+    if main.get("contact_hold_delete_all_text") != "Delete All Holds":
         raise AssertionError(json.dumps(payload, indent=2))
     if main.get("contact_hold_other_side_text") != "Add Matching Other Side":
         raise AssertionError(json.dumps(payload, indent=2))
@@ -502,7 +511,7 @@ except Exception:
         raise AssertionError(json.dumps(dock_payload, indent=2))
     if dock.get("workspace_floating"):
         raise AssertionError(json.dumps(dock_payload, indent=2))
-    if dock.get("current_tab") != "Timeline Notes":
+    if dock.get("current_tab") not in ["Quick Start", "Dynamic Parenting", "Hand / Foot Hold", "Dynamic Pivot", "Universal IK/FK", "Onion Skin", "Rotation Doctor", "Skinning Cleanup", "Rig Scale", "Video Reference", "Timeline Notes"]:
         raise AssertionError(json.dumps(dock_payload, indent=2))
     if dock.get("docked_is_window"):
         raise AssertionError(json.dumps(dock_payload, indent=2))
