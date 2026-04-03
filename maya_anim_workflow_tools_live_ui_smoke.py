@@ -103,6 +103,14 @@ try:
     importlib.reload(maya_universal_ikfk_switcher)
     importlib.reload(maya_dynamic_parent_pivot)
 
+    def force_cleanup():
+        try:
+            maya_dynamic_parent_pivot._close_existing_window()
+        except Exception:
+            pass
+        if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
+            maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
+
     main_window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(initial_tab="pivot")
     if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
         maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
@@ -217,6 +225,7 @@ try:
         "donate_style": main_window.donate_button.styleSheet(),
     }}
     main_window.close()
+    force_cleanup()
 
     default_window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools()
     if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
@@ -225,37 +234,12 @@ try:
         "current_tab": default_window.tab_widget.tabText(default_window.tab_widget.currentIndex()),
     }}
     default_window.close()
-
-    docked_window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab="timeline")
-    if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
-        maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
-    dock_result = {{
-        "workspace_exists": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True)),
-        "workspace_floating": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, query=True, floating=True)) if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True) else None,
-        "current_tab": docked_window.tab_widget.tabText(docked_window.tab_widget.currentIndex()),
-    }}
-    try:
-        docked_window.close()
-    except Exception:
-        pass
-    try:
-        if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True):
-            cmds.deleteUI(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, control=True)
-    except Exception:
-        pass
-
-    ikfk_window = maya_universal_ikfk_switcher.launch_maya_universal_ikfk_switcher()
-    ikfk_result = {{
-        "current_tab": ikfk_window.tab_widget.tabText(ikfk_window.tab_widget.currentIndex()),
-    }}
-    ikfk_window.close()
+    force_cleanup()
 
     result = {{
         "ok": True,
         "main": main_result,
         "default": default_result,
-        "dock": dock_result,
-        "ikfk": ikfk_result,
     }}
 except Exception:
     result = {{
@@ -457,20 +441,110 @@ except Exception:
     if "#FFC439" not in (main.get("donate_style") or ""):
         raise AssertionError(json.dumps(payload, indent=2))
 
-    dock = result.get("dock") or {}
     default = result.get("default") or {}
     if default.get("current_tab") != "Quick Start":
         raise AssertionError(json.dumps(payload, indent=2))
-    if not dock.get("workspace_exists"):
-        raise AssertionError(json.dumps(payload, indent=2))
-    if dock.get("workspace_floating"):
-        raise AssertionError(json.dumps(payload, indent=2))
-    if dock.get("current_tab") != "Timeline Notes":
-        raise AssertionError(json.dumps(payload, indent=2))
+    dock_code = """
+import importlib
+import sys
+import traceback
 
-    ikfk = result.get("ikfk") or {}
+repo_path = r"{repo_path}"
+if repo_path not in sys.path:
+    sys.path.insert(0, repo_path)
+
+try:
+    import maya.cmds as cmds
+    import maya_anim_workflow_tools
+    import maya_dynamic_parent_pivot
+    importlib.reload(maya_anim_workflow_tools)
+    importlib.reload(maya_dynamic_parent_pivot)
+
+    maya_dynamic_parent_pivot._close_existing_window()
+    if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
+        maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
+
+    docked_window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab="timeline")
+    if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
+        maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
+
+    dock_parent_chain = []
+    walker = docked_window
+    while walker is not None:
+        try:
+            dock_parent_chain.append(walker.objectName() or walker.__class__.__name__)
+        except Exception:
+            dock_parent_chain.append(str(type(walker)))
+        try:
+            walker = walker.parentWidget()
+        except Exception:
+            break
+
+    result = {{
+        "ok": True,
+        "workspace_exists": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True)),
+        "workspace_floating": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, query=True, floating=True)) if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True) else None,
+        "current_tab": docked_window.tab_widget.tabText(docked_window.tab_widget.currentIndex()),
+        "docked_is_window": bool(docked_window.isWindow()),
+        "dock_parent_chain": dock_parent_chain,
+    }}
+except Exception:
+    result = {{
+        "ok": False,
+        "traceback": traceback.format_exc(),
+    }}
+""".format(repo_path=str(REPO_ROOT).replace("\\", "\\\\"))
+    dock_payload = run_bridge_exec_python(dock_code, timeout=120)
+    dock = dock_payload.get("result") or {}
+    if not dock.get("ok"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if not dock.get("workspace_exists"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("workspace_floating"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("current_tab") != "Timeline Notes":
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("docked_is_window"):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if "mayaAnimWorkflowToolsWindowWorkspaceControl" not in (dock.get("dock_parent_chain") or []):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+
+    ikfk_code = """
+import importlib
+import sys
+import traceback
+
+repo_path = r"{repo_path}"
+if repo_path not in sys.path:
+    sys.path.insert(0, repo_path)
+
+try:
+    import maya_universal_ikfk_switcher
+    import maya_dynamic_parent_pivot
+    importlib.reload(maya_universal_ikfk_switcher)
+    importlib.reload(maya_dynamic_parent_pivot)
+
+    maya_dynamic_parent_pivot._close_existing_window()
+    if maya_dynamic_parent_pivot.QtWidgets and maya_dynamic_parent_pivot.QtWidgets.QApplication.instance():
+        maya_dynamic_parent_pivot.QtWidgets.QApplication.processEvents()
+
+    ikfk_window = maya_universal_ikfk_switcher.launch_maya_universal_ikfk_switcher()
+    result = {{
+        "ok": True,
+        "current_tab": ikfk_window.tab_widget.tabText(ikfk_window.tab_widget.currentIndex()),
+    }}
+except Exception:
+    result = {{
+        "ok": False,
+        "traceback": traceback.format_exc(),
+    }}
+""".format(repo_path=str(REPO_ROOT).replace("\\", "\\\\"))
+    ikfk_payload = run_bridge_exec_python(ikfk_code, timeout=120)
+    ikfk = ikfk_payload.get("result") or {}
+    if not ikfk.get("ok"):
+        raise AssertionError(json.dumps(ikfk_payload, indent=2))
     if ikfk.get("current_tab") != "Universal IK/FK":
-        raise AssertionError(json.dumps(payload, indent=2))
+        raise AssertionError(json.dumps(ikfk_payload, indent=2))
 
     print("MAYA_ANIM_WORKFLOW_TOOLS_LIVE_UI_SMOKE: PASS")
     return 0

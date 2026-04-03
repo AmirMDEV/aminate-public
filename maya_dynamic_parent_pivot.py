@@ -349,6 +349,52 @@ def _delete_workspace_control(name):
             cmds.deleteUI(name)
 
 
+def _workflow_widgets():
+    if not QtWidgets:
+        return []
+    app = QtWidgets.QApplication.instance()
+    if not app:
+        return []
+    widgets = []
+    for widget in app.allWidgets():
+        try:
+            if widget.objectName() == WINDOW_OBJECT_NAME:
+                widgets.append(widget)
+        except Exception:
+            pass
+    return widgets
+
+
+def _widget_has_ancestor_object_name(widget, object_name):
+    walker = widget
+    while walker is not None:
+        try:
+            if walker.objectName() == object_name:
+                return True
+            walker = walker.parentWidget()
+        except Exception:
+            return False
+    return False
+
+
+def _find_docked_workflow_widget():
+    for widget in _workflow_widgets():
+        if _widget_has_ancestor_object_name(widget, WORKSPACE_CONTROL_NAME):
+            return widget
+    return None
+
+
+def _cleanup_duplicate_workflow_widgets(keep_widget=None):
+    for widget in _workflow_widgets():
+        if keep_widget is not None and widget is keep_widget:
+            continue
+        try:
+            widget.close()
+            widget.deleteLater()
+        except Exception:
+            pass
+
+
 def _close_existing_window():
     global GLOBAL_WINDOW
     if GLOBAL_WINDOW is not None:
@@ -379,13 +425,15 @@ def _close_existing_window():
     app = QtWidgets.QApplication.instance()
     if not app:
         return
-    for widget in app.topLevelWidgets():
-        try:
-            if widget.objectName() == WINDOW_OBJECT_NAME:
-                widget.close()
-                widget.deleteLater()
-        except Exception:
-            pass
+    try:
+        app.processEvents()
+    except Exception:
+        pass
+    _cleanup_duplicate_workflow_widgets()
+    try:
+        app.processEvents()
+    except Exception:
+        pass
 
 
 def _matrix_from_node(node_name):
@@ -1780,14 +1828,14 @@ if QtWidgets:
     try:
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-        _WindowBase = type("MayaAnimWorkflowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        _WindowBase = type("MayaAnimWorkflowBase", (MayaQWidgetDockableMixin, QtWidgets.QWidget), {})
     except Exception:
-        _WindowBase = type("MayaAnimWorkflowBase", (QtWidgets.QDialog,), {})
+        _WindowBase = type("MayaAnimWorkflowBase", (QtWidgets.QWidget,), {})
 
 
     class MayaAnimWorkflowWindow(_WindowBase):
         def __init__(self, controller, parent=None, initial_tab=0):
-            super(MayaAnimWorkflowWindow, self).__init__(parent or _maya_main_window())
+            super(MayaAnimWorkflowWindow, self).__init__(parent)
             self.controller = controller
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Anim Workflow Tools")
@@ -2694,14 +2742,29 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
     _close_existing_window()
+    app = QtWidgets.QApplication.instance()
+    if app:
+        try:
+            app.processEvents()
+        except Exception:
+            pass
     GLOBAL_CONTROLLER = MayaAnimWorkflowController()
-    window_parent = None if dock else _maya_main_window()
+    window_parent = None
     GLOBAL_WINDOW = MayaAnimWorkflowWindow(GLOBAL_CONTROLLER, parent=window_parent, initial_tab=initial_tab)
     if dock:
         try:
             GLOBAL_WINDOW.show(dockable=True, floating=False, area="right")
         except Exception:
             GLOBAL_WINDOW.show()
+        if app:
+            try:
+                app.processEvents()
+            except Exception:
+                pass
+        docked_widget = _find_docked_workflow_widget()
+        if docked_widget is not None:
+            GLOBAL_WINDOW = docked_widget
+            _cleanup_duplicate_workflow_widgets(keep_widget=docked_widget)
     else:
         GLOBAL_WINDOW.show()
     try:
