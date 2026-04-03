@@ -1,0 +1,53 @@
+{
+  "amir_layouts": [
+    "Shelf|MainShelfLayout|formLayout22|ShelfLayout|Amir_s_Scripts",
+    "Shelf|MainShelfLayout|formLayout22|ShelfLayout|Amir_s_Scripts",
+    "Shelf|MainShelfLayout|formLayout22|ShelfLayout|Amir_s_Scripts"
+  ],
+  "child_array": [
+    "Curves",
+    "Surfaces",
+    "Polygons",
+    "Sculpting",
+    "UVEditing",
+    "Rigging",
+    "Animation",
+    "Rendering",
+    "FX",
+    "FXCaching",
+    "Custom",
+    "Arnold",
+    "Bifrost",
+    "MASH",
+    "MotionGraphics",
+    "XGen",
+    "TURTLE",
+    "Amir_s_Scripts",
+    "Amir_s_Scripts",
+    "Amir_s_Scripts"
+  ],
+  "selected_tab": "Amir_s_Scripts",
+  "shelf_top_level": "Shelf|MainShelfLayout|formLayout22|ShelfLayout",
+  "tab_labels": [
+    "Curves",
+    "Surfaces",
+    "Poly Modeling",
+    "Sculpting",
+    "UV Editing",
+    "Rigging",
+    "Animation",
+    "Rendering",
+    "FX",
+    "FX Caching",
+    "Custom",
+    "Arnold",
+    "Bifrost",
+    "MASH",
+    "Motion Graphics",
+    "XGen",
+    "TURTLE",
+    "Amir's Scripts",
+    "Amir's Scripts",
+    "Amir's Scripts"
+  ]
+}

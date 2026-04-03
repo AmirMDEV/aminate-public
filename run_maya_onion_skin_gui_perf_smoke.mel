@@ -1,0 +1,1 @@
+python("import runpy; runpy.run_path(r'C:/Users/Amir Mansaray/Documents/Github/maya-animation-tools/maya_onion_skin_gui_perf_smoke.py', run_name='__main__')");

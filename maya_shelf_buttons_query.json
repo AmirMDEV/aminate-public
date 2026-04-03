@@ -1,0 +1,13 @@
+{
+  "buttons": [
+    {
+      "annotation": "Launch Maya Onion Skin",
+      "docTag": "mayaOnionSkinShelfButton",
+      "label": "Onion Skin",
+      "name": "shelfButton38"
+    }
+  ],
+  "children": [
+    "shelfButton38"
+  ]
+}

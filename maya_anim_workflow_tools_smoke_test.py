@@ -1,0 +1,378 @@
+from __future__ import absolute_import, division, print_function
+
+import os
+import sys
+import traceback
+
+import maya.standalone
+
+
+try:
+    maya.standalone.initialize(name="python")
+except RuntimeError as exc:
+    if "inside of Maya" not in str(exc):
+        raise
+
+import maya.cmds as cmds  # noqa: E402
+
+
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if THIS_DIR not in sys.path:
+    sys.path.insert(0, THIS_DIR)
+
+import maya_anim_workflow_tools  # noqa: E402
+import maya_contact_hold  # noqa: E402
+import maya_rig_scale_export  # noqa: E402
+import maya_timeline_notes  # noqa: E402
+import maya_universal_ikfk_switcher  # noqa: E402
+import maya_video_reference_tool  # noqa: E402
+
+
+def _assert(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
+def _translation(node_name):
+    return cmds.xform(node_name, query=True, worldSpace=True, translation=True)
+
+
+def _matrix(node_name):
+    return cmds.xform(node_name, query=True, worldSpace=True, matrix=True)
+
+
+def _times(node_name, attribute):
+    return cmds.keyframe(node_name, attribute=attribute, query=True, timeChange=True) or []
+
+
+def _shader_group(shader_name):
+    shading_group = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=shader_name + "SG")
+    cmds.connectAttr(shader_name + ".outColor", shading_group + ".surfaceShader", force=True)
+    return shading_group
+
+
+def _long_name(node_name):
+    return (cmds.ls(node_name, long=True) or [node_name])[0]
+
+
+def _build_parenting_scene():
+    hand_target = cmds.createNode("transform", name="hand_ctrl")
+    gun_target = cmds.createNode("transform", name="gun_ctrl")
+    driven_a = cmds.createNode("transform", name="drivenA_ctrl")
+    driven_b = cmds.createNode("transform", name="drivenB_ctrl")
+    cmds.xform(hand_target, worldSpace=True, translation=(8.0, 0.0, 0.0))
+    cmds.xform(gun_target, worldSpace=True, translation=(14.0, 2.0, 0.0))
+    cmds.xform(driven_a, worldSpace=True, translation=(0.0, 1.0, 0.0))
+    cmds.xform(driven_b, worldSpace=True, translation=(0.0, 3.0, 0.0))
+    return hand_target, gun_target, driven_a, driven_b
+
+
+def _build_ikfk_scene():
+    shoulder_fk = cmds.createNode("transform", name="L_arm_shoulder_fk_ctrl")
+    elbow_fk = cmds.createNode("transform", name="L_arm_elbow_fk_ctrl")
+    wrist_fk = cmds.createNode("transform", name="L_arm_wrist_fk_ctrl")
+    cmds.parent(elbow_fk, shoulder_fk)
+    cmds.parent(wrist_fk, elbow_fk)
+    cmds.xform(shoulder_fk, worldSpace=True, translation=(0.0, 10.0, 0.0))
+    cmds.xform(elbow_fk, worldSpace=True, translation=(5.0, 12.0, 0.0))
+    cmds.xform(wrist_fk, worldSpace=True, translation=(9.0, 14.0, 0.0))
+
+    shoulder_drv = cmds.createNode("transform", name="L_arm_shoulder_drv")
+    elbow_drv = cmds.createNode("transform", name="L_arm_elbow_drv")
+    wrist_drv = cmds.createNode("transform", name="L_arm_wrist_drv")
+    cmds.parent(elbow_drv, shoulder_drv)
+    cmds.parent(wrist_drv, elbow_drv)
+    cmds.xform(shoulder_drv, worldSpace=True, translation=(0.0, 10.0, 0.0))
+    cmds.xform(elbow_drv, worldSpace=True, translation=(4.0, 12.0, 0.0))
+    cmds.xform(wrist_drv, worldSpace=True, translation=(8.0, 14.0, 0.0))
+
+    ik_ctrl = cmds.createNode("transform", name="L_arm_ik_ctrl")
+    pv_ctrl = cmds.createNode("transform", name="L_arm_pv_ctrl")
+    settings = cmds.createNode("transform", name="L_arm_settings_ctrl")
+    cmds.addAttr(settings, longName="leftArm_ikfk", attributeType="double")
+
+    return {
+        "fk_controls": [shoulder_fk, elbow_fk, wrist_fk],
+        "match_nodes": [shoulder_drv, elbow_drv, wrist_drv],
+        "ik_control": ik_ctrl,
+        "pole_vector_control": pv_ctrl,
+        "switch_attr": settings + ".leftArm_ikfk",
+    }
+
+
+def _build_skin_cleanup_scene():
+    root_joint = cmds.createNode("joint", name="skinCleanup_root_jnt")
+    mid_joint = cmds.createNode("joint", name="skinCleanup_mid_jnt", parent=root_joint)
+    cmds.xform(root_joint, worldSpace=True, translation=(14.0, 0.0, 0.0))
+    cmds.xform(mid_joint, worldSpace=True, translation=(14.0, 4.0, 0.0))
+
+    mesh = cmds.polyCube(
+        name="skinCleanup_badScale_geo",
+        width=2.0,
+        height=3.0,
+        depth=1.5,
+        subdivisionsY=2,
+    )[0]
+    cmds.xform(mesh, worldSpace=True, translation=(16.0, 1.0, -2.0), rotation=(10.0, 25.0, 5.0), scale=(1.8, 0.7, 1.3))
+    cmds.polySoftEdge(mesh, angle=180, constructionHistory=False)
+    cmds.polySoftEdge(mesh + ".e[0:3]", angle=0, constructionHistory=False)
+
+    shader_a = cmds.shadingNode("lambert", asShader=True, name="skinCleanup_red")
+    shader_b = cmds.shadingNode("lambert", asShader=True, name="skinCleanup_blue")
+    sg_a = _shader_group(shader_a)
+    sg_b = _shader_group(shader_b)
+    cmds.sets(mesh + ".f[0:2]", edit=True, forceElement=sg_a)
+    cmds.sets(mesh + ".f[3:5]", edit=True, forceElement=sg_b)
+
+    skin_cluster = cmds.skinCluster([root_joint, mid_joint], mesh, toSelectedBones=True, name="skinCleanup_skinCluster")[0]
+    cmds.skinPercent(skin_cluster, mesh + ".vtx[0:3]", transformValue=[(root_joint, 1.0), (mid_joint, 0.0)])
+    cmds.skinPercent(skin_cluster, mesh + ".vtx[4:7]", transformValue=[(root_joint, 0.5), (mid_joint, 0.5)])
+    cmds.skinPercent(skin_cluster, mesh + ".vtx[8:11]", transformValue=[(root_joint, 0.1), (mid_joint, 0.9)])
+    return mesh
+
+
+def _build_rig_scale_scene():
+    rig_group = cmds.createNode("transform", name="combinedRigScale_source_GRP")
+    cmds.setAttr(rig_group + ".scaleX", 1.5)
+    cmds.setAttr(rig_group + ".scaleY", 1.5)
+    cmds.setAttr(rig_group + ".scaleZ", 1.5)
+
+    root_joint = cmds.createNode("joint", name="combinedRigScale_root_jnt", parent=rig_group)
+    mid_joint = cmds.createNode("joint", name="combinedRigScale_mid_jnt", parent=root_joint)
+    cmds.setAttr(root_joint + ".translateX", 20.0)
+    cmds.setAttr(root_joint + ".translateY", 4.0)
+    cmds.setAttr(mid_joint + ".translateY", 4.0)
+
+    mesh = cmds.polyCube(name="combinedRigScale_geo", width=2.0, height=4.0, depth=1.5, subdivisionsY=2)[0]
+    mesh = cmds.parent(mesh, rig_group)[0]
+    cmds.xform(mesh, objectSpace=True, translation=(20.0, 2.0, 0.0))
+    skin_cluster = cmds.skinCluster([root_joint, mid_joint], mesh, toSelectedBones=True, name="combinedRigScale_skinCluster")[0]
+    cmds.skinPercent(skin_cluster, mesh + ".vtx[0:3]", transformValue=[(root_joint, 1.0), (mid_joint, 0.0)])
+    cmds.skinPercent(skin_cluster, mesh + ".vtx[4:7]", transformValue=[(root_joint, 0.5), (mid_joint, 0.5)])
+    cmds.skinPercent(skin_cluster, mesh + ".vtx[8:11]", transformValue=[(root_joint, 0.1), (mid_joint, 0.9)])
+    return rig_group, root_joint, mid_joint
+
+
+def _build_contact_hold_scene():
+    root = cmds.createNode("transform", name="contactHold_root_ctrl")
+    left_foot = cmds.createNode("transform", name="L_contactHold_foot_ctrl", parent=root)
+    right_foot = cmds.createNode("transform", name="R_contactHold_foot_ctrl", parent=root)
+    cmds.xform(left_foot, objectSpace=True, translation=(2.0, 0.0, 0.0))
+    cmds.xform(right_foot, objectSpace=True, translation=(-2.0, 0.0, 0.0))
+    cmds.setKeyframe(root, attribute="translateX", time=1, value=0.0)
+    cmds.setKeyframe(root, attribute="translateX", time=10, value=9.0)
+    cmds.setKeyframe(root, attribute="rotateY", time=1, value=0.0)
+    cmds.setKeyframe(root, attribute="rotateY", time=10, value=90.0)
+    return root, left_foot, right_foot
+
+
+def run():
+    cmds.file(new=True, force=True)
+    cmds.currentUnit(time="film")
+    cmds.playbackOptions(minTime=1, maxTime=24, animationStartTime=1, animationEndTime=24)
+
+    controller = maya_anim_workflow_tools.MayaAnimWorkflowController()
+
+    hand_target, gun_target, driven_a, driven_b = _build_parenting_scene()
+    cmds.currentTime(8, edit=True)
+    cmds.select([driven_a, driven_b], replace=True)
+    success, message = controller.create_temp_controls()
+    _assert(success, message)
+    _assert(len(controller.parenting_setups(from_selection=False)) == 2, "Expected two temp-control setups")
+
+    cmds.select(hand_target, replace=True)
+    success, message = controller.set_driver_from_selection()
+    _assert(success, message)
+    _assert(controller.driver_node == _long_name(hand_target), "Stored follow target should come from the picked hand target")
+
+    cmds.select([driven_a, driven_b], replace=True)
+    success, message = controller.add_grab_current(hand_target, event_action="pickup")
+    _assert(success, message)
+    setup_lookup = {item["driven"]: item for item in controller.parenting_setups(from_selection=False)}
+    _assert(_long_name(setup_lookup[_long_name(driven_a)]["current_driver"]) == _long_name(hand_target), "Driven A should start by following the hand target")
+    _assert(_long_name(setup_lookup[_long_name(driven_b)]["current_driver"]) == _long_name(hand_target), "Driven B should start by following the hand target")
+
+    cmds.currentTime(10, edit=True)
+    before_switch = _translation(driven_a)
+    cmds.select([driven_a, gun_target], replace=True)
+    success, message = controller.add_grab_current(event_action="pass")
+    _assert(success, message)
+    _assert(_long_name(controller.driver_node) == _long_name(gun_target), "Follow target should auto-switch from the current selection")
+    after_switch = _translation(driven_a)
+    _assert(all(abs(before_switch[index] - after_switch[index]) < 0.01 for index in range(3)), "Switching targets should preserve the driven control position")
+    driven_a_setup = controller.parenting_setups(from_selection=True)[0]
+    _assert(_long_name(driven_a_setup["current_driver"]) == _long_name(gun_target), "Driven A should now follow the gun target")
+
+    cmds.currentTime(12, edit=True)
+    cmds.select([driven_a, driven_b], replace=True)
+    success, message = controller.add_release_current("original", event_action="drop")
+    _assert(success, message)
+    success, message = controller.normalize_transitions()
+    _assert(success, message)
+    setup_lookup = {item["driven"]: item for item in controller.parenting_setups(from_selection=False)}
+    driven_a_events = setup_lookup[_long_name(driven_a)]["event_log"]
+    _assert(len(driven_a_events) == 3, "Driven A should have hand, gun, and release events saved")
+    _assert(driven_a_events[0]["action"] == "pickup" and _long_name(driven_a_events[0]["target"]) == _long_name(hand_target), "First event should be a pickup onto the hand target")
+    _assert(driven_a_events[1]["action"] == "pass" and _long_name(driven_a_events[1]["target"]) == _long_name(gun_target), "Second event should be a pass onto the gun target")
+    _assert(driven_a_events[2]["action"] == "drop" and driven_a_events[2]["space"] == "world", "Third event should be a drop to world when there is no original parent")
+
+    controller.bake_mode = "keys"
+    controller.bake_range = "playback"
+    success, message = controller.bake_to_rig(clear_after=True)
+    _assert(success, message)
+    _assert(not controller.parenting_setups(from_selection=False), "Temp-control setups should clear after bake")
+
+    pivot_a = cmds.createNode("transform", name="pivotA_ctrl")
+    pivot_b = cmds.createNode("transform", name="pivotB_ctrl")
+    cmds.xform(pivot_b, worldSpace=True, translation=(4.0, 0.0, 0.0))
+    cmds.select([pivot_a, pivot_b], replace=True)
+    success, message = controller.create_pivot("centered")
+    _assert(success, message)
+    cmds.xform(controller.active_pivot, worldSpace=True, translation=(0.0, 2.0, 0.0))
+    cmds.setAttr(controller.active_pivot + ".rotateY", 90.0)
+    success, message = controller.apply_pivot_rotation()
+    _assert(success, message)
+    moved = _translation(pivot_b)
+    _assert(abs(moved[0] - 0.0) < 0.01 and abs(moved[2] + 4.0) < 0.01, "Pivot rotation should respect a repositioned pivot")
+    active_pivot = controller.active_pivot
+    success, message = controller.clear_pivot()
+    _assert(success, message)
+    _assert(not active_pivot or not cmds.objExists(active_pivot), "Pivot control should be removed on clear")
+
+    ikfk_nodes = _build_ikfk_scene()
+    cmds.select(ikfk_nodes["fk_controls"], replace=True)
+    detected_profile, issues = controller.detect_profile()
+    _assert(detected_profile["ik_control"].endswith("L_arm_ik_ctrl"), "IK control should be auto-detected")
+    _assert(detected_profile["switch_attr"].endswith(".leftArm_ikfk"), "Switch attribute should be auto-detected")
+    _assert(len(detected_profile["fk_controls"]) == 3, "All FK controls should be auto-detected")
+    _assert(any(item.endswith("L_arm_ik_ctrl") for item in detected_profile.get("ik_controls", [])), "IK controllers should include the IK end control")
+    _assert(any(item.endswith("L_arm_pv_ctrl") for item in detected_profile.get("ik_controls", [])), "IK controllers should include the pole vector control")
+    _assert(not issues, "Expected a clean profile detection, got: {0}".format(issues))
+
+    detected_profile["profile_name"] = "left_arm_profile"
+    success, message = controller.save_profile(detected_profile)
+    _assert(success, message)
+    success, loaded_profile = controller.load_profile("left_arm_profile")
+    _assert(success, loaded_profile)
+    _assert(any(item.endswith("L_arm_ik_ctrl") for item in loaded_profile.get("ik_controls", [])), "Saved profiles should persist IK controller lists")
+    _assert(any(item.endswith("L_arm_pv_ctrl") for item in loaded_profile.get("ik_controls", [])), "Saved profiles should persist pole-vector membership")
+
+    cmds.currentTime(12, edit=True)
+    success, message = controller.switch_fk_to_ik(loaded_profile)
+    _assert(success, message)
+    ik_position = _translation(ikfk_nodes["ik_control"])
+    _assert(abs(ik_position[0] - 8.0) < 0.01 and abs(ik_position[1] - 14.0) < 0.01, "IK control should match end effector")
+    switch_times = _times(ikfk_nodes["switch_attr"].split(".", 1)[0], "leftArm_ikfk")
+    _assert(11.0 in switch_times and 12.0 in switch_times, "Switch attribute should be keyed on frame-1 and frame")
+
+    success, message = controller.switch_ik_to_fk(loaded_profile)
+    _assert(success, message)
+    switch_times = _times(ikfk_nodes["switch_attr"].split(".", 1)[0], "leftArm_ikfk")
+    _assert(11.0 in switch_times and 12.0 in switch_times, "IK -> FK should keep frame-1 and frame keys")
+
+    cleanup_mesh = _build_skin_cleanup_scene()
+    skin_controller = controller.skinning_controller
+    _assert(skin_controller is not None, "Skinning Cleanup controller should exist in the combined tool")
+    cmds.select(cleanup_mesh, replace=True)
+    success, message = skin_controller.analyze_selection()
+    _assert(success, message)
+    _assert(not skin_controller.report["errors"], skin_controller.report_text())
+    source_scale = cmds.getAttr(cleanup_mesh + ".scale")[0]
+    success, message = skin_controller.create_clean_copy()
+    _assert(success, "Skinning Cleanup create failed: {0}\n{1}".format(message, skin_controller.report_text()))
+    _assert(skin_controller.result["verified"], skin_controller.report_text())
+    clean_scale = cmds.getAttr(skin_controller.result["clean_transform"] + ".scale")[0]
+    _assert(all(abs(value - 1.0) <= 0.00001 for value in clean_scale), "Skinning Cleanup copy should freeze scale to 1,1,1")
+    _assert(any(abs(source_scale[index] - 1.0) > 0.001 for index in range(3)), "Skinning Cleanup should keep the original bad scale until replace")
+    success, message = skin_controller.delete_clean_copy()
+    _assert(success, message)
+
+    rig_group, rig_root, rig_mid = _build_rig_scale_scene()
+    rig_scale_controller = controller.rig_scale_controller
+    _assert(rig_scale_controller is not None, "Rig Scale controller should exist in the combined tool")
+    rig_scale_controller.character_root = rig_group
+    rig_scale_controller.skeleton_root = rig_root
+    rig_scale_controller.scale_factor = 2.0
+    source_rig_root_long = maya_rig_scale_export._node_long_name(rig_root)
+    source_rig_mid_long = maya_rig_scale_export._node_long_name(rig_mid)
+    success, message = rig_scale_controller.analyze_setup()
+    _assert(success, message)
+    _assert(not rig_scale_controller.report["errors"], rig_scale_controller.report_text())
+    source_root = _translation(rig_root)
+    source_mid = _translation(rig_mid)
+    source_distance = ((source_root[0] - source_mid[0]) ** 2 + (source_root[1] - source_mid[1]) ** 2 + (source_root[2] - source_mid[2]) ** 2) ** 0.5
+    success, message = rig_scale_controller.create_export_copy()
+    _assert(success, "Rig Scale create failed: {0}\n{1}".format(message, rig_scale_controller.report_text()))
+    _assert(rig_scale_controller.result["verified"], rig_scale_controller.report_text())
+    duplicate_root = rig_scale_controller.result["joint_map"][source_rig_root_long]
+    duplicate_mid = rig_scale_controller.result["joint_map"][source_rig_mid_long]
+    duplicate_scale = cmds.getAttr(duplicate_root + ".scale")[0]
+    _assert(all(abs(value - 1.0) <= 0.00001 for value in duplicate_scale), "Rig Scale joints should stay at 1,1,1 scale")
+    duplicate_root_position = _translation(duplicate_root)
+    duplicate_mid_position = _translation(duplicate_mid)
+    duplicate_distance = ((duplicate_root_position[0] - duplicate_mid_position[0]) ** 2 + (duplicate_root_position[1] - duplicate_mid_position[1]) ** 2 + (duplicate_root_position[2] - duplicate_mid_position[2]) ** 2) ** 0.5
+    _assert(abs(duplicate_distance - (source_distance * 2.0)) <= 0.001, "Rig Scale should scale bone lengths from the current visible size")
+    success, message = rig_scale_controller.delete_export_copy()
+    _assert(success, message)
+
+    hold_root, hold_left_foot, hold_right_foot = _build_contact_hold_scene()
+    contact_hold_controller = controller.contact_hold_controller
+    _assert(contact_hold_controller is not None, "Contact Hold controller should exist in the combined tool")
+    cmds.currentTime(3, edit=True)
+    cmds.select(hold_left_foot, replace=True)
+    success, message = contact_hold_controller.set_controls_from_selection()
+    _assert(success, message)
+    success, message = contact_hold_controller.add_matching_other_side()
+    _assert(success, message)
+    expected_hold_controls = [
+        maya_contact_hold._node_long_name(hold_left_foot),
+        maya_contact_hold._node_long_name(hold_right_foot),
+    ]
+    _assert(contact_hold_controller.control_nodes == expected_hold_controls, "Contact Hold should add the matching other-side foot")
+    contact_hold_controller.start_frame = 3
+    contact_hold_controller.end_frame = 6
+    contact_hold_controller.keep_rotation = True
+    contact_hold_controller.key_before_after = True
+    success, message = contact_hold_controller.analyze_setup()
+    _assert(success, message)
+    anchor_matrices = {
+        hold_left_foot: _matrix(hold_left_foot),
+        hold_right_foot: _matrix(hold_right_foot),
+    }
+    success, message = contact_hold_controller.apply_hold()
+    _assert(success, "Contact Hold failed: {0}\n{1}".format(message, contact_hold_controller.report_text()))
+    for frame_value in range(3, 7):
+        cmds.currentTime(frame_value, edit=True)
+        for node_name, anchor_matrix in anchor_matrices.items():
+            held_matrix = _matrix(node_name)
+            _assert(max(abs(float(anchor_matrix[index]) - float(held_matrix[index])) for index in range(16)) <= 0.001, "Held control should stay in the same world pose")
+    for node_name in (hold_left_foot, hold_right_foot):
+        hold_translate_times = _times(node_name, "translateX")
+        hold_rotate_times = _times(node_name, "rotateY")
+        _assert(2.0 in hold_translate_times and 7.0 in hold_translate_times, "Contact Hold should add clean keys before and after the hold")
+        _assert(2.0 in hold_rotate_times and 7.0 in hold_rotate_times, "Contact Hold should key rotation before and after when Keep Turn Too is on")
+
+    _assert(hasattr(maya_rig_scale_export, "launch_maya_rig_scale_export"), "Rig Scale wrapper entrypoint missing")
+    _assert(hasattr(maya_universal_ikfk_switcher, "launch_maya_universal_ikfk_switcher"), "IK/FK wrapper entrypoint missing")
+    _assert(hasattr(maya_video_reference_tool, "launch_maya_video_reference"), "Video Reference entrypoint missing")
+    _assert(hasattr(maya_timeline_notes, "launch_maya_timeline_notes"), "Timeline Notes entrypoint missing")
+
+    print("MAYA_ANIM_WORKFLOW_TOOLS_SMOKE_TEST: PASS")
+
+
+if __name__ == "__main__":
+    exit_code = 0
+    try:
+        run()
+    except Exception:
+        exit_code = 1
+        traceback.print_exc()
+        print("MAYA_ANIM_WORKFLOW_TOOLS_SMOKE_TEST: FAIL")
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        try:
+            maya.standalone.uninitialize()
+        except Exception:
+            pass
+        os._exit(exit_code)
