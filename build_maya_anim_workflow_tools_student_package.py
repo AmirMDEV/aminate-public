@@ -10,8 +10,11 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parent
 PACKAGE_ROOT = REPO_ROOT / "student_package" / "maya_anim_workflow_tools"
 PAYLOAD_ROOT = PACKAGE_ROOT / "maya_anim_workflow_tools_package"
+ZIP_PATH = REPO_ROOT / "student_package" / "Amirs_Maya_Anim_Workflow_Tools_v0.1_BETA.zip"
 INSTALLER_SOURCE = REPO_ROOT / "install_maya_anim_workflow_tools_dragdrop.py"
 MANIFEST_FILE_NAME = "manifest.json"
+RELEASE_VERSION_LABEL = "Version 0.1 BETA"
+RELEASE_TAG = "v0.1-beta"
 RUNTIME_FILES = [
     "maya_anim_workflow_tools.py",
     "maya_contact_hold.py",
@@ -28,22 +31,12 @@ RUNTIME_FILES = [
 ]
 
 
-def _git_version():
-    completed = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    version = completed.stdout.strip()
-    return version or "unknown"
-
-
 def build_student_package():
     if PACKAGE_ROOT.exists():
         shutil.rmtree(PACKAGE_ROOT)
     PAYLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    if ZIP_PATH.exists():
+        ZIP_PATH.unlink()
 
     shutil.copy2(str(INSTALLER_SOURCE), str(PACKAGE_ROOT / INSTALLER_SOURCE.name))
     for file_name in RUNTIME_FILES:
@@ -51,7 +44,8 @@ def build_student_package():
 
     manifest = {
         "package_name": "AmirMayaAnimWorkflowTools",
-        "version": _git_version(),
+        "version": RELEASE_VERSION_LABEL,
+        "release_tag": RELEASE_TAG,
         "runtime_files": list(RUNTIME_FILES),
     }
     (PAYLOAD_ROOT / MANIFEST_FILE_NAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -72,6 +66,7 @@ def build_student_package():
     )
     for pycache_dir in PACKAGE_ROOT.rglob("__pycache__"):
         shutil.rmtree(pycache_dir, ignore_errors=True)
+    shutil.make_archive(str(ZIP_PATH.with_suffix("")), "zip", str(PACKAGE_ROOT.parent), PACKAGE_ROOT.name)
     return manifest
 
 
@@ -79,6 +74,7 @@ def main():
     manifest = build_student_package()
     print("Built student package at {0}".format(PACKAGE_ROOT))
     print("Version: {0}".format(manifest["version"]))
+    print("Zip: {0}".format(ZIP_PATH))
     return 0
 
 

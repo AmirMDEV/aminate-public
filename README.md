@@ -1,4 +1,6 @@
-# Maya Animation Tools
+# Amir's Maya Anim Workflow Tools
+
+Current release label: `Version 0.1 BETA`
 
 This folder contains standalone Maya Python tools that stay lightweight, shelf-installable, and version-tolerant across Maya 2022-2026.
 
@@ -221,6 +223,17 @@ maya_contact_hold.launch_maya_contact_hold()
 
 The combined window is now resizable, opens docked from the shelf by default, wraps each main tab in a scroll area so tall tools stay usable instead of clipping, starts with `Quick Start` as the first tab, lets you drag tabs into the order you prefer, and now adds a plain-English "What This Tab Helps With" explainer at the top of every tab.
 
+## Current Supported Sections
+
+For the `Version 0.1 BETA` public student release, the sections you should currently rely on are:
+
+- `Onion Skin` in `3D Ghost` mode
+- `Dynamic Parenting`
+- `Hand / Foot Hold`, mainly the foot-hold workflow
+- `Timeline Notes`
+
+Other tabs are still included in the UI, but they should be treated as preview or in-progress sections rather than the current student-facing dependable set.
+
 Supporting modules:
 
 - `maya_dynamic_parent_pivot.py`: full combined implementation and shelf command target
@@ -269,6 +282,130 @@ The packaged student install flow is:
 2. Drag `student_package\maya_anim_workflow_tools\install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
 3. The installer copies or updates the runtime files into the student's Maya scripts folder, refreshes the `Anim Workflow` shelf button on `Amir's Scripts`, opens the tool, and docks it.
 4. To update later, drag the newer installer into Maya again.
+
+The release zip for students is:
+
+- `student_package\Amirs_Maya_Anim_Workflow_Tools_v0.1_BETA.zip`
+
+If a student downloads that zip:
+
+1. Unzip it.
+2. Open the `maya_anim_workflow_tools` folder inside it.
+3. Open Maya.
+4. Drag `install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
+5. Wait for the installer to copy the files, refresh the `Anim Workflow` shelf button, open the tool, and dock it.
+6. To update later, repeat the same drag-and-drop step with a newer zip.
+
+## Step-By-Step Install Instructions
+
+1. Download `Amirs_Maya_Anim_Workflow_Tools_v0.1_BETA.zip` from the GitHub release.
+2. Right-click the zip and extract it.
+3. Open Autodesk Maya.
+4. Inside the extracted folder, drag `install_maya_anim_workflow_tools_dragdrop.py` straight into the Maya viewport.
+5. Maya will install or update the tool automatically.
+6. Maya will refresh the `Anim Workflow` shelf button automatically.
+7. Maya will open the tool automatically.
+8. The tool should dock automatically on the right side of Maya.
+9. If you install a newer version later, drag the newer installer into Maya again.
+
+## How To Use Each Section
+
+### Quick Start
+
+Use this first if you want the plain-English reminder for what each tab is for.
+
+### Dynamic Parenting
+
+Use this for props like a gun magazine.
+
+Simple example:
+
+1. Put the magazine where you want it.
+2. Click `Add Object`.
+3. Pick the hand or gun.
+4. Click `Pick Parent`.
+5. If you want the object to line up to that parent, click `Snap To Parent`.
+6. If you want to save a custom grip position for that parent, move the object and click `Save This Offset`.
+7. Click `Switch to this Parent`.
+8. Use `World` when you want the object to let go.
+
+### Hand / Foot Hold
+
+Use this when a foot should stay planted while the body keeps moving.
+
+Simple example:
+
+1. Pick the foot control.
+2. Set the frame where the foot first touches down.
+3. Set the frame where the foot stops sticking.
+4. Choose the world axis you want to lock.
+5. Click the hold button to save the planted section.
+6. Use the saved hold list to turn rows on, off, update them, or delete them later.
+
+### Dynamic Pivot
+
+Use this when you want a temporary turning point without changing the rig's real pivot.
+
+### Universal IK/FK
+
+Use this when you need to switch a limb between IK and FK and match the pose.
+
+### Onion Skin
+
+For the current public beta, use `3D Ghost` mode.
+
+Simple example:
+
+1. Pick the rig root or object you want to preview.
+2. Open the `Onion Skin` tab.
+3. Choose your past and future ghost counts.
+4. Keep the mode on `3D Ghost`.
+5. Click the attach button.
+6. Scrub the timeline to see the ghosted poses.
+
+### Rotation Doctor
+
+Use this to inspect and repair rotation issues on animated controls.
+
+### Skinning Cleanup
+
+Use this when a skinned mesh has bad scale and you want a clean rebuilt copy.
+
+### Rig Scale
+
+Use this when you want to build a clean export copy of a character at a new size.
+
+### Video Reference
+
+Use this to bring in a video reference card, offset it, and line up optional audio.
+
+### Timeline Notes
+
+Use this to color parts of the timeline and attach readable notes to those sections.
+
+Simple example:
+
+1. Highlight a range in the time slider.
+2. Open `Timeline Notes`.
+3. Leave the auto highlighted-range option on if you want the note to follow the selected range.
+4. Type the full note text.
+5. Pick a color.
+6. Add the note.
+7. Scrub through the timeline to read the notes in the live reader.
+
+## Tab Screenshots
+
+- [Quick Start](release_screenshots/quick_start.png)
+- [Dynamic Parenting](release_screenshots/dynamic_parenting.png)
+- [Hand / Foot Hold](release_screenshots/hand_foot_hold.png)
+- [Dynamic Pivot](release_screenshots/dynamic_pivot.png)
+- [Universal IK/FK](release_screenshots/universal_ikfk.png)
+- [Onion Skin](release_screenshots/onion_skin.png)
+- [Rotation Doctor](release_screenshots/rotation_doctor.png)
+- [Skinning Cleanup](release_screenshots/skinning_cleanup.png)
+- [Rig Scale](release_screenshots/rig_scale.png)
+- [Video Reference](release_screenshots/video_reference.png)
+- [Timeline Notes](release_screenshots/timeline_notes.png)
 
 ## Notes
 
