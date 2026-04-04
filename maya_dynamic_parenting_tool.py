@@ -46,6 +46,7 @@ WORLD_LOCATOR_NAME = "amirDynamicParentingWorld_LOC"
 SETUP_TYPE = "amirDynamicParentSetupV2"
 TARGETS_GROUP_SUFFIX = "_adpTargets_GRP"
 TARGET_LOCATOR_SUFFIX = "_adpTarget_LOC"
+FOLLOW_GROUP_SUFFIX = "_adpFollow_GRP"
 DRIVEN_CONSTRAINT_SUFFIX = "_adpDriven_parentConstraint"
 FOLLOW_CONSTRAINT_SUFFIX = "_adpFollow_parentConstraint"
 EPSILON = 1.0e-4
@@ -172,6 +173,30 @@ def _matrix_from_node(node_name):
     return om.MMatrix(cmds.xform(node_name, query=True, matrix=True, worldSpace=True))
 
 
+def _visible_pose_matrix(node_name):
+    if not om:
+        return _matrix_from_node(node_name)
+    temp_node = ""
+    try:
+        temp_node = cmds.createNode("transform", name="__adpVisiblePose_{0}".format(uuid.uuid4().hex[:8]))
+        if cmds.objExists(node_name + ".rotateOrder") and cmds.objExists(temp_node + ".rotateOrder"):
+            try:
+                cmds.setAttr(temp_node + ".rotateOrder", int(cmds.getAttr(node_name + ".rotateOrder")))
+            except Exception:
+                pass
+        translation = cmds.xform(node_name, query=True, worldSpace=True, translation=True)
+        rotation = cmds.xform(node_name, query=True, worldSpace=True, rotation=True)
+        cmds.xform(temp_node, worldSpace=True, translation=translation)
+        cmds.xform(temp_node, worldSpace=True, rotation=rotation)
+        return _matrix_from_node(temp_node)
+    finally:
+        if temp_node and cmds.objExists(temp_node):
+            try:
+                cmds.delete(temp_node)
+            except Exception:
+                pass
+
+
 def _set_world_matrix(node_name, matrix):
     cmds.xform(node_name, worldSpace=True, matrix=_matrix_to_list(matrix))
 
@@ -240,7 +265,8 @@ def _set_keyable_channels(node_name, attrs):
 
 def _dynamic_parent_blend_attrs(node_name):
     attrs = []
-    for attr_name in cmds.listAttr(node_name, keyable=True) or []:
+    all_attr_names = _dedupe_preserve_order((cmds.listAttr(node_name, keyable=True) or []) + (cmds.listAttr(node_name) or []))
+    for attr_name in all_attr_names:
         lower_name = attr_name.lower()
         if not lower_name.startswith("blend"):
             continue
@@ -248,7 +274,7 @@ def _dynamic_parent_blend_attrs(node_name):
             attrs.append(attr_name)
     if attrs:
         return attrs
-    return [attr_name for attr_name in (cmds.listAttr(node_name, keyable=True) or []) if attr_name.lower().startswith("blend")]
+    return [attr_name for attr_name in all_attr_names if attr_name.lower().startswith("blend")]
 
 
 def _get_blend_attr_values(node_name):
@@ -388,10 +414,35 @@ def _set_constraint_weights(constraint_name, weight_map, keyframe=True):
         value = float(weight_map.get(target_name, 0.0))
         cmds.setAttr("{0}.{1}".format(constraint_name, alias), value)
         if keyframe:
-            try:
-                cmds.setKeyframe(constraint_name, attribute=alias)
-            except Exception:
-                pass
+                try:
+                    cmds.setKeyframe(constraint_name, attribute=alias)
+                except Exception:
+                    pass
+
+
+def _constraint_target_index(constraint_name, target_node):
+    target_list = cmds.parentConstraint(constraint_name, query=True, targetList=True) or []
+    normalized_target = (cmds.ls(target_node, long=True) or [target_node])[0]
+    normalized_targets = [(cmds.ls(target_name, long=True) or [target_name])[0] for target_name in target_list]
+    try:
+        return normalized_targets.index(normalized_target)
+    except ValueError:
+        return None
+
+
+def _set_constraint_target_offsets(constraint_name, target_node, translate=(0.0, 0.0, 0.0), rotate=(0.0, 0.0, 0.0)):
+    target_index = _constraint_target_index(constraint_name, target_node)
+    if target_index is None:
+        return
+    plug_base = "{0}.target[{1}]".format(constraint_name, target_index)
+    try:
+        cmds.setAttr(plug_base + ".targetOffsetTranslate", float(translate[0]), float(translate[1]), float(translate[2]), type="double3")
+    except Exception:
+        pass
+    try:
+        cmds.setAttr(plug_base + ".targetOffsetRotate", float(rotate[0]), float(rotate[1]), float(rotate[2]), type="double3")
+    except Exception:
+        pass
 
 
 def _ensure_root_hierarchy():
@@ -490,6 +541,7 @@ def _load_setup_data(setup_group):
                 "label": entry.get("label") or ("World" if entry.get("is_world") else _short_name(driver_node or locator_name)),
                 "driver": driver_node,
                 "locator": locator_name,
+                "follow_group": entry.get("follow_group", "") if entry.get("follow_group", "") and cmds.objExists(entry.get("follow_group", "")) else "",
                 "follow_constraint": follow_constraint if follow_constraint and cmds.objExists(follow_constraint) else "",
                 "is_world": bool(entry.get("is_world")),
             }
@@ -591,7 +643,7 @@ class MayaDynamicParentingController(object):
         cmds.setAttr(locator_name + ".visibility", 0)
         if start_in_current_position:
             if reference_matrix is None:
-                reference_matrix = _matrix_from_node(driven_node)
+                reference_matrix = _visible_pose_matrix(driven_node)
             _set_world_matrix(locator_name, reference_matrix)
         else:
             _set_world_matrix(locator_name, _identity_matrix())
@@ -600,13 +652,14 @@ class MayaDynamicParentingController(object):
             "label": "World",
             "driver": "",
             "locator": locator_name,
+            "follow_group": "",
             "follow_constraint": "",
             "is_world": True,
         }
 
     def _ensure_setup(self, driven_node, start_in_current_position=True):
         driven_node = (cmds.ls(driven_node, long=True) or [driven_node])[0]
-        reference_matrix = _matrix_from_node(driven_node)
+        reference_matrix = _visible_pose_matrix(driven_node)
         existing = _find_setup_for_driven(driven_node)
         if existing:
             data = _load_setup_data(existing)
@@ -633,9 +686,10 @@ class MayaDynamicParentingController(object):
         driven_constraint = cmds.parentConstraint(
             world_entry["locator"],
             driven_node,
-            maintainOffset=bool(start_in_current_position),
+            maintainOffset=False,
             name="{0}{1}".format(safe_name, DRIVEN_CONSTRAINT_SUFFIX),
         )[0]
+        _set_constraint_target_offsets(driven_constraint, world_entry["locator"])
         if start_in_current_position:
             _set_world_translation_rotation_preserve_scale(driven_node, reference_matrix)
         _set_string_attr(setup_group, "adpDrivenConstraint", driven_constraint)
@@ -676,6 +730,8 @@ class MayaDynamicParentingController(object):
         for target in setup.get("targets") or []:
             if target.get("follow_constraint") and cmds.objExists(target["follow_constraint"]):
                 nodes_to_delete.append(target["follow_constraint"])
+            if target.get("follow_group") and cmds.objExists(target["follow_group"]):
+                nodes_to_delete.append(target["follow_group"])
             if target.get("locator") and cmds.objExists(target["locator"]):
                 nodes_to_delete.append(target["locator"])
         if setup.get("setup_group") and cmds.objExists(setup["setup_group"]):
@@ -759,6 +815,7 @@ class MayaDynamicParentingController(object):
                     "label": target["label"],
                     "driver": target["driver"],
                     "locator": target["locator"],
+                    "follow_group": target.get("follow_group", ""),
                     "follow_constraint": target["follow_constraint"],
                     "is_world": bool(target["is_world"]),
                 }
@@ -769,7 +826,7 @@ class MayaDynamicParentingController(object):
         setup = self.current_setup()
         if not setup:
             return False, "Add or pick the constrained object first."
-        reference_matrix = _matrix_from_node(setup["driven"])
+        reference_matrix = _visible_pose_matrix(setup["driven"])
         if bool(setup.get("maintain_offset", True)):
             current_weights = self.current_weights(setup)
             for target in setup["targets"]:
@@ -786,23 +843,32 @@ class MayaDynamicParentingController(object):
             existing = self._target_entry_by_driver(setup, target_node)
             if existing:
                 continue
+            target_matrix = _matrix_from_node(target_node)
+            follow_group = cmds.createNode("transform", name="{0}{1}".format(_safe_node_name(target_node), FOLLOW_GROUP_SUFFIX), parent=setup["targets_group"])
+            _set_world_matrix(follow_group, target_matrix)
             locator_name = cmds.spaceLocator(name="{0}{1}".format(_safe_node_name(target_node), TARGET_LOCATOR_SUFFIX))[0]
-            locator_name = cmds.parent(locator_name, setup["targets_group"])[0]
+            locator_name = cmds.parent(locator_name, follow_group)[0]
             cmds.setAttr(locator_name + ".visibility", 0)
-            _set_world_matrix(locator_name, reference_matrix)
+            for attr_name in ("translate", "rotate"):
+                try:
+                    cmds.setAttr(locator_name + "." + attr_name, 0.0, 0.0, 0.0, type="double3")
+                except Exception:
+                    pass
             follow_constraint = cmds.parentConstraint(
                 target_node,
-                locator_name,
-                maintainOffset=True,
+                follow_group,
+                maintainOffset=False,
                 name="{0}{1}".format(_safe_node_name(target_node), FOLLOW_CONSTRAINT_SUFFIX),
             )[0]
-            _set_world_matrix(locator_name, reference_matrix)
+            _set_world_matrix(follow_group, target_matrix)
             cmds.parentConstraint(locator_name, setup["driven"], edit=True, weight=0.0)
+            _set_constraint_target_offsets(setup["driven_constraint"], locator_name)
             target_entry = {
                 "id": uuid.uuid4().hex[:8],
                 "label": _short_name(target_node),
                 "driver": target_node,
                 "locator": locator_name,
+                "follow_group": follow_group,
                 "follow_constraint": follow_constraint,
                 "is_world": False,
             }
@@ -905,78 +971,107 @@ class MayaDynamicParentingController(object):
         if not constraint_name or not cmds.objExists(constraint_name) or not locator_name or not cmds.objExists(locator_name):
             return
         if reference_matrix is None:
-            reference_matrix = _matrix_from_node(setup["driven"])
-        target_list = cmds.parentConstraint(constraint_name, query=True, targetList=True) or []
-        normalized_locator = (cmds.ls(locator_name, long=True) or [locator_name])[0]
-        normalized_targets = [(cmds.ls(target_name, long=True) or [target_name])[0] for target_name in target_list]
-        try:
-            target_index = normalized_targets.index(normalized_locator)
-        except ValueError:
+            reference_matrix = _visible_pose_matrix(setup["driven"])
+        if target_entry.get("is_world"):
+            if maintain_offset and reference_matrix is not None:
+                _set_world_matrix(locator_name, reference_matrix)
+            _set_constraint_target_offsets(constraint_name, locator_name)
             return
-        temp_prefix = "__adpTmpOffset_{0}".format(uuid.uuid4().hex[:8])
+
+        driver_node = target_entry.get("driver")
+        if not driver_node or not cmds.objExists(driver_node):
+            return
+        follow_group = target_entry.get("follow_group", "")
+        if not follow_group or not cmds.objExists(follow_group):
+            parents = cmds.listRelatives(locator_name, parent=True, fullPath=True, type="transform") or []
+            follow_group = parents[0] if parents else ""
+        if not follow_group or not cmds.objExists(follow_group):
+            follow_group = cmds.createNode("transform", name="{0}{1}".format(_safe_node_name(driver_node), FOLLOW_GROUP_SUFFIX), parent=setup["targets_group"])
+            target_entry["follow_group"] = follow_group
+            try:
+                locator_name = cmds.parent(locator_name, follow_group)[0]
+                target_entry["locator"] = locator_name
+            except Exception:
+                pass
+
+        follow_constraint = target_entry.get("follow_constraint", "")
+        if follow_constraint and cmds.objExists(follow_constraint):
+            try:
+                cmds.delete(follow_constraint)
+            except Exception:
+                pass
+
+        driver_matrix = _matrix_from_node(driver_node)
+        _set_world_matrix(follow_group, driver_matrix)
+        follow_constraint = cmds.parentConstraint(
+            driver_node,
+            follow_group,
+            maintainOffset=False,
+            name="{0}{1}".format(_safe_node_name(driver_node), FOLLOW_CONSTRAINT_SUFFIX),
+        )[0]
+        target_entry["follow_constraint"] = follow_constraint
+        _set_world_matrix(follow_group, driver_matrix)
+        if not maintain_offset:
+            for attr_name, value in (
+                ("translate", (0.0, 0.0, 0.0)),
+                ("rotate", (0.0, 0.0, 0.0)),
+            ):
+                try:
+                    cmds.setAttr(locator_name + "." + attr_name, value[0], value[1], value[2], type="double3")
+                except Exception:
+                    pass
+            _set_constraint_target_offsets(constraint_name, locator_name)
+            return
+        _set_world_translation_rotation_preserve_scale(locator_name, reference_matrix)
         temp_target = ""
         temp_driven = ""
         temp_constraint = ""
-        plug_base = "{0}.target[{1}]".format(constraint_name, target_index)
         try:
-            temp_target = cmds.spaceLocator(name=temp_prefix + "_target")[0]
-            temp_driven = cmds.spaceLocator(name=temp_prefix + "_driven")[0]
-            target_parent = (cmds.listRelatives(locator_name, parent=True, fullPath=True) or [None])[0]
-            driven_parent = (cmds.listRelatives(setup["driven"], parent=True, fullPath=True) or [None])[0]
-            if target_parent:
-                temp_target = cmds.parent(temp_target, target_parent)[0]
-            if driven_parent:
-                temp_driven = cmds.parent(temp_driven, driven_parent)[0]
+            temp_target = cmds.createNode("transform", name="__adpTmpTarget_{0}".format(uuid.uuid4().hex[:8]))
             if cmds.objExists(locator_name + ".rotateOrder") and cmds.objExists(temp_target + ".rotateOrder"):
                 try:
                     cmds.setAttr(temp_target + ".rotateOrder", int(cmds.getAttr(locator_name + ".rotateOrder")))
                 except Exception:
                     pass
-            if cmds.objExists(setup["driven"] + ".rotateOrder") and cmds.objExists(temp_driven + ".rotateOrder"):
+            _set_world_translation_rotation_preserve_scale(temp_target, _visible_pose_matrix(locator_name))
+            duplicate_nodes = cmds.duplicate(
+                setup["driven"],
+                parentOnly=True,
+                inputConnections=False,
+                upstreamNodes=False,
+                returnRootsOnly=True,
+                name="__adpTmpDriven_{0}".format(uuid.uuid4().hex[:8]),
+            ) or []
+            if duplicate_nodes:
+                temp_driven = duplicate_nodes[0]
+            driven_parent = (cmds.listRelatives(setup["driven"], parent=True, fullPath=True) or [None])[0]
+            if temp_driven and driven_parent:
                 try:
-                    cmds.setAttr(temp_driven + ".rotateOrder", int(cmds.getAttr(setup["driven"] + ".rotateOrder")))
+                    parent_result = cmds.parent(temp_driven, driven_parent)
+                    if parent_result:
+                        temp_driven = parent_result[0]
                 except Exception:
                     pass
-            _set_world_matrix(temp_target, _matrix_from_node(locator_name))
-            _set_world_matrix(temp_driven, reference_matrix)
-            temp_constraint = cmds.parentConstraint(temp_target, temp_driven, maintainOffset=True, name=temp_prefix + "_pc")[0]
-            offset_translate = cmds.getAttr(temp_constraint + ".target[0].targetOffsetTranslate")[0]
-            offset_rotate = cmds.getAttr(temp_constraint + ".target[0].targetOffsetRotate")[0]
-        except Exception:
-            target_matrix = _matrix_from_node(locator_name)
-            offset_matrix = reference_matrix * target_matrix.inverse()
-            transform = om.MTransformationMatrix(offset_matrix)
-            translation = transform.translation(om.MSpace.kWorld)
-            rotation = transform.rotation(asQuaternion=True).asEulerRotation()
-            rotate_order = 0
-            if cmds.objExists(locator_name + ".rotateOrder"):
-                try:
-                    rotate_order = int(cmds.getAttr(locator_name + ".rotateOrder"))
-                except Exception:
-                    rotate_order = 0
-            rotation.reorderIt(ROTATE_ORDER_TO_EULER[rotate_order])
-            offset_translate = (translation.x, translation.y, translation.z)
-            offset_rotate = (math.degrees(rotation.x), math.degrees(rotation.y), math.degrees(rotation.z))
+            if temp_driven:
+                _set_world_translation_rotation_preserve_scale(temp_driven, reference_matrix)
+                temp_constraint = cmds.parentConstraint(temp_target, temp_driven, maintainOffset=True)[0]
+                offset_translate = cmds.getAttr(temp_constraint + ".target[0].targetOffsetTranslate")[0]
+                offset_rotate = cmds.getAttr(temp_constraint + ".target[0].targetOffsetRotate")[0]
+                _set_constraint_target_offsets(constraint_name, locator_name, translate=offset_translate, rotate=offset_rotate)
+            else:
+                _set_constraint_target_offsets(constraint_name, locator_name)
         finally:
             nodes_to_delete = [node_name for node_name in (temp_constraint, temp_target, temp_driven) if node_name and cmds.objExists(node_name)]
             if nodes_to_delete:
                 try:
                     cmds.delete(nodes_to_delete)
                 except Exception:
-                    for node_name in nodes_to_delete:
-                        if cmds.objExists(node_name):
-                            try:
-                                cmds.delete(node_name)
-                            except Exception:
-                                pass
-        cmds.setAttr(plug_base + ".targetOffsetTranslate", *offset_translate, type="double3")
-        cmds.setAttr(plug_base + ".targetOffsetRotate", *offset_rotate, type="double3")
-        cmds.setKeyframe(plug_base + ".targetOffsetTranslateX")
-        cmds.setKeyframe(plug_base + ".targetOffsetTranslateY")
-        cmds.setKeyframe(plug_base + ".targetOffsetTranslateZ")
-        cmds.setKeyframe(plug_base + ".targetOffsetRotateX")
-        cmds.setKeyframe(plug_base + ".targetOffsetRotateY")
-        cmds.setKeyframe(plug_base + ".targetOffsetRotateZ")
+                    pass
+        for attr_name in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"):
+            try:
+                cmds.setKeyframe(locator_name, attribute=attr_name)
+            except Exception:
+                pass
 
     def _record_event(self, setup, action_label, weight_map):
         event_log = list(setup.get("event_log") or [])
@@ -1022,9 +1117,15 @@ class MayaDynamicParentingController(object):
             for target in setup["targets"]:
                 constraint_weights[target["locator"]] = float(weight_map.get(target["id"], 0.0))
             _set_constraint_weights(setup["driven_constraint"], constraint_weights, keyframe=True)
+            _set_keyable_channels(setup["driven"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
+            blend_values = self._active_constraint_blend_values(setup, active=True)
+            if blend_values:
+                _set_blend_attr_values(setup["driven"], blend_values, keyframe=True)
+            if maintain_offset and reference_matrix is not None:
+                _set_world_translation_rotation_preserve_scale(setup["driven"], reference_matrix)
+                _set_keyable_channels(setup["driven"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
             if reseed_active and maintain_offset and reference_matrix is not None:
                 self._store_switch_reference_matrix(setup, reference_matrix)
-            _set_keyable_channels(setup["driven"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
             if record_event and action_label:
                 self._record_event(setup, action_label, weight_map)
         finally:
@@ -1049,7 +1150,7 @@ class MayaDynamicParentingController(object):
             return False, "Turn at least one parent on before you key the weights."
         # Always use the live pose at the moment of the switch so a stale
         # stored snap pose cannot pull the object back to an older position.
-        reference_matrix = _matrix_from_node(setup["driven"])
+        reference_matrix = _visible_pose_matrix(setup["driven"])
         self._key_weight_map_on_frame(
             setup,
             sanitized,
@@ -1076,7 +1177,7 @@ class MayaDynamicParentingController(object):
         target_frame = current_frame + DEFAULT_SWITCH_STEP
         # Always use the live pose at the moment of the switch so a stale
         # stored snap pose cannot pull the object back to an older position.
-        reference_matrix = _matrix_from_node(setup["driven"])
+        reference_matrix = _visible_pose_matrix(setup["driven"])
         current_weights = self.current_weights(setup)
         current_blend_values = _get_blend_attr_values(setup["driven"])
         same_target = all(
@@ -1090,7 +1191,7 @@ class MayaDynamicParentingController(object):
             frame_value=current_frame,
             action_label=None,
             record_event=False,
-            reseed_active=False,
+            reseed_active=maintain_offset,
             reference_matrix=reference_matrix,
         )
         if current_blend_values:
@@ -1203,6 +1304,11 @@ class MayaDynamicParentingController(object):
                 if target["follow_constraint"] and cmds.objExists(target["follow_constraint"]):
                     try:
                         cmds.delete(target["follow_constraint"])
+                    except Exception:
+                        pass
+                if target.get("follow_group") and cmds.objExists(target["follow_group"]):
+                    try:
+                        cmds.delete(target["follow_group"])
                     except Exception:
                         pass
                 if target["locator"] and cmds.objExists(target["locator"]):
