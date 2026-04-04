@@ -1,6 +1,6 @@
-# Amir's Maya Anim Workflow Tools
+# Maya Anim Workflow Tools
 
-`Version 0.1 BETA`
+By Amir Mansaray
 
 A tabbed Maya toolset for animation workflow helpers.
 
@@ -14,6 +14,8 @@ The sections in regular use in this beta are:
 - `Timeline Notes`
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
+
+`Version 0.1 BETA`
 
 ## Install
 
