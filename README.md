@@ -34,8 +34,8 @@ This section is for props that need to move between parents, like a magazine mov
 
 ![Dynamic Parenting](release_screenshots/dynamic_parenting.png)
 
-Video:
-[Dynamic Parenting](release_media/dynamic_parenting.mp4)
+Animated example:
+![Dynamic Parenting GIF](release_media/dynamic_parenting.gif)
 
 Simple example:
 
