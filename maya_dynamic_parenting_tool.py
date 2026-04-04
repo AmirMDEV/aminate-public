@@ -1581,9 +1581,9 @@ if QtWidgets:
             target_row.addWidget(QtWidgets.QLabel("Parent To"))
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
+            target_row.addWidget(self.parent_to_picked_button)
             target_row.addWidget(self.snap_to_picked_button)
             target_row.addWidget(self.save_offset_button)
-            target_row.addWidget(self.parent_to_picked_button)
             main_layout.addLayout(target_row)
 
             switch_hint = QtWidgets.QLabel(
