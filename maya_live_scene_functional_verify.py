@@ -347,19 +347,76 @@ try:
     if not hand_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in hand_blend_values.values()):
         raise RuntimeError("Dynamic Parenting did not turn on the driven blendParent attribute.")
     cmds.currentTime(6, edit=True)
+    cmds.xform(driven, worldSpace=True, translation=(15.0, 3.25, -0.5))
+    hand_manual = _world_translation(driven)
     before_switch = _world_translation(driven)
     _select([driven, gun_driver])
     gun_pick_success, gun_pick_message = parenting_controller.set_pending_target_from_selection()
     if not gun_pick_success:
         raise RuntimeError("Dynamic Parenting gun pick failed: {0}".format(gun_pick_message))
-    gun_switch_success, gun_switch_message = parenting_controller.apply_pending_target()
+    result["scene"]["manual_switch_before_apply"] = _world_translation(driven)
+    current_setup_before_apply = parenting_controller.current_setup()
+    result["scene"]["manual_switch_target_positions_before_apply"] = {
+        target["label"]: _world_translation(target["locator"])
+        for target in current_setup_before_apply.get("targets") or []
+    }
+    add_success = parenting_controller.add_targets_from_nodes([gun_driver])
+    if not add_success[0] if isinstance(add_success, tuple) else not add_success:
+        raise RuntimeError("Dynamic Parenting gun add failed: {0}".format(add_success[1] if isinstance(add_success, tuple) else add_success))
+    result["scene"]["manual_switch_after_add"] = _world_translation(driven)
+    current_setup_after_add = parenting_controller.current_setup()
+    result["scene"]["manual_switch_target_positions_after_add"] = {
+        target["label"]: _world_translation(target["locator"])
+        for target in current_setup_after_add.get("targets") or []
+    }
+    gun_target_entry = parenting_controller._target_entry_by_driver(current_setup_after_add, gun_driver)
+    if not gun_target_entry:
+        gun_target_entry = next(
+            (
+                target
+                for target in current_setup_after_add.get("targets") or []
+                if target.get("label") == "dynamicGun_CTRL"
+            ),
+            None,
+        )
+    if not gun_target_entry:
+        raise RuntimeError("Dynamic Parenting gun target was not added.")
+    if any(abs(float(hand_manual[index]) - float(result["scene"]["manual_switch_after_add"][index])) > 0.01 for index in range(3)):
+        raise RuntimeError("Dynamic Parenting add-target step should preserve the hand-adjusted pose when Maintain Current Offset is on.")
+    gun_switch_success, gun_switch_message = parenting_controller.parent_fully_to_target(gun_target_entry["id"])
     if not gun_switch_success:
         raise RuntimeError("Dynamic Parenting gun switch failed: {0}".format(gun_switch_message))
     after_switch = _world_translation(driven)
+    gun_weights_after = parenting_controller.current_weights(parenting_controller.current_setup())
+    current_setup_after = parenting_controller.current_setup()
+    locator_positions_after = {}
+    target_offsets_after = {}
+    driven_constraint_after = current_setup_after.get("driven_constraint")
+    for target in current_setup_after.get("targets") or []:
+        locator_positions_after[target["label"]] = _world_translation(target["locator"])
+        if driven_constraint_after and target["locator"]:
+            try:
+                target_list = cmds.parentConstraint(driven_constraint_after, query=True, targetList=True) or []
+                target_index = target_list.index(target["locator"])
+                plug_base = "{0}.target[{1}]".format(driven_constraint_after, target_index)
+                target_offsets_after[target["label"]] = {
+                    "translate": list(cmds.getAttr(plug_base + ".targetOffsetTranslate")[0]),
+                    "rotate": list(cmds.getAttr(plug_base + ".targetOffsetRotate")[0]),
+                }
+            except Exception:
+                target_offsets_after[target["label"]] = None
     gun_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(driven)
     if not gun_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in gun_blend_values.values()):
         raise RuntimeError("Dynamic Parenting did not keep the driven blendParent attribute on after the second switch.")
-    current_setup = parenting_controller.current_setup()
+    result["scene"]["manual_switch_before"] = hand_manual
+    result["scene"]["manual_switch_after"] = after_switch
+    result["scene"]["manual_switch_message"] = gun_switch_message
+    result["scene"]["manual_switch_weights"] = gun_weights_after
+    result["scene"]["manual_switch_target_positions"] = locator_positions_after
+    result["scene"]["manual_switch_target_offsets"] = target_offsets_after
+    if any(abs(float(hand_manual[index]) - float(after_switch[index])) > 0.01 for index in range(3)):
+        raise RuntimeError("Dynamic Parenting switch should preserve the hand-adjusted pose when Maintain Current Offset is on.")
+    current_setup = current_setup_after
     target_lookup = {target["label"]: target["id"] for target in current_setup.get("targets") or []}
     cmds.currentTime(8, edit=True)
     blend_success, blend_message = parenting_controller.apply_weight_map(
