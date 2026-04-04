@@ -333,10 +333,16 @@ try:
     hand_pick_success, hand_pick_message = parenting_controller.set_pending_target_from_selection()
     if not hand_pick_success:
         raise RuntimeError("Dynamic Parenting hand pick failed: {0}".format(hand_pick_message))
+    hand_snap_success, hand_snap_message = parenting_controller.snap_pending_target()
+    if not hand_snap_success:
+        raise RuntimeError("Dynamic Parenting hand snap failed: {0}".format(hand_snap_message))
+    hand_snapped = _world_translation(driven)
     hand_switch_success, hand_switch_message = parenting_controller.apply_pending_target()
     if not hand_switch_success:
         raise RuntimeError("Dynamic Parenting hand switch failed: {0}".format(hand_switch_message))
     hand_after = _world_translation(driven)
+    if any(abs(float(hand_snapped[index]) - float(hand_after[index])) > 0.01 for index in range(3)):
+        raise RuntimeError("Dynamic Parenting snap pose was not preserved after switching.")
     hand_blend_values = maya_dynamic_parenting_tool._get_blend_attr_values(driven)
     if not hand_blend_values or any(abs(float(value) - 1.0) > 0.001 for value in hand_blend_values.values()):
         raise RuntimeError("Dynamic Parenting did not turn on the driven blendParent attribute.")
@@ -691,6 +697,7 @@ try:
             "starting_setups": starting_setup_count,
             "remaining_setups": len(remaining_setups),
             "hand_before": hand_before,
+            "hand_snapped": hand_snapped,
             "hand_after": hand_after,
             "switch_before": before_switch,
             "switch_after": after_switch,
@@ -885,8 +892,13 @@ result = namespace.get("result")
     if abs(float(dynamic_parenting.get("world_weight", 0.0)) - 1.0) > 0.001:
         raise AssertionError(json.dumps(result, indent=2))
     hand_before = dynamic_parenting.get("hand_before") or []
+    hand_snapped = dynamic_parenting.get("hand_snapped") or []
     hand_after = dynamic_parenting.get("hand_after") or []
-    if len(hand_before) != 3 or len(hand_after) != 3 or any(abs(float(hand_before[index]) - float(hand_after[index])) > 0.01 for index in range(3)):
+    if len(hand_before) != 3 or len(hand_snapped) != 3:
+        raise AssertionError(json.dumps(result, indent=2))
+    if not any(abs(float(hand_before[index]) - float(hand_snapped[index])) > 0.01 for index in range(3)):
+        raise AssertionError(json.dumps(result, indent=2))
+    if len(hand_snapped) != 3 or len(hand_after) != 3 or any(abs(float(hand_snapped[index]) - float(hand_after[index])) > 0.01 for index in range(3)):
         raise AssertionError(json.dumps(result, indent=2))
     switch_before = dynamic_parenting.get("switch_before") or []
     switch_after = dynamic_parenting.get("switch_after") or []
