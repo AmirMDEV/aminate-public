@@ -49,3 +49,10 @@ Keep this folder focused on Maya and animation tooling. Browser automation, NAS,
 - When embedding sibling Maya tools into the combined Anim Workflow window, make them behave like real child panels inside the tabs instead of leaving them as floating dialog-style widgets.
 - For dockable Maya UIs in this repo, use a real dock host widget with its own object name, let Maya create the `workspaceControl` from that host name, and keep the content widget parented under that host. Do not name the host like the final workspace control or Maya can dock an empty shell while the real UI still floats.
 - When adding a new workflow to the combined tool, update the tabbed UI, README, workspace map, and smoke coverage in the same task so the main entrypoint stays truthful.
+
+### Release Defaults
+
+- For student-facing or public releases of this repo, package the release as a drag-and-drop Maya installer and upload that packaged build to GitHub Releases instead of expecting users to clone the repo.
+- The release asset should be the built installer zip from `student_package\`, not the raw source repo.
+- The release flow should include: rebuild the student package, generate the zip, verify the docked installer path in live Maya, capture current screenshots, push the source changes, then publish or update the GitHub Release with the installer zip attached.
+- Public release notes and README copy should stay factual and simple: what the tool is, which sections are dependable, how to install it, and how to use the supported sections. Avoid developer-focused implementation notes in the public-facing release copy.
