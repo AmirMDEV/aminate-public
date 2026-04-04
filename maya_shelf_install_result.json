@@ -1,4 +1,0 @@
-{
-  "error": "Traceback (most recent call last):\n  File \"<maya console>\", line 20, in <module>\n  File \"C:\\Users\\Amir Mansaray\\Documents\\Github\\maya-animation-tools\\maya_onion_skin.py\", line 251, in install_maya_onion_skin_shelf_button\n    existing_buttons = cmds.shelfLayout(shelf_name, query=True, childArray=True) or []\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Object 'Amir's Scripts' not found.\n\n",
-  "status": "fail"
-}
