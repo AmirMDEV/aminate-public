@@ -800,10 +800,10 @@ class MayaDynamicParentingController(object):
     def _target_snap_matrix(self, target_entry):
         if not target_entry:
             return None
-        if target_entry.get("driver") and cmds.objExists(target_entry["driver"]):
-            return _matrix_from_node(target_entry["driver"])
         if target_entry.get("locator") and cmds.objExists(target_entry["locator"]):
-            return _matrix_from_node(target_entry["locator"])
+            return _visible_pose_matrix(target_entry["locator"])
+        if target_entry.get("driver") and cmds.objExists(target_entry["driver"]):
+            return _visible_pose_matrix(target_entry["driver"])
         return None
 
     def _save_targets(self, setup, targets):
@@ -1158,7 +1158,7 @@ class MayaDynamicParentingController(object):
             frame_value=float(cmds.currentTime(query=True)),
             action_label=action_label,
             record_event=True,
-            reseed_active=True,
+            reseed_active=maintain_offset,
             reference_matrix=reference_matrix,
         )
         _set_blend_attr_values(setup["driven"], self._active_constraint_blend_values(setup, active=True), keyframe=True)
@@ -1208,7 +1208,7 @@ class MayaDynamicParentingController(object):
             frame_value=target_frame,
             action_label=action_label,
             record_event=True,
-            reseed_active=True,
+            reseed_active=maintain_offset,
             reference_matrix=reference_matrix,
         )
         original_frame = float(cmds.currentTime(query=True))
@@ -1280,6 +1280,37 @@ class MayaDynamicParentingController(object):
             setup = self.current_setup()
             existing = self._target_entry_by_driver(setup, target_node)
         return self.snap_to_target_id(existing["id"])
+
+    def save_offset_to_target_id(self, target_id):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Add or pick the constrained object first."
+        target_entry = self._target_entry_by_id(setup, target_id)
+        if not target_entry:
+            return False, "Pick a parent row first."
+        reference_matrix = _visible_pose_matrix(setup["driven"])
+        self._reseed_target(setup, target_entry, True, reference_matrix=reference_matrix)
+        self._save_targets(setup, setup["targets"])
+        self._store_switch_reference_matrix(setup, reference_matrix)
+        if target_entry.get("is_world"):
+            return True, "Saved the current spot as the World offset."
+        return True, "Saved the current spot as the offset for {0}.".format(target_entry["label"])
+
+    def save_offset_to_pending_target(self):
+        setup = self.current_setup()
+        if not setup:
+            return False, "Add or pick the constrained object first."
+        target_node = self.pending_target_node
+        if not target_node or not cmds.objExists(target_node):
+            return False, "Pick the next hand, gun, prop, or object first."
+        existing = self._target_entry_by_driver(setup, target_node)
+        if not existing:
+            success, message = self.add_targets_from_nodes([target_node])
+            if not success:
+                return success, message
+            setup = self.current_setup()
+            existing = self._target_entry_by_driver(setup, target_node)
+        return self.save_offset_to_target_id(existing["id"])
 
     def reseed_active_weights(self):
         setup = self.current_setup()
@@ -1541,6 +1572,8 @@ if QtWidgets:
             self.use_target_button.setToolTip("Take the thing you picked and put it into the Parent To box.")
             self.snap_to_picked_button = QtWidgets.QPushButton("Snap To Parent")
             self.snap_to_picked_button.setToolTip("Move the object onto this parent now and remember that pose for the next switch.")
+            self.save_offset_button = QtWidgets.QPushButton("Save This Offset")
+            self.save_offset_button.setToolTip("After you move the object where you want it, save that pose as the offset for this parent.")
             self.parent_to_picked_button = QtWidgets.QPushButton("Switch to this Parent")
             self.parent_to_picked_button.setToolTip("Keep the old parent on this frame, then turn this picked parent on next frame.")
             self.add_target_button = QtWidgets.QPushButton("Add Parent")
@@ -1549,12 +1582,16 @@ if QtWidgets:
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
             target_row.addWidget(self.snap_to_picked_button)
+            target_row.addWidget(self.save_offset_button)
             target_row.addWidget(self.parent_to_picked_button)
             main_layout.addLayout(target_row)
 
             switch_hint = QtWidgets.QLabel(
-                "You can also snap the object where you want it first, then click Switch to this Parent. "
-                "If Maintain Current Offset is on, the switch keeps that exact spot."
+                "Easy offset workflow:\n"
+                "1. Pick Parent.\n"
+                "2. Move the object where you want it to sit on that parent.\n"
+                "3. Click Save This Offset.\n"
+                "4. Later, Snap To Parent or Switch to this Parent."
             )
             switch_hint.setWordWrap(True)
             main_layout.addWidget(switch_hint)
@@ -1574,9 +1611,12 @@ if QtWidgets:
             action_row = QtWidgets.QHBoxLayout()
             self.parent_to_row_button = QtWidgets.QPushButton("Reparent to Selected Parent")
             self.parent_to_row_button.setToolTip("Use the parent row you picked and switch to it on the next frame.")
+            self.save_offset_row_button = QtWidgets.QPushButton("Save Offset For Selected Parent")
+            self.save_offset_row_button.setToolTip("Save the object's current pose as the offset for the parent row you picked.")
             self.parent_to_world_button = QtWidgets.QPushButton("World")
             self.parent_to_world_button.setToolTip("Stop following everything and switch to World on the next frame.")
             action_row.addWidget(self.parent_to_row_button)
+            action_row.addWidget(self.save_offset_row_button)
             action_row.addWidget(self.parent_to_world_button)
             main_layout.addLayout(action_row)
 
@@ -1609,6 +1649,7 @@ if QtWidgets:
             advanced_help = QtWidgets.QLabel(
                 "What these extra buttons mean:\n"
                 "- Add Parent: remember a parent for later.\n"
+                "- Save This Offset: save how the object should sit on that parent.\n"
                 "- Blend Parents: let two parents share the object on this frame.\n"
                 "- Fix Jump Here: fix a pop on this frame.\n"
                 "- Forget Parent: remove that parent from the list.\n"
@@ -1660,9 +1701,11 @@ if QtWidgets:
             self.maintain_offset_check.toggled.connect(self._toggle_maintain_offset)
             self.use_target_button.clicked.connect(self._use_target)
             self.snap_to_picked_button.clicked.connect(self._snap_to_picked_target)
+            self.save_offset_button.clicked.connect(self._save_offset_to_picked_target)
             self.parent_to_picked_button.clicked.connect(self._parent_to_picked_target)
             self.add_target_button.clicked.connect(self._add_target)
             self.parent_to_row_button.clicked.connect(self._parent_to_row)
+            self.save_offset_row_button.clicked.connect(self._save_offset_to_row)
             self.parent_to_world_button.clicked.connect(self._parent_to_world)
             self.apply_weights_button.clicked.connect(self._apply_weights)
             self.fix_pop_button.clicked.connect(self._refresh_active_weights)
@@ -1833,6 +1876,15 @@ if QtWidgets:
             success, message = self.controller.snap_pending_target()
             self._set_status(message, success)
 
+        def _save_offset_to_picked_target(self):
+            if not self.controller.pending_target_node or not cmds.objExists(self.controller.pending_target_node):
+                success, message = self.controller.set_pending_target_from_selection()
+                if not success:
+                    self._set_status(message, success)
+                    return
+            success, message = self.controller.save_offset_to_pending_target()
+            self._set_status(message, success)
+
         def _parent_to_target_id(self, target_id):
             success, message = self.controller.parent_fully_to_target(target_id, action_label="switch")
             self._set_status(message, success)
@@ -1843,6 +1895,14 @@ if QtWidgets:
                 self._set_status("Pick a parent row first.", False)
                 return
             success, message = self.controller.parent_fully_to_target(target_ids[0], action_label="switch")
+            self._set_status(message, success)
+
+        def _save_offset_to_row(self):
+            target_ids = self._selected_target_ids()
+            if not target_ids:
+                self._set_status("Pick a parent row first.", False)
+                return
+            success, message = self.controller.save_offset_to_target_id(target_ids[0])
             self._set_status(message, success)
 
         def _parent_to_world(self):
