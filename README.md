@@ -4,16 +4,16 @@
 
 A tabbed Maya toolset for animation workflow helpers.
 
-## Current Working Sections
+## Sections In Use
 
-The sections to rely on in the current beta are:
+The sections in regular use in this beta are:
 
 - `Onion Skin` in `3D Ghost` mode
 - `Dynamic Parenting`
 - `Hand / Foot Hold`, mainly the foot-hold workflow
 - `Timeline Notes`
 
-Other tabs are still visible in the tool, but they should be treated as preview or in-progress sections for now.
+Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
 ## Install
 
@@ -22,13 +22,13 @@ Other tabs are still visible in the tool, but they should be treated as preview 
 3. Open the `maya_anim_workflow_tools` folder inside the extracted folder.
 4. Open Autodesk Maya.
 5. Drag `install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
-6. Wait for the tool to install, open, and dock automatically.
+6. The tool installs, opens, and docks automatically.
 
 ## How To Use
 
 ### Dynamic Parenting
 
-Use this for props that need to move between parents, like a magazine moving between a hand, a gun, and world space.
+This section is for props that need to move between parents, like a magazine moving between a hand, a gun, and world space.
 
 Simple example:
 
@@ -43,7 +43,7 @@ Simple example:
 
 ### Hand / Foot Hold
 
-Use this when a foot should stay planted while the body keeps moving.
+This section is for planted contact, especially when a foot should stay in place while the body keeps moving.
 
 Simple example:
 
@@ -56,7 +56,7 @@ Simple example:
 
 ### Onion Skin
 
-For the current beta, use `3D Ghost` mode.
+The dependable mode in the current beta is `3D Ghost`.
 
 Simple example:
 
@@ -69,7 +69,7 @@ Simple example:
 
 ### Timeline Notes
 
-Use this to color parts of the timeline and attach readable notes to those sections.
+This section is for colored timeline ranges with readable notes attached to them.
 
 Simple example:
 
