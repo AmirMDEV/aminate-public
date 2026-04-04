@@ -72,6 +72,10 @@ try:
     start_in_place_checked = panel.start_in_place_check.isChecked()
     initial_scale = cmds.xform(mag, query=True, relative=True, scale=True)
 
+    cmds.select([hand], replace=True)
+    panel._use_target()
+    parent_only_pick_status = panel.status_label.text()
+
     cmds.select([mag, hand], replace=True)
     panel._use_target()
     first_pick_status = panel.status_label.text()
@@ -167,6 +171,7 @@ try:
         "after_add": after_add,
         "start_in_place_text": start_in_place_text,
         "start_in_place_checked": start_in_place_checked,
+        "parent_only_pick_status": parent_only_pick_status,
         "pick_parent_text": panel.use_target_button.text(),
         "snap_text": panel.snap_to_picked_button.text(),
         "parent_to_picked_text": panel.parent_to_picked_button.text(),
@@ -245,6 +250,8 @@ except Exception:
     if result.get("snap_text") != "Snap To Parent":
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("parent_to_picked_text") != "Switch to this Parent":
+        raise AssertionError(json.dumps(result, indent=2))
+    if "reloadHand_CTRL" not in (result.get("parent_only_pick_status") or ""):
         raise AssertionError(json.dumps(result, indent=2))
     if result.get("save_parent_text") != "Add Parent":
         raise AssertionError(json.dumps(result, indent=2))

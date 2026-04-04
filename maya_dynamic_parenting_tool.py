@@ -151,7 +151,17 @@ def _frame_display(frame_value):
 def _selected_transforms():
     if not MAYA_AVAILABLE:
         return []
-    return _dedupe_preserve_order(cmds.ls(selection=True, long=True, type="transform") or [])
+    normalized = []
+    for node_name in cmds.ls(selection=True, long=True) or []:
+        if not cmds.objExists(node_name):
+            continue
+        if cmds.nodeType(node_name) == "transform":
+            normalized.append((cmds.ls(node_name, long=True) or [node_name])[0])
+            continue
+        parents = cmds.listRelatives(node_name, parent=True, fullPath=True, type="transform") or []
+        if parents:
+            normalized.append(parents[0])
+    return _dedupe_preserve_order(normalized)
 
 
 def _matrix_to_list(matrix):
