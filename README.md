@@ -32,6 +32,11 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 This section is for props that need to move between parents, like a magazine moving between a hand, a gun, and world space.
 
+![Dynamic Parenting](release_screenshots/dynamic_parenting.png)
+
+Video:
+[Dynamic Parenting](release_media/dynamic_parenting.mp4)
+
 Simple example:
 
 1. Put the magazine where you want it.
@@ -47,6 +52,8 @@ Simple example:
 
 This section is for planted contact, especially when a foot should stay in place while the body keeps moving.
 
+![Hand / Foot Hold](release_screenshots/hand_foot_hold.png)
+
 Simple example:
 
 1. Pick the foot control.
@@ -60,6 +67,8 @@ Simple example:
 
 The dependable mode in the current beta is `3D Ghost`.
 
+![Onion Skin](release_screenshots/onion_skin.png)
+
 Simple example:
 
 1. Pick the rig root or object you want to preview.
@@ -72,6 +81,8 @@ Simple example:
 ### Timeline Notes
 
 This section is for colored timeline ranges with readable notes attached to them.
+
+![Timeline Notes](release_screenshots/timeline_notes.png)
 
 Simple example:
 
