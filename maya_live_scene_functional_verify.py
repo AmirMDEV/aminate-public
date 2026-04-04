@@ -360,9 +360,13 @@ try:
         target["label"]: _world_translation(target["locator"])
         for target in current_setup_before_apply.get("targets") or []
     }
-    add_success = parenting_controller.add_targets_from_nodes([gun_driver])
-    if not add_success[0] if isinstance(add_success, tuple) else not add_success:
-        raise RuntimeError("Dynamic Parenting gun add failed: {0}".format(add_success[1] if isinstance(add_success, tuple) else add_success))
+    add_result = parenting_controller.add_targets_from_nodes([gun_driver])
+    if isinstance(add_result, tuple):
+        add_success, add_message = add_result
+    else:
+        add_success, add_message = bool(add_result), ""
+    if not add_success:
+        raise RuntimeError("Dynamic Parenting gun add failed: {0}".format(add_message))
     result["scene"]["manual_switch_after_add"] = _world_translation(driven)
     current_setup_after_add = parenting_controller.current_setup()
     result["scene"]["manual_switch_target_positions_after_add"] = {
