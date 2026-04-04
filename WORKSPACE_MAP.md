@@ -9,6 +9,9 @@ This folder contains standalone Maya tooling aimed at animator-facing workflows 
 - `maya_shelf_utils.py`: shared shelf installer and shelf-name normalization helpers for Maya tools in this folder
 - `maya_anim_workflow_tools.py`: canonical tabbed entrypoint for dynamic parenting, hand/foot holds, dynamic pivot, universal IK/FK, onion skin, rotation cleanup, skinning cleanup, rig-scale export, video reference, and timeline-note workflows
 - `maya_dynamic_parent_pivot.py`: combined implementation behind the tabbed Anim Workflow UI, including the embedded Hand / Foot Hold, Onion Skin, Rotation Doctor, Skinning Cleanup, Rig Scale, Video Reference, and Timeline Notes tabs
+- `install_maya_anim_workflow_tools_dragdrop.py`: drag-and-drop Maya installer entrypoint that updates installed runtime files, refreshes the shelf button, opens the tool, and docks it
+- `build_maya_anim_workflow_tools_student_package.py`: rebuilds the student-ready package folder with the current runtime files and installer
+- `student_package\maya_anim_workflow_tools\`: generated student distribution folder with the drag-and-drop installer, payload files, and a short install README
 - `maya_dynamic_parenting_tool.py`: scene-backed dynamic parenting panel for hand/gun/world switching, stored parent choices, and weighted blends inside the combined workflow tool
 - `maya_universal_ikfk_switcher.py`: compatibility launcher that opens the IK/FK tab directly
 - `maya_live_bridge_bootstrap.py`: live Maya bridge bootstrap helper that uses the command-line field after a fresh Maya reopen
@@ -23,6 +26,7 @@ This folder contains standalone Maya tooling aimed at animator-facing workflows 
 - `README.md`: install, usage, and compatibility notes
 - `maya_anim_workflow_tools_smoke_test.py`: mayapy smoke for the combined Anim Workflow tool
 - `maya_anim_workflow_tools_live_ui_smoke.py`: broker-driven live Maya UI smoke for the tabbed Anim Workflow window
+- `maya_anim_workflow_tools_dragdrop_install_verify.py`: broker-driven live Maya verification for the drag-and-drop installer and docked launch path
 - `maya_anim_workflow_tools_shelf_install_verify.py`: broker-driven live Maya shelf install verification for the combined Anim Workflow tool on `Amir's Scripts`
 - `maya_live_scene_functional_verify.py`: broker-driven live Maya functional verifier that uses the current open scene plus temporary cleanup-only test nodes
 - `maya_rotation_doctor_smoke_test.py`: mayapy smoke for rotation diagnosis and repair recipes
@@ -48,4 +52,4 @@ Treat this folder as Maya-specific tooling. If the task is about browser automat
 
 When the task is about dynamic parenting, hand/foot contact holds, dynamic pivot, IK/FK switching, onion skinning, rotation cleanup, skinning cleanup, rig-scale export, video reference, timeline notes, scene-bound tutorial authoring, guided Maya lessons, or pose-compare ghost snapshots, start with the dedicated module for that workflow first and treat `maya_anim_workflow_tools.py` as the combined-tab entrypoint only when the task explicitly needs the global tabbed window.
 
-For the current house-standard validation anchor, start with `maya_anim_workflow_tools.py`, then use `maya_anim_workflow_tools_live_ui_smoke.py` and `maya_anim_workflow_tools_shelf_install_verify.py` to prove the docked UI and shelf-install path in live Maya.
+For the current house-standard validation anchor, start with `maya_anim_workflow_tools.py`, then use `maya_anim_workflow_tools_live_ui_smoke.py`, `maya_anim_workflow_tools_dragdrop_install_verify.py`, and `maya_anim_workflow_tools_shelf_install_verify.py` to prove the docked UI plus both installer paths in live Maya.

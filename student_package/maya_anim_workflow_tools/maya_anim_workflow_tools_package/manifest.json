@@ -1,0 +1,18 @@
+{
+  "package_name": "AmirMayaAnimWorkflowTools",
+  "version": "267f971",
+  "runtime_files": [
+    "maya_anim_workflow_tools.py",
+    "maya_contact_hold.py",
+    "maya_dynamic_parent_pivot.py",
+    "maya_dynamic_parenting_tool.py",
+    "maya_onion_skin.py",
+    "maya_rig_scale_export.py",
+    "maya_rotation_doctor.py",
+    "maya_shelf_utils.py",
+    "maya_skinning_cleanup.py",
+    "maya_timeline_notes.py",
+    "maya_universal_ikfk_switcher.py",
+    "maya_video_reference_tool.py"
+  ]
+}

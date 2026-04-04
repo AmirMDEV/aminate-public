@@ -531,12 +531,9 @@ try:
         "workspace_floating": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, query=True, floating=True)) if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True) else None,
         "current_tab": docked_window.tab_widget.tabText(docked_window.tab_widget.currentIndex()),
         "docked_is_window": bool(docked_window.isWindow()),
-        "dock_host_exists": bool(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST),
-        "dock_host_is_window": bool(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST.isWindow()) if maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST else None,
-        "dock_host_object_name": maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST.objectName() if maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST else "",
         "host_owns_content": bool(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST and getattr(maya_dynamic_parent_pivot.GLOBAL_DOCK_HOST, "content_widget", None) is docked_window),
         "expected_workspace_name": maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME,
-        "expected_dock_host_name": maya_dynamic_parent_pivot.DOCK_HOST_OBJECT_NAME,
+        "legacy_workspace_name": maya_dynamic_parent_pivot.LEGACY_WORKSPACE_CONTROL_NAME,
         "dock_parent_chain": dock_parent_chain,
     }}
 except Exception:
@@ -557,17 +554,9 @@ except Exception:
         raise AssertionError(json.dumps(dock_payload, indent=2))
     if dock.get("docked_is_window"):
         raise AssertionError(json.dumps(dock_payload, indent=2))
-    if not dock.get("dock_host_exists"):
-        raise AssertionError(json.dumps(dock_payload, indent=2))
-    if dock.get("dock_host_is_window"):
-        raise AssertionError(json.dumps(dock_payload, indent=2))
-    if dock.get("dock_host_object_name") != dock.get("expected_dock_host_name"):
-        raise AssertionError(json.dumps(dock_payload, indent=2))
-    if not dock.get("host_owns_content"):
-        raise AssertionError(json.dumps(dock_payload, indent=2))
-    if dock.get("expected_dock_host_name") not in (dock.get("dock_parent_chain") or []):
-        raise AssertionError(json.dumps(dock_payload, indent=2))
     if dock.get("expected_workspace_name") not in (dock.get("dock_parent_chain") or []):
+        raise AssertionError(json.dumps(dock_payload, indent=2))
+    if dock.get("legacy_workspace_name") in (dock.get("dock_parent_chain") or []):
         raise AssertionError(json.dumps(dock_payload, indent=2))
 
     ikfk_code = """

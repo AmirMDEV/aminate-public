@@ -259,6 +259,17 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 1. Keep this folder on Maya's script path, or add it to `sys.path` before import.
 2. Launch the tool you want directly, or install its shelf button into `Amir's Scripts`.
 
+## Student Package
+
+Use `build_maya_anim_workflow_tools_student_package.py` to regenerate the student-ready package in `student_package\maya_anim_workflow_tools`.
+
+The packaged student install flow is:
+
+1. Open Maya.
+2. Drag `student_package\maya_anim_workflow_tools\install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
+3. The installer copies or updates the runtime files into the student's Maya scripts folder, refreshes the `Anim Workflow` shelf button on `Amir's Scripts`, opens the tool, and docks it.
+4. To update later, drag the newer installer into Maya again.
+
 ## Notes
 
 - Maya Dynamic Parenting is now a scene-backed setup rather than a bake-and-clear helper. You add the constrained object once, add any hand, gun, prop, or world choices it should follow, and those parent choices stay stored in the Maya scene.
@@ -283,6 +294,7 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 - Maya Video Reference no longer relies on Maya loading an MP4 directly into an image plane. Movie files are proxied into an image sequence for the current playback range, which avoids the yellow-X "Unable to load the image file" failure seen with direct MP4 image planes.
 - Maya Video Reference still uses the active viewport to place the tracing card, so clicking the view you want first is still the safest workflow.
 - Maya Video Reference now opens a lightweight `Video Notes` manager when Blue Pencil is unavailable. That fallback uses curve lines on a live drawing surface and visibility holds instead of leaving the user with a dead-end warning.
+- The combined `Maya Anim Workflow Tools` window now uses the real dockable Maya workspace-control path directly. The actual tool window is what docks now, not an empty host wrapper.
 - Maya Timeline Notes falls back to direct bookmark-node authoring in `mayapy`, so note export/import logic can be tested without the full Maya UI.
 - Maya Timeline Notes now has an `Auto Use Highlighted Range` checkbox. When it is on, the Start and End fields follow the highlighted time-slider range automatically, and `Use Playback Range` turns that auto-sync off so manual ranges stay put.
 - Maya Timeline Notes now also has `Auto Update Picked Note` on by default, so if you pick a note and change its text, color, or frame range, the scene note updates automatically after a short debounce.
@@ -310,7 +322,9 @@ By default, the shelf installer targets `Amir's Scripts`, replaces the prior Ani
 - `maya_onion_skin_shelf_install_verify.py`: broker-driven live Maya shelf install check that installs Onion Skin into `Amir's Scripts`, confirms the selected shelf tab, and verifies the saved shelf file exists
 - `maya_anim_workflow_tools_smoke_test.py`: mayapy smoke for dynamic parenting, dynamic pivot, IK/FK profile detection, profile persistence, and both switch directions
 - `maya_anim_workflow_tools_live_ui_smoke.py`: broker-driven live Maya GUI smoke that opens the tabbed workflow window, verifies the tabs, and checks the branded footer
+- `maya_anim_workflow_tools_dragdrop_install_verify.py`: broker-driven live Maya verification for the student drag-and-drop updater installer, including copied install files, shelf refresh, automatic load, and docked launch
 - `maya_anim_workflow_tools_shelf_install_verify.py`: broker-driven live Maya shelf install check that installs the combined Anim Workflow tool into `Amir's Scripts`, confirms the selected shelf tab, and verifies the saved shelf file on disk
+- `build_maya_anim_workflow_tools_student_package.py`: refreshes the student distribution folder with the current runtime files and drag-and-drop installer
 - `maya_live_bridge_bootstrap.py`: direct live-Maya bridge bootstrap helper that uses Maya's command-line field instead of relying on Script Editor being open first
 - `maya_live_scene_functional_verify.py`: broker-driven live Maya scene verifier that uses the already-open scene, runs a real Onion Skin attach/refresh cycle on scene geometry, and exercises Rotation Doctor plus the combined Anim Workflow tabs with temporary cleanup-only test nodes
 - `maya_skinning_cleanup_smoke_test.py`: mayapy smoke for exact-weight skin cleanup, scale freeze, verification, replace, and unsupported-history failure cases

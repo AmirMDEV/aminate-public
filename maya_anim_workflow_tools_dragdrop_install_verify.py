@@ -84,103 +84,82 @@ def run_bridge_exec_python(code: str, timeout: int = 120) -> dict:
 
 def main() -> int:
     ensure_bridge()
-
+    package_root = REPO_ROOT / "student_package" / "maya_anim_workflow_tools"
     code = """
 import importlib
+import json
 import os
 import sys
 import traceback
 
-from maya import cmds, mel
-
 repo_path = r"{repo_path}"
+package_root = r"{package_root}"
 if repo_path not in sys.path:
     sys.path.insert(0, repo_path)
+if package_root not in sys.path:
+    sys.path.insert(0, package_root)
 
 try:
+    import maya.cmds as cmds
+    import maya_dynamic_parent_pivot
+    import install_maya_anim_workflow_tools_dragdrop
+    importlib.reload(maya_dynamic_parent_pivot)
+    importlib.reload(install_maya_anim_workflow_tools_dragdrop)
+
+    maya_dynamic_parent_pivot._close_existing_window()
+    install_result = install_maya_anim_workflow_tools_dragdrop.install_maya_anim_workflow_tools_from_dragdrop()
     import maya_anim_workflow_tools
     importlib.reload(maya_anim_workflow_tools)
-    button_name = maya_anim_workflow_tools.install_maya_anim_workflow_tools_shelf_button()
+    docked_window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab="quick_start")
 
-    shelf_top_level = mel.eval("$tmpVar=$gShelfTopLevel")
-    child_names = cmds.shelfTabLayout(shelf_top_level, query=True, childArray=True) or []
-    tab_labels = cmds.shelfTabLayout(shelf_top_level, query=True, tabLabel=True) or []
-    shelf_layout = ""
-    shelf_label = ""
-    for index, child_name in enumerate(child_names):
-        visible_label = tab_labels[index] if index < len(tab_labels) else child_name
-        if visible_label == "Amir's Scripts" or child_name == "Amir_s_Scripts":
-            shelf_layout = child_name
-            shelf_label = visible_label
+    parent_chain = []
+    walker = docked_window
+    while walker is not None:
+        try:
+            parent_chain.append(walker.objectName() or walker.__class__.__name__)
+        except Exception:
+            parent_chain.append(str(type(walker)))
+        try:
+            walker = walker.parentWidget()
+        except Exception:
             break
 
-    selected_tab = cmds.shelfTabLayout(shelf_top_level, query=True, selectTab=True)
-    buttons = cmds.shelfLayout(shelf_layout, query=True, childArray=True) or []
-    matching_button = ""
-    matching_label = ""
-    matching_doc_tag = ""
-    legacy_doc_tags = []
-    for child in buttons:
-        if not cmds.control(child, exists=True):
-            continue
-        try:
-            doc_tag = cmds.shelfButton(child, query=True, docTag=True)
-        except Exception:
-            doc_tag = ""
-        if doc_tag != maya_anim_workflow_tools.SHELF_BUTTON_DOC_TAG:
-            if doc_tag in ("mayaOnionSkinShelfButton", "mayaRotationDoctorShelfButton"):
-                legacy_doc_tags.append(doc_tag)
-            continue
-        matching_button = child
-        matching_label = cmds.shelfButton(child, query=True, label=True) or ""
-        matching_doc_tag = doc_tag
-        break
-
-    shelf_dir = cmds.internalVar(userShelfDir=True)
-    shelf_file_path = os.path.join(shelf_dir, "shelf_" + shelf_layout + ".mel")
-
+    install_root = install_maya_anim_workflow_tools_dragdrop._install_root(cmds)
     result = {{
         "ok": True,
-        "button_name": button_name,
-        "shelf_layout": shelf_layout,
-        "shelf_label": shelf_label,
-        "selected_tab": selected_tab,
-        "matching_button": matching_button,
-        "matching_label": matching_label,
-        "matching_doc_tag": matching_doc_tag,
-        "legacy_doc_tags": legacy_doc_tags,
-        "shelf_file_path": shelf_file_path,
+        "install_result": install_result,
+        "install_root": install_root,
+        "workspace_exists": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True)),
+        "workspace_floating": bool(cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, query=True, floating=True)) if cmds.workspaceControl(maya_dynamic_parent_pivot.WORKSPACE_CONTROL_NAME, exists=True) else None,
+        "parent_chain": parent_chain,
+        "window_title": docked_window.windowTitle(),
     }}
 except Exception:
     result = {{
         "ok": False,
         "traceback": traceback.format_exc(),
     }}
-""".format(repo_path=str(REPO_ROOT).replace("\\", "\\\\"))
+""".format(
+        repo_path=str(REPO_ROOT).replace("\\", "\\\\"),
+        package_root=str(package_root).replace("\\", "\\\\"),
+    )
 
     payload = run_bridge_exec_python(code, timeout=120)
     result = payload.get("result") or {}
     if not result.get("ok"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if result.get("shelf_layout") != "Amir_s_Scripts":
+    if not pathlib.Path(result.get("install_root") or "").exists():
         raise AssertionError(json.dumps(payload, indent=2))
-    if result.get("shelf_label") != "Amir's Scripts":
+    if result.get("window_title") != "Maya Anim Workflow Tools":
         raise AssertionError(json.dumps(payload, indent=2))
-    if result.get("selected_tab") != "Amir_s_Scripts":
+    if not result.get("workspace_exists"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if result.get("matching_label") != "Anim Workflow":
+    if result.get("workspace_floating"):
         raise AssertionError(json.dumps(payload, indent=2))
-    if result.get("matching_doc_tag") != "mayaAnimWorkflowShelfButton":
-        raise AssertionError(json.dumps(payload, indent=2))
-    if not result.get("matching_button"):
-        raise AssertionError(json.dumps(payload, indent=2))
-    if result.get("legacy_doc_tags"):
-        raise AssertionError(json.dumps(payload, indent=2))
-    shelf_file_path = pathlib.Path(result.get("shelf_file_path") or "")
-    if not shelf_file_path.exists():
+    if "mayaAnimWorkflowToolsWindowWorkspaceControl" not in (result.get("parent_chain") or []):
         raise AssertionError(json.dumps(payload, indent=2))
 
-    print("MAYA_ANIM_WORKFLOW_TOOLS_SHELF_INSTALL_VERIFY: PASS")
+    print("MAYA_ANIM_WORKFLOW_TOOLS_DRAGDROP_INSTALL_VERIFY: PASS")
     return 0
 
 
