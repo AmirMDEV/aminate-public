@@ -4,7 +4,7 @@ By Amir Mansaray
 
 A tabbed Maya toolset for animation workflow helpers.
 
-`Version 0.2 BETA`
+`Version 0.2.1 BETA`
 
 ## Sections In Use
 
@@ -21,7 +21,7 @@ The other tabs are present in the interface, but they are still closer to previe
 
 ## Install
 
-1. Download `Amirs_Maya_Anim_Workflow_Tools_v0.2_BETA.zip` from the latest release.
+1. Download `Amirs_Maya_Anim_Workflow_Tools_v0.2.1_BETA.zip` from the latest release.
 2. Unzip it.
 3. Open the `maya_anim_workflow_tools` folder inside the extracted folder.
 4. Open Autodesk Maya.

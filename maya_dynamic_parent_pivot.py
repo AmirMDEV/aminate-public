@@ -63,7 +63,7 @@ LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.2 BETA"
+VERSION_LABEL = "Version 0.2.1 BETA"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Anim Workflow"
 SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
