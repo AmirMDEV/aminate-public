@@ -1,8 +1,9 @@
 """
 maya_dynamic_parent_pivot.py
 
-Combined Maya animation workflow tool with Dynamic Parenting, Dynamic Pivot,
-Universal IK/FK, Onion Skin, Rotation Doctor, Skinning Cleanup, and Rig Scale tabs.
+Combined Maya animation workflow tool with Dynamic Parenting, Hand / Foot Hold,
+Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter (Face and Body), Onion Skin,
+Rotation Doctor, Skinning Cleanup, Rig Scale, Video Reference, and Timeline Notes tabs.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -14,7 +15,10 @@ import os
 import maya_shelf_utils
 import maya_contact_hold
 import maya_dynamic_parenting_tool
+import maya_face_retarget
 import maya_onion_skin
+import maya_surface_contact
+import maya_timing_tools
 import maya_rotation_doctor
 import maya_skinning_cleanup
 import maya_rig_scale_export
@@ -59,10 +63,12 @@ LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.1 BETA"
+VERSION_LABEL = "Version 0.2 BETA"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Anim Workflow"
 SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
+SHELF_ICON_FILE_NAME = "maya_anim_workflow_tools_icon.png"
+SHELF_ICON_OVERLAY_LABEL = "MAW"
 ROOT_GROUP_NAME = "amirDynamicTools_GRP"
 PARENTING_GROUP_NAME = "amirDynamicParenting_GRP"
 PIVOT_GROUP_NAME = "amirDynamicPivot_GRP"
@@ -76,8 +82,10 @@ DEFAULT_PV_DISTANCE_MULTIPLIER = 2.0
 EPSILON = 1.0e-5
 TAB_PARENTING = "Dynamic Parenting"
 TAB_CONTACT_HOLD = "Hand / Foot Hold"
+TAB_SURFACE_CONTACT = "Surface Contact"
 TAB_PIVOT = "Dynamic Pivot"
 TAB_IKFK = "Universal IK/FK"
+TAB_FACE_RETARGET = "Controls Retargeter (Face and Body)"
 TAB_ONION = "Onion Skin"
 TAB_ROTATION = "Rotation Doctor"
 TAB_SKIN = "Skinning Cleanup"
@@ -85,12 +93,16 @@ TAB_RIG_SCALE = "Rig Scale"
 TAB_VIDEO = "Video Reference"
 TAB_TIMELINE = "Timeline Notes"
 TAB_GUIDE = "Quick Start"
+TAB_TIMING = "Scene Helpers"
 TAB_HELP_TEXT = {
     TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
+    TAB_TIMING: "Use this when you want the Scene Helpers quick buttons for Auto Key, Auto Snap To Frames, Game Animation Mode, Set Up Render Environment, Delete Render Environment, Camera Offset controls, and Camera Preset plus whole-frame timing cleanup.",
     TAB_PARENTING: "Use this when one prop or control needs to switch between hand, gun, world, or mixed parents without popping. Best for reloads, pickups, passes, and drops.",
     TAB_CONTACT_HOLD: "Use this when a hand or foot should stay planted on chosen world axes while the body keeps moving. The hold stays live, editable, and reversible.",
+    TAB_SURFACE_CONTACT: "Use this when a hand, foot, or other control should stay clamped to a selected mesh surface in real time. The solver stays live, follows the selected mesh, and can be keyed on or off.",
     TAB_PIVOT: "Use this when you want to turn from a temporary pivot point without changing the real rig pivot.",
     TAB_IKFK: "Use this when you need to switch an arm or leg cleanly between IK and FK and keep the pose matched.",
+    TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. If you grab too many, remove the extra source or target control(s). Load Selected Source fills the source list in the order you picked. Load Selected Target fills the target list in the order you picked. Pair By Order maps source item 1 to target item 1, source item 2 to target item 2, and so on. Auto Map By Name can guess similar controls for you. Retarget selected controls for one control pair row or retarget all controls for every control pair row. Quick Pair Edit only changes the saved row you click first.",
     TAB_ONION: "Use this when you want to see ghosted past and future poses to judge spacing, arcs, and timing.",
     TAB_ROTATION: "Use this when rotations are flipping, gimbaling, or reading strangely and you want the safest fix suggestion.",
     TAB_SKIN: "Use this when a skinned mesh has bad transform scale and you need a clean copy without losing weights or look.",
@@ -417,12 +429,14 @@ def _close_existing_window():
             pass
     for module in (
         maya_contact_hold,
+        maya_surface_contact,
         maya_onion_skin,
         maya_rotation_doctor,
         maya_skinning_cleanup,
         maya_rig_scale_export,
         maya_video_reference_tool,
         maya_timeline_notes,
+        maya_face_retarget,
     ):
         try:
             close_fn = getattr(module, "_close_existing_window", None)
@@ -1248,12 +1262,15 @@ class MayaAnimWorkflowController(object):
         self.bake_range = "playback"
         self.dynamic_parenting_controller = maya_dynamic_parenting_tool.MayaDynamicParentingController() if MAYA_AVAILABLE else None
         self.contact_hold_controller = maya_contact_hold.MayaContactHoldController() if MAYA_AVAILABLE else None
+        self.surface_contact_controller = maya_surface_contact.MayaSurfaceContactController() if MAYA_AVAILABLE else None
+        self.timing_controller = maya_timing_tools.MayaTimingToolsController() if MAYA_AVAILABLE else None
         self.onion_controller = maya_onion_skin.MayaOnionSkinController() if MAYA_AVAILABLE else None
         self.rotation_controller = maya_rotation_doctor.MayaRotationDoctorController() if MAYA_AVAILABLE else None
         self.skinning_controller = maya_skinning_cleanup.MayaSkinningCleanupController() if MAYA_AVAILABLE else None
         self.rig_scale_controller = maya_rig_scale_export.MayaRigScaleExportController() if MAYA_AVAILABLE else None
         self.video_reference_controller = maya_video_reference_tool.MayaVideoReferenceController() if MAYA_AVAILABLE else None
         self.timeline_notes_controller = maya_timeline_notes.MayaTimelineNotesController() if MAYA_AVAILABLE else None
+        self.face_retarget_controller = maya_face_retarget.FaceRetargetController() if MAYA_AVAILABLE else None
         self.status_callback = None
         self.active_pivot = self._find_existing_pivot()
         self.profile_store = _load_profile_store() if MAYA_AVAILABLE else {"version": PROFILE_VERSION, "profiles": []}
@@ -1284,6 +1301,11 @@ class MayaAnimWorkflowController(object):
                 self.contact_hold_controller.shutdown()
             except Exception:
                 pass
+        if self.surface_contact_controller:
+            try:
+                self.surface_contact_controller.shutdown()
+            except Exception:
+                pass
         if self.onion_controller:
             try:
                 self.onion_controller.shutdown()
@@ -1312,6 +1334,11 @@ class MayaAnimWorkflowController(object):
         if self.timeline_notes_controller:
             try:
                 self.timeline_notes_controller.shutdown()
+            except Exception:
+                pass
+        if self.face_retarget_controller:
+            try:
+                self.face_retarget_controller.shutdown()
             except Exception:
                 pass
         self._remove_scene_callbacks()
@@ -1887,8 +1914,10 @@ if QtWidgets:
             main_layout.addWidget(self.tab_widget, 1)
             self.parenting_page, self.parenting_tab = self._make_scroll_tab()
             self.contact_hold_page, self.contact_hold_tab = self._make_scroll_tab()
+            self.surface_contact_page, self.surface_contact_tab = self._make_scroll_tab()
             self.pivot_page, self.pivot_tab = self._make_scroll_tab()
             self.ikfk_page, self.ikfk_tab = self._make_scroll_tab()
+            self.face_retarget_page, self.face_retarget_tab = self._make_scroll_tab()
             self.onion_page, self.onion_tab = self._make_scroll_tab()
             self.rotation_page, self.rotation_tab = self._make_scroll_tab()
             self.skin_page, self.skin_tab = self._make_scroll_tab()
@@ -1896,11 +1925,15 @@ if QtWidgets:
             self.video_page, self.video_tab = self._make_scroll_tab()
             self.timeline_page, self.timeline_tab = self._make_scroll_tab()
             self.guide_page, self.guide_tab = self._make_scroll_tab()
+            self.timing_page, self.timing_tab = self._make_scroll_tab()
             self.tab_widget.addTab(self.guide_tab, TAB_GUIDE)
+            self.tab_widget.addTab(self.timing_tab, TAB_TIMING)
             self.tab_widget.addTab(self.parenting_tab, TAB_PARENTING)
             self.tab_widget.addTab(self.contact_hold_tab, TAB_CONTACT_HOLD)
+            self.tab_widget.addTab(self.surface_contact_tab, TAB_SURFACE_CONTACT)
             self.tab_widget.addTab(self.pivot_tab, TAB_PIVOT)
             self.tab_widget.addTab(self.ikfk_tab, TAB_IKFK)
+            self.tab_widget.addTab(self.face_retarget_tab, TAB_FACE_RETARGET)
             self.tab_widget.addTab(self.onion_tab, TAB_ONION)
             self.tab_widget.addTab(self.rotation_tab, TAB_ROTATION)
             self.tab_widget.addTab(self.skin_tab, TAB_SKIN)
@@ -1910,8 +1943,10 @@ if QtWidgets:
             self.tab_intro_labels = {}
             self._build_parenting_tab()
             self._build_contact_hold_tab()
+            self._build_surface_contact_tab()
             self._build_pivot_tab()
             self._build_ikfk_tab()
+            self._build_face_retarget_tab()
             self._build_onion_tab()
             self._build_rotation_tab()
             self._build_skin_tab()
@@ -1919,6 +1954,7 @@ if QtWidgets:
             self._build_video_tab()
             self._build_timeline_tab()
             self._build_guide_tab()
+            self._build_timing_tab()
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
             main_layout.addWidget(self.status_label)
@@ -2041,6 +2077,16 @@ if QtWidgets:
             )
             layout.addWidget(self.contact_hold_panel, 1)
 
+        def _build_surface_contact_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.surface_contact_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_SURFACE_CONTACT))
+            self.surface_contact_panel = self._embed_tool_panel(
+                maya_surface_contact.MayaSurfaceContactWindow(self.controller.surface_contact_controller, parent=self.surface_contact_page),
+                self.surface_contact_page,
+            )
+            layout.addWidget(self.surface_contact_panel, 1)
+
         def _build_ikfk_tab(self):
             layout = QtWidgets.QVBoxLayout(self.ikfk_page)
             layout.addWidget(self._build_tab_intro(TAB_IKFK))
@@ -2160,6 +2206,17 @@ if QtWidgets:
             self.switch_fk_to_ik_button.clicked.connect(self._switch_fk_to_ik)
             self.switch_ik_to_fk_button.clicked.connect(self._switch_ik_to_fk)
 
+        def _build_face_retarget_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.face_retarget_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_FACE_RETARGET))
+            layout.addWidget(QtWidgets.QLabel("Pick the source controls first, then the target controls. Load Selected Source and Load Selected Target fill each list in the order you picked. Pair By Order maps item 1 to item 1, item 2 to item 2, and so on. Auto Map By Name can pair similar face or body controls for you. If you load too many, remove the extra source or target control. If you need to fix one saved row, click it first and use Quick Pair Edit."))
+            self.face_retarget_panel = self._embed_tool_panel(
+                maya_face_retarget.MayaFaceRetargetWindow(self.controller.face_retarget_controller, parent=self.face_retarget_page),
+                self.face_retarget_page,
+            )
+            layout.addWidget(self.face_retarget_panel, 1)
+
         def _build_onion_tab(self):
             layout = QtWidgets.QVBoxLayout(self.onion_page)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -2226,6 +2283,17 @@ if QtWidgets:
             guide = QtWidgets.QPlainTextEdit()
             guide.setReadOnly(True)
             guide.setPlainText(
+                "Scene Helpers\n"
+                "- Use this when you want the Auto Key, Auto Snap To Frames, Game Animation Mode, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons at the top of the tab.\n"
+                "- Use Auto Key when you want Maya to key changes as you animate.\n"
+                "- Leave Auto Snap To Frames on if you want the tool to watch for timing changes for you.\n"
+                "- Click Snap Selected Keys To Frames if keys are already off-frame.\n"
+                "- Click Game Animation Mode to prep the scene for 30 fps, real-time playback, autosave, and five backups.\n\n"
+                "- Click Set Up Render Environment to build the cyclorama helper in Python and add the sky light, bookmarks, and render cameras around the selected character.\n"
+                "- The camera preset menu starts on Perspective, then lets you jump to Front, Side, or Three Quarter.\n"
+                "- Click Delete Render Environment to remove the whole render setup again when you want to start over.\n"
+                "- Use Camera Height Offset and Camera Dolly Offset to move all helper cameras up/down or in/out together.\n"
+                "- Use Camera Preset to jump between Perspective, Front, Side, and Three Quarter after the setup is built.\n\n"
                 "Dynamic Parenting\n"
                 "- Use this when a prop or control needs to switch between hand, gun, world, or mixed parents without popping.\n"
                 "- Pick the moving thing, like the magazine.\n"
@@ -2239,6 +2307,17 @@ if QtWidgets:
                 "- Open More if you want to remember extra parents, blend two parents, fix a jump, or delete saved switches.\n"
                 "- To delete one saved switch, open More, pick it in History, and click Delete Picked Switch.\n"
                 "- Remove Object deletes this tool's constraints, saved parents, and saved switches for that object.\n\n"
+                "Controls Retargeter (Face and Body)\n"
+                "- Use this when you want face or body controls from one rig copied onto another rig.\n"
+                "- Pick the source face controls first, then click Load Selected Source.\n"
+                "- Pick the target face controls second, then click Load Selected Target.\n"
+                "- If you pick too many, select the extra source or target control and click Remove Selected Source or Remove Selected Target.\n"
+                "- Keep the same order on both sides. Source item 1 maps to Target item 1, source item 2 maps to target item 2, and so on.\n"
+                "- Example: brow, eye, mouth, jaw, or body controls can still pair even if one rig says source_brow_CTRL and the other says target_brow_CTRL.\n"
+                "- If you need to fix one saved row, click its row first and use Quick Pair Edit. It only changes the selected row.\n"
+                "- Click Pair By Order for order matching, or Auto Map By Name for loose name matching.\n"
+                "- Click Retarget Selected Controls for one control pair row or Retarget All Controls for every control pair row.\n"
+                "- The target controls get the keys, so you can still edit them after the transfer.\n\n"
                 "Hand / Foot Hold\n"
                 "- Use this when a planted hand or foot should stay in the same place on chosen world axes while the body keeps moving.\n"
                 "- Pick the hand or foot control.\n"
@@ -2249,6 +2328,15 @@ if QtWidgets:
                 "- Turn on the world axes you want to keep still, like Z for forward travel.\n"
                 "- Click Create / Update Hold.\n"
                 "- Use Use Hold to turn the saved hold on again, Use Original Motion to turn it off, and Delete Hold to remove it.\n\n"
+                "Surface Contact\n"
+                "- Use this when a hand, foot, or other control should stay clamped to a selected mesh surface.\n"
+                "- Pick the control first, then pick the surface mesh.\n"
+                "- Turn on Follow Surface Normal if you want the control to turn with the surface.\n"
+                "- Click Check Setup to make sure the control and surface are ready.\n"
+                "- Click Create / Update Contact to make the clamp live.\n"
+                "- Use Turn On Selected and Turn Off Selected to turn saved contacts on and off.\n"
+                "- Use Key State if you want Maya to remember that on or off state on the current frame.\n"
+                "- Use Refresh Now if you want the current frame solved again right away.\n\n"
                 "Dynamic Pivot\n"
                 "- Use this when you want a temporary turn point without changing the real pivot.\n"
                 "- Pick the object or objects.\n"
@@ -2314,6 +2402,16 @@ if QtWidgets:
             )
             layout.addWidget(guide)
 
+        def _build_timing_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.timing_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_TIMING))
+            self.timing_panel = self._embed_tool_panel(
+                maya_timing_tools.MayaTimingToolsWindow(self.controller.timing_controller, parent=self.timing_page),
+                self.timing_page,
+            )
+            layout.addWidget(self.timing_panel, 1)
+
         @staticmethod
         def _tab_key(value):
             if value is None:
@@ -2325,17 +2423,31 @@ if QtWidgets:
             lookup = {
                 "guide": "quick_start",
                 "quick_start": "quick_start",
+                "timing": "scene_helpers",
+                "timing_helpers": "scene_helpers",
+                "scene": "scene_helpers",
+                "scene_helpers": "scene_helpers",
                 "parenting": "dynamic_parenting",
                 "dynamic_parenting": "dynamic_parenting",
                 "contact": "hand_foot_hold",
                 "contact_hold": "hand_foot_hold",
                 "hold": "hand_foot_hold",
                 "hold_still": "hand_foot_hold",
+                "surface": "surface_contact",
+                "surface_contact": "surface_contact",
+                "contact_surface": "surface_contact",
                 "pivot": "dynamic_pivot",
                 "dynamic_pivot": "dynamic_pivot",
                 "ikfk": "universal_ik_fk",
                 "ik_fk": "universal_ik_fk",
                 "switcher": "universal_ik_fk",
+                "face": "controls_retargeter_face_and_body",
+                "face_retarget": "controls_retargeter_face_and_body",
+                "face_retargeter": "controls_retargeter_face_and_body",
+                "facial_retarget": "controls_retargeter_face_and_body",
+                "controls": "controls_retargeter_face_and_body",
+                "controls_retargeter": "controls_retargeter_face_and_body",
+                "controls_retargeter_face_and_body": "controls_retargeter_face_and_body",
                 "onion": "onion_skin",
                 "onion_skin": "onion_skin",
                 "rotation": "rotation_doctor",
@@ -2686,6 +2798,13 @@ def _shelf_button_command(repo_path):
     ).format(repo_path.replace("\\", "\\\\"))
 
 
+def _shelf_icon_path(repo_path):
+    icon_path = os.path.join(repo_path, SHELF_ICON_FILE_NAME)
+    if os.path.exists(icon_path):
+        return icon_path
+    return maya_shelf_utils.DEFAULT_SHELF_ICON
+
+
 def install_maya_dynamic_parent_pivot_shelf_button(shelf_name=DEFAULT_SHELF_NAME, button_label=DEFAULT_SHELF_BUTTON_LABEL, repo_path=None):
     if not MAYA_AVAILABLE:
         raise RuntimeError("install_maya_dynamic_parent_pivot_shelf_button() must run inside Autodesk Maya.")
@@ -2699,7 +2818,8 @@ def install_maya_dynamic_parent_pivot_shelf_button(shelf_name=DEFAULT_SHELF_NAME
         doc_tag=SHELF_BUTTON_DOC_TAG,
         annotation="Launch Maya Anim Workflow Tools",
         button_label=button_label,
-        image_overlay_label="AW",
+        image=_shelf_icon_path(repo_path),
+        image_overlay_label=SHELF_ICON_OVERLAY_LABEL,
         shelf_name=shelf_name,
     )
     return metadata["button"]
