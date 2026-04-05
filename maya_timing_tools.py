@@ -1180,6 +1180,11 @@ class MayaTimingToolsController(object):
             return False, "Could not set playback to real-time: {0}".format(exc)
 
         try:
+            cmds.playbackOptions(edit=True, view="all")
+        except Exception as exc:
+            return False, "Could not set Time Slider update view to All: {0}".format(exc)
+
+        try:
             cmds.autoSave(enable=True, limitBackups=True, maxBackups=DEFAULT_MAX_BACKUPS)
         except Exception as exc:
             return False, "Could not enable autosave backups: {0}".format(exc)
