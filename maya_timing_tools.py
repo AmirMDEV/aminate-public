@@ -45,6 +45,7 @@ DEFAULT_MAX_BACKUPS = 5
 DEFAULT_RENDER_ENV_LIGHT_EXPOSURE = 1.5
 DEFAULT_RENDER_ENV_LIGHT_INTENSITY = 0.2
 DEFAULT_RENDER_ENV_SCALE_MULTIPLIER = 3.5
+DEFAULT_SCENE_HELPERS_CAMERA_BASE_HEIGHT = 5.0
 DEFAULT_SCENE_HELPERS_CAMERA_HEIGHT_OFFSET = 0.0
 DEFAULT_SCENE_HELPERS_CAMERA_DOLLY_OFFSET = 0.0
 SCENE_HELPERS_ROOT_NAME = "amirSceneHelpers_GRP"
@@ -632,9 +633,9 @@ def _make_camera(name, center, offset, focal_length=55.0):
 
 def _scene_helpers_camera_specs(height_span, camera_distance):
     return {
-        "front": ((0.0, 0.0, camera_distance), 55.0),
-        "side": ((camera_distance, 0.0, 0.0), 55.0),
-        "three_quarter": ((camera_distance * 0.72, 0.0, camera_distance * 0.72), 50.0),
+        "front": ((0.0, DEFAULT_SCENE_HELPERS_CAMERA_BASE_HEIGHT, camera_distance), 55.0),
+        "side": ((camera_distance, DEFAULT_SCENE_HELPERS_CAMERA_BASE_HEIGHT, 0.0), 55.0),
+        "three_quarter": ((camera_distance * 0.72, DEFAULT_SCENE_HELPERS_CAMERA_BASE_HEIGHT, camera_distance * 0.72), 50.0),
     }
 
 
@@ -1061,6 +1062,11 @@ class MayaTimingToolsController(object):
         self.scene_helpers_camera_dolly_offset = 0.0
         self._install_idle_watch()
 
+    def reset_scene_helpers_camera_offsets(self):
+        self.scene_helpers_camera_height_offset = 0.0
+        self.scene_helpers_camera_dolly_offset = 0.0
+        return True, "Reset render camera offsets to zero."
+
     def set_status_callback(self, callback):
         self.status_callback = callback
 
@@ -1195,6 +1201,7 @@ class MayaTimingToolsController(object):
     def setup_render_environment(self):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
+        self.reset_scene_helpers_camera_offsets()
         success, message = _apply_scene_helpers_render_environment(
             camera_height_offset=self.scene_helpers_camera_height_offset,
             camera_dolly_offset=self.scene_helpers_camera_dolly_offset,
@@ -1211,6 +1218,7 @@ class MayaTimingToolsController(object):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
         if not cmds.objExists(SCENE_HELPERS_RENDER_ROOT_NAME) and not cmds.objExists(SCENE_HELPERS_ROOT_NAME):
+            self.reset_scene_helpers_camera_offsets()
             self.last_render_camera_preset = "perspective"
             preset_success, preset_message = _apply_scene_helpers_camera_preset("perspective")
             message = "No render environment to delete."
@@ -1219,6 +1227,7 @@ class MayaTimingToolsController(object):
             self._emit_status(message, True)
             return True, message
         _delete_existing_scene_helpers()
+        self.reset_scene_helpers_camera_offsets()
         self.last_render_camera_preset = "perspective"
         message = "Deleted the render environment."
         preset_success, preset_message = _apply_scene_helpers_camera_preset("perspective")
@@ -1499,6 +1508,7 @@ if QtWidgets:
 
         def _render_environment(self):
             success, message = self.controller.setup_render_environment()
+            self._sync_from_controller()
             self._set_status(message, success)
 
         def _delete_render_environment(self):
@@ -1514,6 +1524,7 @@ if QtWidgets:
                     self._set_status("Kept the render environment.", True)
                     return
             success, message = self.controller.delete_render_environment()
+            self._sync_from_controller()
             self._set_status(message, success)
 
         def _go_to_render_camera(self):
