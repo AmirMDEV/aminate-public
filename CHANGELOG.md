@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Renamed the docked Student Core timeline bar to `Toolkit Bar` and added a far-right blue Game Animation Mode toggle with a custom game icon and active highlight.
 - Renamed the user-facing tool to `Aminate`, including the main window, shelf button, installer message, and student package label.
 - Added `Animation Layer Tint` to Scene Helpers and the docked Student Core timeline bar so the active animation layer name and color stay visible above Maya's timeline.
 - Added a `Reference Manager` tab that saves the current scene and packages the packaged scene, Maya references, textures, image planes, audio, caches, and a manifest into one zip.

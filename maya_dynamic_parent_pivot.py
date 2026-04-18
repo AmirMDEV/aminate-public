@@ -103,7 +103,7 @@ TAB_TIMING = "Scene Helpers"
 TAB_REFERENCE_MANAGER = "Reference Manager"
 TAB_HELP_TEXT = {
     TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
-    TAB_STUDENT_CORE: "Use this when you want a compact animBot-style dockable bar above Maya's timeline for core student timing work: nudge keys, insert or remove an inbetween, reset selected controls, bake on twos, select animated controls, and clean static curves.",
+    TAB_STUDENT_CORE: "Use this when you want compact animBot-style timing buttons and the dockable Toolkit Bar above Maya's timeline: nudge keys, insert or remove an inbetween, reset selected controls, bake on twos, select animated controls, and clean static curves.",
     TAB_TIMING: "Use this when you want the Scene Helpers quick buttons for Auto Key, Auto Snap To Frames, Animation Layer Tint, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Delete Render Environment, Camera Offset controls, and Camera Preset plus whole-frame timing cleanup.",
     TAB_REFERENCE_MANAGER: "Use this when you want one zip containing the saved Maya scene plus referenced scenes, textures, image planes, audio, caches, and a manifest so the shot can move to another machine.",
     TAB_PARENTING: "Use this when one prop or control needs to switch between hand, gun, world, or mixed parents without popping. Best for reloads, pickups, passes, and drops.",
@@ -2334,15 +2334,15 @@ if QtWidgets:
                 "- Use -1 and +1 to nudge selected Graph Editor keys, or all keys on selected controls.\n"
                 "- Use In to add an inbetween key on the current frame, and Cut to remove keys on the current frame.\n"
                 "- Use Zero to reset selected controls, 2s to bake selected controls every two frames, Anim to pick animated controls, and Clean to remove static curves.\n"
-                "- Open Scene Helpers when you want the full Student Core strip inside a tab, or use the docked Student Core timeline bar.\n\n"
+                "- Open Scene Helpers when you want the full Student Core strip inside a tab, or use the docked Toolkit Bar.\n\n"
                 "Scene Helpers\n"
-                "- Use this when you want the Student Core strip plus Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons at the top of the tab.\n"
+                "- Use this when you want the Student Core strip plus Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons.\n"
                 "- Use Auto Key when you want Maya to key changes as you animate.\n"
                 "- Leave Auto Snap To Frames on if you want the tool to watch for timing changes for you.\n"
                 "- Click Snap Selected Keys To Frames if keys are already off-frame.\n"
                 "- Click Load Textures when scene textures exist locally but Maya has not refreshed or repathed them yet.\n"
                 "- Click Open Last Autosave if Maya crashed and you want to jump straight back to the latest autosave.\n"
-                "- Click Game Animation Mode to prep the scene for 30 fps, real-time playback, autosave, five backups, and a texture refresh.\n\n"
+                "- Click Game Animation Mode in Scene Helpers or the blue button at the far right of the Toolkit Bar to prep the scene for 30 fps, real-time playback, autosave, five backups, and a texture refresh.\n\n"
                 "- Click Set Up Render Environment to build the cyclorama helper in Python and add the sky light, bookmarks, and render cameras around the selected character.\n"
                 "- The camera preset menu starts on Perspective, then lets you jump to Front, Side, or Three Quarter.\n"
                 "- Click Delete Render Environment to remove the whole render setup again when you want to start over.\n"
@@ -2490,7 +2490,7 @@ if QtWidgets:
                 "- 2s bakes selected controls across the playback range every two frames.\n"
                 "- Anim selects every transform with animation curves.\n"
                 "- Clean removes static animation curves from selected controls when every value is the same.\n\n"
-                "Use Open Timeline Bar when you want to restore the small strip above Maya's timeline."
+                "Use Open Toolkit Bar when you want to restore the small strip above Maya's timeline."
             )
             help_box.setMaximumHeight(170)
             layout.addWidget(help_box)
@@ -2976,7 +2976,7 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
                 status_callback=GLOBAL_WINDOW._set_status,
             )
         except Exception as exc:
-            _warning("Could not open Student Core timeline bar: {0}".format(exc))
+            _warning("Could not open Toolkit Bar: {0}".format(exc))
     elif not success:
         GLOBAL_WINDOW.show()
         _process_qt_events()

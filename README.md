@@ -8,7 +8,7 @@ A tabbed Maya toolset for animation workflow helpers.
 
 The sections in regular use in this beta are:
 
-- `Student Core` for compact color-coded timing buttons, a small dockable timeline bar, key nudging, inbetweens, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup
+- `Student Core` for compact color-coded timing buttons, the dockable Toolkit Bar, key nudging, inbetweens, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup
 - `Scene Helpers` for the Student Core strip, Animation Layer Tint, camera presets, render setup, texture loading, and game animation mode
 - `Reference Manager` for saving the current scene and packaging Maya references, textures, image planes, audio, caches, and a manifest into one zip
 - `Controls Retargeter (Face and Body)` for control-based retarget between rigs
@@ -31,7 +31,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 4. Open Autodesk Maya.
 5. Drag `install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
 6. The tool installs, opens, and docks automatically.
-7. After install, Maya opens Aminate and the Student Core timeline bar when Maya starts.
+7. After install, Maya opens Aminate and the Toolkit Bar when Maya starts.
 
 ## How To Use
 
@@ -47,7 +47,7 @@ Simple example:
 4. Use `Cut` to remove a key on the current frame.
 5. Use `Zero` to reset selected controls to translate 0, rotate 0, and scale 1.
 6. Use `2s` to bake selected controls every two frames across the playback range.
-7. Use `Open Timeline Bar` if the small color-coded strip above Maya's timeline is closed.
+7. Use `Open Toolkit Bar` if the small color-coded strip above Maya's timeline is closed.
 
 ### Scene Helpers
 
@@ -57,8 +57,8 @@ Simple example:
 
 1. Keep `Animation Layer Tint` on.
 2. Select or change an animation layer in Maya.
-3. The docked Student Core timeline bar shows that layer name and tint color above the timeline.
-4. Use `Game Animation Mode` for 30 fps realtime playback and student-safe autosave defaults.
+3. The docked Toolkit Bar shows that layer name and tint color above the timeline.
+4. Use the blue game button at the far right of the Toolkit Bar for 30 fps realtime playback and student-safe autosave defaults.
 5. Use `Set Up Render Environment` for the helper cameras, light, and cyclorama.
 
 ### Dynamic Parenting
@@ -145,7 +145,7 @@ Camera Notes example:
 ### Timeline Notes
 
 This section is for colored timeline ranges with readable notes attached to them.
-Use `Scene Helpers` or the docked Student Core timeline bar when you need key nudging, inbetweens, reset pose, bake-on-twos, or Animation Layer Tint next to timeline review.
+Use `Scene Helpers` or the docked Toolkit Bar when you need key nudging, inbetweens, reset pose, bake-on-twos, Game Animation Mode, or Animation Layer Tint next to timeline review.
 
 Simple example:
 
@@ -161,7 +161,7 @@ Simple example:
 
 - [Quick Start](release_screenshots/quick_start.png)
 - [Student Core](release_screenshots/student_core.png)
-- [Student Timeline Bar](release_screenshots/student_timeline_bar.png)
+- [Toolkit Bar](release_screenshots/student_timeline_bar.png)
 - [Reference Manager](release_screenshots/reference_manager.png)
 - [Dynamic Parenting](release_screenshots/dynamic_parenting.png)
 - [Hand / Foot Hold](release_screenshots/hand_foot_hold.png)

@@ -43,8 +43,10 @@ STUDENT_TIMELINE_BAR_OBJECT_NAME = "studentCoreTimelineButtonBarWindow"
 STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME = STUDENT_TIMELINE_BAR_OBJECT_NAME + "WorkspaceControl"
 AUTO_SNAP_OPTION = "AmirMayaAnimWorkflowAutoSnapToFrames"
 ANIMATION_LAYER_TINT_OPTION = "AmirMayaAnimWorkflowAnimationLayerTint"
+GAME_ANIMATION_MODE_OPTION = "AmirMayaAnimWorkflowGameAnimationMode"
 DEFAULT_AUTO_SNAP = True
 DEFAULT_ANIMATION_LAYER_TINT = True
+DEFAULT_GAME_ANIMATION_MODE = False
 DEFAULT_TIME_UNIT = "ntsc"
 DEFAULT_PLAYBACK_SPEED = 1.0
 DEFAULT_MAX_BACKUPS = 5
@@ -877,6 +879,20 @@ def _make_student_core_icon(color_hex, glyph):
             painter.drawLine(12, 12, 18, 12)
             painter.drawLine(12, 16, 18, 16)
             painter.drawLine(12, 20, 16, 20)
+        elif glyph == "game":
+            painter.setPen(QtGui.QPen(light, 2))
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawRect(8, 8, 14, 14)
+            painter.drawLine(19, 12, 22, 12)
+            painter.drawLine(22, 12, 22, 18)
+            painter.drawLine(22, 18, 19, 18)
+            painter.setBrush(light)
+            painter.drawEllipse(11, 8, 4, 4)
+            painter.drawLine(13, 13, 13, 18)
+            painter.drawLine(13, 15, 9, 18)
+            painter.drawLine(13, 15, 17, 18)
+            painter.drawLine(13, 18, 10, 22)
+            painter.drawLine(13, 18, 17, 22)
         else:
             painter.setPen(QtGui.QPen(light, 2))
             font = painter.font()
@@ -946,6 +962,39 @@ def _style_student_timeline_bar_button(button, color_hex):
         }
         """
         % {"color": color_hex or "#55CBCD"}
+    )
+
+
+def _style_toolkit_game_mode_button(button):
+    if not button:
+        return
+    button.setIconSize(QtCore.QSize(22, 22))
+    button.setMinimumSize(36, 30)
+    button.setMaximumSize(42, 32)
+    button.setStyleSheet(
+        """
+        QToolButton {
+            background-color: #172033;
+            color: #EAF6FF;
+            border: 1px solid #2C6CFF;
+            border-bottom: 2px solid #2C6CFF;
+            border-radius: 5px;
+            padding: 2px;
+            font-weight: 700;
+        }
+        QToolButton:hover {
+            background-color: #203456;
+            border-color: #5BA5FF;
+        }
+        QToolButton:checked {
+            background-color: #176BFF;
+            border-color: #8EC5FF;
+            border-bottom: 2px solid #BFE3FF;
+        }
+        QToolButton:pressed {
+            background-color: #0F55D8;
+        }
+        """
     )
 
 
@@ -1670,6 +1719,7 @@ class MayaTimingToolsController(object):
     def __init__(self):
         self.auto_snap_enabled = _option_var_bool(AUTO_SNAP_OPTION, DEFAULT_AUTO_SNAP)
         self.animation_layer_tint_enabled = _option_var_bool(ANIMATION_LAYER_TINT_OPTION, DEFAULT_ANIMATION_LAYER_TINT)
+        self.game_animation_mode_enabled = _option_var_bool(GAME_ANIMATION_MODE_OPTION, DEFAULT_GAME_ANIMATION_MODE)
         self.auto_key_enabled = _current_auto_key_state()
         self._last_time_unit = _current_time_unit()
         self._idle_script_job_id = None
@@ -1794,6 +1844,16 @@ class MayaTimingToolsController(object):
             return False, "Could not change Auto Key: {0}".format(exc)
         self.auto_key_enabled = enabled
         return True, "Auto Key is {0}.".format("on" if enabled else "off")
+
+    def set_game_animation_mode_enabled(self, enabled):
+        enabled = bool(enabled)
+        if enabled:
+            return self.apply_game_animation_mode()
+        self.game_animation_mode_enabled = False
+        _save_option_var_bool(GAME_ANIMATION_MODE_OPTION, False)
+        message = "Game Animation Mode visual toggle is off. Scene settings were not changed back."
+        self._emit_status(message, True)
+        return True, message
 
     def snap_current_targets(self):
         if not MAYA_AVAILABLE:
@@ -2145,6 +2205,8 @@ class MayaTimingToolsController(object):
         texture_success, texture_message, texture_details = self.load_scene_textures(emit_status=False)
 
         self._last_time_unit = _current_time_unit()
+        self.game_animation_mode_enabled = True
+        _save_option_var_bool(GAME_ANIMATION_MODE_OPTION, True)
         message = "Game Animation Mode is on. Scene set to 30 fps, real-time playback, autosave, and {0} active viewport(s).".format(active_panels)
         if texture_message:
             message = "{0} {1}".format(message, texture_message)
@@ -2335,7 +2397,7 @@ if QtWidgets:
             self.controller = controller
             self.status_callback = status_callback
             self.setObjectName(STUDENT_CORE_TEMP_POPUP_OBJECT)
-            self.setWindowTitle("Student Core Timeline Buttons")
+            self.setWindowTitle("Toolkit Buttons")
             flags = _qt_flag("WindowType", "Tool", QtCore.Qt.Tool)
             frameless = _qt_flag("WindowType", "FramelessWindowHint", QtCore.Qt.FramelessWindowHint)
             try:
@@ -2441,8 +2503,9 @@ if QtWidgets:
             hint.setObjectName("studentCoreHint")
             hint.setWordWrap(True)
             header.addWidget(hint, 1)
-            self.show_temp_button = QtWidgets.QPushButton("Open Timeline Bar")
-            self.show_temp_button.setToolTip("Open the small dockable Student Core bar above Maya's timeline.")
+            self.show_temp_button = QtWidgets.QPushButton("Open Toolkit Bar")
+            self.show_temp_button.setText("Open Toolkit Bar")
+            self.show_temp_button.setToolTip("Open the small dockable Toolkit Bar above Maya's timeline.")
             self.show_temp_button.clicked.connect(self._show_temporary_buttons)
             header.addWidget(self.show_temp_button)
             layout.addLayout(header)
@@ -2478,7 +2541,7 @@ if QtWidgets:
         def _show_temporary_buttons(self):
             launch_student_timeline_button_bar(dock=True, controller=self.controller, status_callback=self.status_callback)
             if self.status_callback:
-                self.status_callback("Student Core timeline bar is docked above Maya's timeline.", True)
+                self.status_callback("Toolkit Bar is docked above Maya's timeline.", True)
 
 
     class StudentTimelineButtonBarWindow(_WindowBase):
@@ -2488,7 +2551,7 @@ if QtWidgets:
             self.status_callback = status_callback
             self.owns_controller = bool(owns_controller)
             self.setObjectName(STUDENT_TIMELINE_BAR_OBJECT_NAME)
-            self.setWindowTitle("Student Core Timeline Bar")
+            self.setWindowTitle("Toolkit Bar")
             self.setMinimumSize(760, 56)
             self.setMaximumHeight(64)
             if hasattr(self, "setSizePolicy"):
@@ -2547,6 +2610,18 @@ if QtWidgets:
                 button.clicked.connect(lambda _checked=False, tab=tool["tab"]: self._open_workflow_tab(tab))
                 layout.addWidget(button)
             layout.addStretch(1)
+            self.game_mode_button = QtWidgets.QToolButton()
+            self.game_mode_button.setObjectName("toolkitBarGameAnimationModeButton")
+            self.game_mode_button.setCheckable(True)
+            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+            self.game_mode_button.setIcon(_make_student_core_icon("#176BFF", "game"))
+            self.game_mode_button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+            self.game_mode_button.setToolTip(
+                "Game Animation Mode: set scene to 30 fps, realtime playback, autosave with five backups, texture reload, and all viewports active."
+            )
+            _style_toolkit_game_mode_button(self.game_mode_button)
+            self.game_mode_button.toggled.connect(self._toggle_game_animation_mode)
+            layout.addWidget(self.game_mode_button)
             main_layout.addLayout(layout)
 
         def _start_animation_layer_tint_timer(self):
@@ -2595,9 +2670,38 @@ if QtWidgets:
                 self.status_callback(message, success)
             elif MAYA_AVAILABLE and om2:
                 if success:
-                    om2.MGlobal.displayInfo("[Student Core Timeline Bar] {0}".format(message))
+                    om2.MGlobal.displayInfo("[Toolkit Bar] {0}".format(message))
                 else:
-                    om2.MGlobal.displayWarning("[Student Core Timeline Bar] {0}".format(message))
+                    om2.MGlobal.displayWarning("[Toolkit Bar] {0}".format(message))
+
+        def _set_game_button_checked(self, enabled):
+            if not getattr(self, "game_mode_button", None):
+                return
+            self.game_mode_button.blockSignals(True)
+            self.game_mode_button.setChecked(bool(enabled))
+            self.game_mode_button.blockSignals(False)
+
+        def _toggle_game_animation_mode(self, enabled):
+            success, message = self.controller.set_game_animation_mode_enabled(enabled)
+            self._set_game_button_checked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+            self._sync_scene_helpers_game_button()
+            if self.status_callback:
+                self.status_callback(message, success)
+            elif MAYA_AVAILABLE and om2:
+                if success:
+                    om2.MGlobal.displayInfo("[Toolkit Bar] {0}".format(message))
+                else:
+                    om2.MGlobal.displayWarning("[Toolkit Bar] {0}".format(message))
+
+        def _sync_scene_helpers_game_button(self):
+            for window in (GLOBAL_WINDOW,):
+                if window is not None and hasattr(window, "game_mode_button"):
+                    try:
+                        window.game_mode_button.blockSignals(True)
+                        window.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+                        window.game_mode_button.blockSignals(False)
+                    except Exception:
+                        pass
 
         def _open_workflow_tab(self, tab_alias):
             success, message = _open_workflow_tab(tab_alias)
@@ -2605,9 +2709,9 @@ if QtWidgets:
                 self.status_callback(message, success)
             elif MAYA_AVAILABLE and om2:
                 if success:
-                    om2.MGlobal.displayInfo("[Student Core Timeline Bar] {0}".format(message))
+                    om2.MGlobal.displayInfo("[Toolkit Bar] {0}".format(message))
                 else:
-                    om2.MGlobal.displayWarning("[Student Core Timeline Bar] {0}".format(message))
+                    om2.MGlobal.displayWarning("[Toolkit Bar] {0}".format(message))
 
         def closeEvent(self, event):
             if self._layer_tint_timer is not None:
@@ -2687,7 +2791,14 @@ if QtWidgets:
             )
             action_row.addWidget(self.auto_snap_button, 1)
 
-            self.game_mode_button = QtWidgets.QPushButton("Game Animation Mode")
+            self.game_mode_button = QtWidgets.QToolButton()
+            self.game_mode_button.setObjectName("sceneHelpersGameAnimationModeButton")
+            self.game_mode_button.setCheckable(True)
+            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+            self.game_mode_button.setText("Game Animation Mode")
+            self.game_mode_button.setIcon(_make_student_core_icon("#176BFF", "game"))
+            self.game_mode_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            _style_toolkit_game_mode_button(self.game_mode_button)
             self.game_mode_button.setToolTip(
                 "Set the scene to 30 fps, real-time playback, autosave with five backups, and mark every viewport "
                 "active."
@@ -2816,7 +2927,7 @@ if QtWidgets:
             self.animation_layer_tint_button.toggled.connect(self._toggle_animation_layer_tint)
             self.refresh_layer_tint_button.clicked.connect(self._refresh_animation_layer_tint)
             self.snap_now_button.clicked.connect(self._snap_now)
-            self.game_mode_button.clicked.connect(self._game_mode)
+            self.game_mode_button.toggled.connect(self._toggle_game_mode)
             self.load_textures_button.clicked.connect(self._load_textures)
             self.recover_autosave_button.clicked.connect(self._recover_autosave)
             self.render_env_button.clicked.connect(self._render_environment)
@@ -2832,6 +2943,9 @@ if QtWidgets:
             self.auto_snap_button.blockSignals(True)
             self.auto_snap_button.setChecked(bool(self.controller.auto_snap_enabled))
             self.auto_snap_button.blockSignals(False)
+            self.game_mode_button.blockSignals(True)
+            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+            self.game_mode_button.blockSignals(False)
             self.animation_layer_tint_button.blockSignals(True)
             self.animation_layer_tint_button.setChecked(bool(getattr(self.controller, "animation_layer_tint_enabled", True)))
             self.animation_layer_tint_button.blockSignals(False)
@@ -2885,8 +2999,18 @@ if QtWidgets:
             success, message = self.controller.snap_current_targets()
             self._set_status(message, success)
 
-        def _game_mode(self):
-            success, message = self.controller.apply_game_animation_mode()
+        def _toggle_game_mode(self, enabled):
+            success, message = self.controller.set_game_animation_mode_enabled(enabled)
+            if not success:
+                self.game_mode_button.blockSignals(True)
+                self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+                self.game_mode_button.blockSignals(False)
+            bar_window = GLOBAL_TIMELINE_BAR_WINDOW
+            if bar_window is not None and hasattr(bar_window, "_set_game_button_checked"):
+                try:
+                    bar_window._set_game_button_checked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+                except Exception:
+                    pass
             self._set_status(message, success)
 
         def _load_textures(self):
