@@ -49,6 +49,10 @@ DEFAULT_COLORS = {
 
 LAYER_STATES = ("Animation", "Static", "Locked")
 TOOL_NAMES = ("Pencil", "Brush", "Eraser", "Text", "Line", "Arrow", "Rectangle", "Ellipse")
+SHAPE_TOOL_NAMES = ("Line", "Arrow", "Rectangle", "Ellipse")
+CAMERA_NOTES_NAME = "amirAnimatorsPencilNotes_CAM"
+CAMERA_NOTES_SHAPE_NAME = CAMERA_NOTES_NAME + "Shape"
+CAMERA_NOTES_ATTR = "animatorsPencilCameraNotes"
 
 
 def _qt_flag(scope_name, member_name, fallback=None):
@@ -58,6 +62,15 @@ def _qt_flag(scope_name, member_name, fallback=None):
     if scoped_enum and hasattr(scoped_enum, member_name):
         return getattr(scoped_enum, member_name)
     return fallback
+
+
+def _tool_button_popup_mode(member_name):
+    if hasattr(QtWidgets.QToolButton, member_name):
+        return getattr(QtWidgets.QToolButton, member_name)
+    scoped_enum = getattr(QtWidgets.QToolButton, "ToolButtonPopupMode", None)
+    if scoped_enum and hasattr(scoped_enum, member_name):
+        return getattr(scoped_enum, member_name)
+    return getattr(QtWidgets.QToolButton, "InstantPopup", 2)
 
 
 def _short_name(node_name):
@@ -153,6 +166,46 @@ def _current_camera():
     return ""
 
 
+def _camera_shape(camera_transform):
+    if not MAYA_AVAILABLE or not camera_transform or not cmds.objExists(camera_transform):
+        return ""
+    try:
+        if cmds.nodeType(camera_transform) == "camera":
+            return camera_transform
+    except Exception:
+        return ""
+    shapes = cmds.listRelatives(camera_transform, shapes=True, noIntermediate=True, fullPath=False) or []
+    for shape in shapes:
+        try:
+            if cmds.nodeType(shape) == "camera":
+                return shape
+        except Exception:
+            continue
+    return ""
+
+
+def _set_camera_for_model_panels(camera_transform):
+    if not MAYA_AVAILABLE or not camera_transform or not cmds.objExists(camera_transform):
+        return False
+    changed = False
+    try:
+        panel = cmds.getPanel(withFocus=True)
+        if panel and cmds.getPanel(typeOf=panel) == "modelPanel":
+            cmds.modelPanel(panel, edit=True, camera=camera_transform)
+            changed = True
+    except Exception:
+        pass
+    if changed:
+        return True
+    for panel in cmds.getPanel(type="modelPanel") or []:
+        try:
+            cmds.modelPanel(panel, edit=True, camera=camera_transform)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def _run_mel(command):
     if not MAYA_AVAILABLE or not mel:
         return None
@@ -214,6 +267,64 @@ def _curve_node(name, points, parent, color, opacity, size, degree=1):
     curve = _long_name(curve)
     _set_display_color(curve, color, opacity=opacity, line_width=size)
     return curve
+
+
+def _make_tool_icon(tool_name, color=None):
+    if not QtGui:
+        return QtGui.QIcon() if QtGui else None
+    color = color or QtGui.QColor("#66D9EF")
+    pixmap = QtGui.QPixmap(28, 28)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    try:
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        pen = QtGui.QPen(QtGui.QColor(color), 2)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.NoBrush)
+        dark = QtGui.QColor("#202020")
+        light = QtGui.QColor("#F6F6F6")
+        tool = str(tool_name or "").lower()
+        if tool == "pencil":
+            painter.drawLine(7, 21, 19, 9)
+            painter.drawLine(10, 23, 22, 11)
+            painter.drawLine(19, 9, 22, 11)
+            painter.drawLine(7, 21, 10, 23)
+        elif tool == "brush":
+            painter.drawLine(8, 20, 19, 9)
+            painter.setBrush(QtGui.QColor(color))
+            painter.drawEllipse(6, 18, 7, 5)
+        elif tool == "eraser":
+            painter.setBrush(QtGui.QColor(color))
+            painter.drawPolygon(QtGui.QPolygon([QtCore.QPoint(8, 19), QtCore.QPoint(15, 12), QtCore.QPoint(21, 18), QtCore.QPoint(14, 24)]))
+            painter.setPen(QtGui.QPen(light, 1))
+            painter.drawLine(12, 15, 18, 21)
+        elif tool == "text":
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSize(14)
+            painter.setFont(font)
+            painter.drawText(QtCore.QRect(5, 3, 20, 22), int(QtCore.Qt.AlignCenter), "T")
+        elif tool == "line":
+            painter.drawLine(7, 21, 21, 7)
+        elif tool == "arrow":
+            painter.drawLine(7, 20, 21, 8)
+            painter.drawLine(21, 8, 15, 8)
+            painter.drawLine(21, 8, 21, 14)
+        elif tool == "rectangle":
+            painter.drawRect(7, 8, 14, 12)
+        elif tool == "ellipse":
+            painter.drawEllipse(6, 8, 16, 12)
+        elif tool == "camera":
+            painter.setBrush(QtGui.QColor(color))
+            painter.drawRoundedRect(6, 10, 13, 9, 2, 2)
+            painter.drawPolygon(QtGui.QPolygon([QtCore.QPoint(19, 12), QtCore.QPoint(24, 9), QtCore.QPoint(24, 21), QtCore.QPoint(19, 18)]))
+            painter.setPen(QtGui.QPen(dark, 1))
+            painter.drawEllipse(10, 12, 5, 5)
+        else:
+            painter.drawEllipse(7, 7, 14, 14)
+    finally:
+        painter.end()
+    return QtGui.QIcon(pixmap)
 
 
 def _parent_if_needed(node_name, parent_name):
@@ -453,6 +564,91 @@ class AnimatorsPencilController(object):
         _set_json_attr(layer_node, "animatorsPencilLayerData", data)
         self._status("Layer moved to camera: {0}".format(camera))
 
+    def camera_notes_camera(self, create=True):
+        if not MAYA_AVAILABLE:
+            return ""
+        for node_name in cmds.ls(type="transform", long=True) or []:
+            if _get_string_attr(node_name, CAMERA_NOTES_ATTR, "") == "camera_notes":
+                return node_name
+        matches = cmds.ls(CAMERA_NOTES_NAME, long=True) or []
+        if matches:
+            return matches[0]
+        if not create:
+            return ""
+        camera_transform, camera_shape = cmds.camera(name=CAMERA_NOTES_NAME)
+        if camera_shape != CAMERA_NOTES_SHAPE_NAME:
+            try:
+                camera_shape = cmds.rename(camera_shape, CAMERA_NOTES_SHAPE_NAME)
+            except Exception:
+                pass
+        try:
+            camera_transform = _parent_if_needed(camera_transform, self.root())
+        except Exception:
+            pass
+        camera_transform = _long_name(camera_transform)
+        _set_string_attr(camera_transform, CAMERA_NOTES_ATTR, "camera_notes")
+        shape = _camera_shape(camera_transform)
+        if shape:
+            _set_string_attr(shape, CAMERA_NOTES_ATTR, "camera_notes")
+        return camera_transform
+
+    def key_camera_notes_to_current_view(self, snap=True, switch_to_camera=False):
+        if not MAYA_AVAILABLE:
+            return ""
+        source_camera = _current_camera()
+        notes_camera = self.camera_notes_camera(create=True)
+        if not notes_camera or not cmds.objExists(notes_camera):
+            self._status("Could not create Camera Notes camera.")
+            return ""
+        if source_camera and cmds.objExists(source_camera) and _short_name(source_camera) != _short_name(notes_camera):
+            try:
+                translation = cmds.xform(source_camera, query=True, worldSpace=True, translation=True)
+                rotation = cmds.xform(source_camera, query=True, worldSpace=True, rotation=True)
+                cmds.xform(notes_camera, worldSpace=True, translation=translation)
+                cmds.xform(notes_camera, worldSpace=True, rotation=rotation)
+            except Exception:
+                pass
+            source_shape = _camera_shape(source_camera)
+            notes_shape = _camera_shape(notes_camera)
+            if source_shape and notes_shape:
+                for attr_name in ("focalLength", "horizontalFilmAperture", "verticalFilmAperture", "nearClipPlane", "farClipPlane"):
+                    try:
+                        if cmds.objExists(source_shape + "." + attr_name) and cmds.objExists(notes_shape + "." + attr_name):
+                            cmds.setAttr(notes_shape + "." + attr_name, cmds.getAttr(source_shape + "." + attr_name))
+                    except Exception:
+                        continue
+        frame = _current_frame()
+        for attr_name in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"):
+            try:
+                cmds.setKeyframe(notes_camera, attribute=attr_name, time=frame)
+            except Exception:
+                pass
+        notes_shape = _camera_shape(notes_camera)
+        if notes_shape:
+            for attr_name in ("focalLength", "horizontalFilmAperture", "verticalFilmAperture"):
+                try:
+                    cmds.setKeyframe(notes_shape, attribute=attr_name, time=frame)
+                except Exception:
+                    pass
+        if snap:
+            for node_name in [notes_camera, notes_shape]:
+                if not node_name:
+                    continue
+                try:
+                    cmds.keyTangent(node_name, time=(frame, frame), edit=True, inTangentType="linear", outTangentType="step")
+                except Exception:
+                    pass
+        if switch_to_camera:
+            _set_camera_for_model_panels(notes_camera)
+        self._status("Camera Notes keyed to current view on frame {0}.".format(frame))
+        return notes_camera
+
+    def switch_to_camera_notes(self):
+        camera = self.camera_notes_camera(create=True)
+        if camera and _set_camera_for_model_panels(camera):
+            self._status("Viewing through Camera Notes camera.")
+        return camera
+
     def marks(self, layer_node=None):
         if not MAYA_AVAILABLE:
             return []
@@ -516,7 +712,7 @@ class AnimatorsPencilController(object):
             return points
         return [(-0.9, 0.0, 0.0), (-0.55, 0.18, 0.0), (-0.1, -0.1, 0.0), (0.35, 0.24, 0.0), (0.9, 0.0, 0.0)]
 
-    def create_mark(self, tool="Pencil", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note"):
+    def create_mark(self, tool="Pencil", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note", camera_note=False, camera_snap=True):
         if not MAYA_AVAILABLE:
             return ""
         layer_node = layer_node or self.active_layer()
@@ -530,6 +726,9 @@ class AnimatorsPencilController(object):
             if tool == "Eraser":
                 self.delete_selected_marks()
                 return ""
+            notes_camera = ""
+            if camera_note:
+                notes_camera = self.key_camera_notes_to_current_view(snap=camera_snap, switch_to_camera=False)
             if tool == "Text":
                 group = cmds.textCurves(name="amirPencilText_MARK", text=text or "Note", font="Arial", constructionHistory=False)[0]
                 group = cmds.parent(group, layer_node)[0]
@@ -541,6 +740,8 @@ class AnimatorsPencilController(object):
             else:
                 mark = _curve_node("amirPencil{0}_MARK".format(tool), self._tool_points(tool), layer_node, color, opacity, size)
             self._mark_node(mark, layer_node, tool, color, opacity, size)
+            if notes_camera:
+                _set_string_attr(mark, "animatorsPencilCameraNotesCamera", notes_camera)
             cmds.select(mark, replace=True)
             self._status("{0} mark created.".format(tool))
             return mark
@@ -774,7 +975,25 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         toolbox = QtWidgets.QGroupBox("Toolbox")
         tool_layout = QtWidgets.QGridLayout(toolbox)
         self.tool_combo = QtWidgets.QComboBox()
-        self.tool_combo.addItems(TOOL_NAMES)
+        self.tool_combo.setObjectName("animatorsPencilToolCombo")
+        for tool_name in TOOL_NAMES:
+            self.tool_combo.addItem(_make_tool_icon(tool_name), tool_name)
+        self.tool_popup_button = QtWidgets.QToolButton()
+        self.tool_popup_button.setObjectName("animatorsPencilToolPopupButton")
+        self.tool_popup_button.setText("Drawing Tools")
+        self.tool_popup_button.setIcon(_make_tool_icon("Pencil"))
+        self.tool_popup_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self.tool_popup_button.setPopupMode(_tool_button_popup_mode("InstantPopup"))
+        self.tool_popup_button.setMenu(self._build_tool_menu(TOOL_NAMES))
+        self.tool_popup_button.setToolTip("Open a Photoshop-style quick menu for pencil, brush, eraser, text, and shape tools.")
+        self.shape_popup_button = QtWidgets.QToolButton()
+        self.shape_popup_button.setObjectName("animatorsPencilShapePopupButton")
+        self.shape_popup_button.setText("Shape Tools")
+        self.shape_popup_button.setIcon(_make_tool_icon("Rectangle"))
+        self.shape_popup_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self.shape_popup_button.setPopupMode(_tool_button_popup_mode("InstantPopup"))
+        self.shape_popup_button.setMenu(self._build_tool_menu(SHAPE_TOOL_NAMES))
+        self.shape_popup_button.setToolTip("Open line, arrow, rectangle, and ellipse tools with clear icons.")
         self.color_combo = QtWidgets.QComboBox()
         self.color_combo.addItems(list(DEFAULT_COLORS.keys()))
         self.size_spin = QtWidgets.QDoubleSpinBox()
@@ -786,17 +1005,44 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.opacity_spin.setValue(1.0)
         self.text_field = QtWidgets.QLineEdit("Note")
         self.draw_button = QtWidgets.QPushButton("Create Mark")
+        self.draw_button.setObjectName("animatorsPencilCreateMarkButton")
+        self.draw_button.setIcon(_make_tool_icon("Pencil"))
+        self.camera_notes_button = QtWidgets.QToolButton()
+        self.camera_notes_button.setObjectName("animatorsPencilCameraNotesMenuButton")
+        self.camera_notes_button.setText("Camera Notes")
+        self.camera_notes_button.setIcon(_make_tool_icon("Camera", QtGui.QColor("#F6C85F")))
+        self.camera_notes_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self.camera_notes_button.setPopupMode(_tool_button_popup_mode("InstantPopup"))
+        self.camera_notes_button.setToolTip("Create or use a Camera Notes camera. Each pencil mark can key this camera to the exact current view.")
+        self.camera_notes_menu = QtWidgets.QMenu(self.camera_notes_button)
+        self.camera_notes_menu.addAction(_make_tool_icon("Camera", QtGui.QColor("#F6C85F")), "Create / Use Camera Notes Camera", self._create_camera_notes_camera)
+        self.camera_notes_menu.addAction(_make_tool_icon("Camera", QtGui.QColor("#72B7F2")), "Key Camera To Current View", self._key_camera_notes_camera)
+        self.camera_notes_menu.addAction(_make_tool_icon("Camera", QtGui.QColor("#7BD88F")), "Look Through Camera Notes", self._switch_to_camera_notes)
+        self.camera_notes_button.setMenu(self.camera_notes_menu)
+        self.camera_note_box = QtWidgets.QCheckBox("Key camera when drawing")
+        self.camera_note_box.setObjectName("animatorsPencilCameraNoteCheckBox")
+        self.camera_note_box.setChecked(True)
+        self.camera_note_box.setToolTip("When on, every new pencil mark keys the Camera Notes camera to the current viewport camera on this frame.")
+        self.camera_snap_box = QtWidgets.QCheckBox("Snap camera cuts")
+        self.camera_snap_box.setObjectName("animatorsPencilCameraSnapCheckBox")
+        self.camera_snap_box.setChecked(True)
+        self.camera_snap_box.setToolTip("When on, Camera Notes keys use stepped tangents so the camera snaps to each keyed note view.")
         tool_layout.addWidget(QtWidgets.QLabel("Tool"), 0, 0)
         tool_layout.addWidget(self.tool_combo, 0, 1)
         tool_layout.addWidget(QtWidgets.QLabel("Color"), 0, 2)
         tool_layout.addWidget(self.color_combo, 0, 3)
-        tool_layout.addWidget(QtWidgets.QLabel("Size"), 1, 0)
-        tool_layout.addWidget(self.size_spin, 1, 1)
-        tool_layout.addWidget(QtWidgets.QLabel("Opacity"), 1, 2)
-        tool_layout.addWidget(self.opacity_spin, 1, 3)
-        tool_layout.addWidget(QtWidgets.QLabel("Text"), 2, 0)
-        tool_layout.addWidget(self.text_field, 2, 1, 1, 2)
-        tool_layout.addWidget(self.draw_button, 2, 3)
+        tool_layout.addWidget(self.tool_popup_button, 1, 0, 1, 2)
+        tool_layout.addWidget(self.shape_popup_button, 1, 2, 1, 2)
+        tool_layout.addWidget(QtWidgets.QLabel("Size"), 2, 0)
+        tool_layout.addWidget(self.size_spin, 2, 1)
+        tool_layout.addWidget(QtWidgets.QLabel("Opacity"), 2, 2)
+        tool_layout.addWidget(self.opacity_spin, 2, 3)
+        tool_layout.addWidget(QtWidgets.QLabel("Text"), 3, 0)
+        tool_layout.addWidget(self.text_field, 3, 1, 1, 2)
+        tool_layout.addWidget(self.draw_button, 3, 3)
+        tool_layout.addWidget(self.camera_notes_button, 4, 0, 1, 2)
+        tool_layout.addWidget(self.camera_note_box, 4, 2)
+        tool_layout.addWidget(self.camera_snap_box, 4, 3)
         layout.addWidget(toolbox)
 
         edit_buttons = QtWidgets.QHBoxLayout()
@@ -860,6 +1106,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.layer_down_button.clicked.connect(lambda: self._move_layer(1))
         self.move_camera_button.clicked.connect(self._move_layer_to_camera)
         self.draw_button.clicked.connect(self._create_mark)
+        self.tool_combo.currentTextChanged.connect(self._tool_changed)
         self.undo_button.clicked.connect(self.controller.undo)
         self.redo_button.clicked.connect(self.controller.redo)
         self.copy_button.clicked.connect(lambda: self.controller.copy_selected_marks(False))
@@ -883,6 +1130,38 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.retime_forward_button.clicked.connect(lambda: self.controller.retime_selected(1))
         self.ghost_button.clicked.connect(lambda: self.controller.make_ghosts(self.current_layer))
         self.clear_ghosts_button.clicked.connect(self.controller.clear_ghosts)
+
+    def _build_tool_menu(self, tool_names):
+        menu = QtWidgets.QMenu(self)
+        for tool_name in tool_names:
+            action = menu.addAction(_make_tool_icon(tool_name), "{0} Tool".format(tool_name))
+            action.setData(tool_name)
+            action.triggered.connect(lambda _checked=False, name=tool_name: self._select_tool(name))
+        return menu
+
+    def _select_tool(self, tool_name):
+        index = self.tool_combo.findText(tool_name)
+        if index >= 0:
+            self.tool_combo.setCurrentIndex(index)
+        self._tool_changed(tool_name)
+
+    def _tool_changed(self, tool_name):
+        icon = _make_tool_icon(tool_name)
+        self.draw_button.setIcon(icon)
+        self.tool_popup_button.setIcon(icon)
+        self.draw_button.setToolTip("Create a {0} mark on the active pencil layer.".format(tool_name))
+
+    def _create_camera_notes_camera(self):
+        camera = self.controller.camera_notes_camera(create=True)
+        self._set_status("Camera Notes camera ready: {0}".format(camera or "not created"))
+
+    def _key_camera_notes_camera(self):
+        camera = self.controller.key_camera_notes_to_current_view(snap=self.camera_snap_box.isChecked(), switch_to_camera=False)
+        self._set_status("Camera Notes keyed: {0}".format(camera or "not keyed"))
+
+    def _switch_to_camera_notes(self):
+        camera = self.controller.switch_to_camera_notes()
+        self._set_status("Looking through Camera Notes: {0}".format(camera or "not available"))
 
     def _set_status(self, message):
         self.status_label.setText(message)
@@ -970,6 +1249,8 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
             size=self.size_spin.value(),
             opacity=self.opacity_spin.value(),
             text=self.text_field.text(),
+            camera_note=self.camera_note_box.isChecked(),
+            camera_snap=self.camera_snap_box.isChecked(),
         )
         self._after_action(mark)
 
@@ -1022,16 +1303,25 @@ def run_smoke_scene():
             cmds.delete(layer_info.get("node"))
     if cmds.objExists("amirAnimatorsPencilGhosts_GRP"):
         cmds.delete("amirAnimatorsPencilGhosts_GRP")
+    smoke_camera = "amirPencilSmokeView_CAM"
+    if cmds.objExists(smoke_camera):
+        cmds.delete(smoke_camera)
+    smoke_camera, _smoke_shape = cmds.camera(name=smoke_camera)
+    cmds.xform(smoke_camera, worldSpace=True, translation=(3.0, 4.0, 12.0), rotation=(-5.0, 20.0, 0.0))
+    _set_camera_for_model_panels(smoke_camera)
     controller = AnimatorsPencilController()
-    layer = controller.create_layer("Smoke Layer", camera=_current_camera(), state="Animation")
+    layer = controller.create_layer("Smoke Layer", camera=smoke_camera, state="Animation")
     cmds.currentTime(10)
-    line = controller.create_mark("Line", layer, DEFAULT_COLORS["Blue"], 4.0, 0.9)
-    rect = controller.create_mark("Rectangle", layer, DEFAULT_COLORS["Yellow"], 3.0, 1.0)
+    line = controller.create_mark("Line", layer, DEFAULT_COLORS["Blue"], 4.0, 0.9, camera_note=True, camera_snap=True)
+    cmds.currentTime(12)
+    cmds.xform(smoke_camera, worldSpace=True, translation=(4.0, 5.0, 13.0), rotation=(-8.0, 25.0, 0.0))
+    rect = controller.create_mark("Rectangle", layer, DEFAULT_COLORS["Yellow"], 3.0, 1.0, camera_note=True, camera_snap=True)
     text = controller.create_mark("Text", layer, DEFAULT_COLORS["White"], 2.0, 1.0, text="Animators Pencil")
     controller.add_key()
-    cmds.currentTime(12)
     dupes = controller.duplicate_previous_key(layer)
     ghosts = controller.make_ghosts(layer, before=3, after=3)
+    notes_camera = controller.camera_notes_camera(create=False)
+    camera_note_keys = sorted({int(round(float(value))) for value in (cmds.keyframe(notes_camera, query=True, timeChange=True) or [])}) if notes_camera and cmds.objExists(notes_camera) else []
     data = {
         "root_exists": cmds.objExists(ROOT_GROUP_NAME),
         "layer": layer,
@@ -1043,6 +1333,10 @@ def run_smoke_scene():
         "mark_count": len(controller.marks(layer)),
         "scene_native_mark_shapes": len(cmds.listRelatives(layer, allDescendents=True, type="nurbsCurve") or []),
         "layer_data": controller.layer_data(layer),
+        "shape_tool_names": list(SHAPE_TOOL_NAMES),
+        "camera_notes_exists": bool(notes_camera and cmds.objExists(notes_camera)),
+        "camera_notes_key_frames": camera_note_keys,
+        "camera_notes_line_link": _get_string_attr(line, "animatorsPencilCameraNotesCamera", "") if line and cmds.objExists(line) else "",
     }
     return data
 

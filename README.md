@@ -13,7 +13,7 @@ The sections in regular use in this beta are:
 - `Reference Manager` for saving the current scene and packaging Maya references, textures, image planes, audio, caches, and a manifest into one zip
 - `Controls Retargeter (Face and Body)` for control-based retarget between rigs
 - `Control Picker` for scene control mapping, grouping, reordering, attr lookup, synced Maya selection, and list / visual control maps
-- `Animators Pencil` for Blue Pencil-style drawing, layers, frame markers, ghosting, retiming, and scene-native annotation marks
+- `Animators Pencil` for Blue Pencil-style drawing, Photoshop-style shape tools, Camera Notes view keying, layers, frame markers, ghosting, retiming, and scene-native annotation marks
 - `Onion Skin` in `3D Ghost` mode
 - `Dynamic Parenting`
 - `Hand / Foot Hold`, mainly the foot-hold workflow
@@ -118,17 +118,29 @@ Simple example:
 
 ### Animators Pencil
 
-This section is for drawing animation notes, arcs, contact marks, timing plans, and simple 2D annotations inside Maya.
+This section is for drawing animation notes, arcs, contact marks, timing plans, simple 2D annotations, and camera-specific review notes inside Maya.
 
 Simple example:
 
 1. Open `Animators Pencil`.
 2. Use `Open Blue Pencil` if you want Maya's native Blue Pencil drawing tools.
 3. Use `Add Layer` for a script-managed layer.
-4. Pick a tool, color, size, and opacity.
-5. Click `Create Mark` to create a real Maya curve or text mark in front of the current camera.
-6. Use `Add Key`, `Duplicate Previous Key`, `Retime`, `Add Frame Marker`, or `Build Ghosts` for drawing animation timing.
-7. The script-managed marks are real Maya scene nodes, so the scene still shows them even without this script installed.
+4. Use `Drawing Tools` for pencil, brush, eraser, text, line, arrow, rectangle, or ellipse.
+5. Use `Shape Tools` for quick line, arrow, rectangle, and ellipse notes with icon buttons.
+6. Pick a color, size, and opacity.
+7. Leave `Key camera when drawing` on if you want Camera Notes to remember the exact view.
+8. Use `Camera Notes` to create the notes camera, key it to the current view, or look through it.
+9. Click `Create Mark` to create a real Maya curve or text mark in front of the current camera.
+10. Use `Add Key`, `Duplicate Previous Key`, `Retime`, `Add Frame Marker`, or `Build Ghosts` for drawing animation timing.
+11. The script-managed marks are real Maya scene nodes, so the scene still shows them even without this script installed.
+
+Camera Notes example:
+
+1. Move the viewport to the angle where you want to draw.
+2. Draw a pencil mark or shape with `Key camera when drawing` on.
+3. Aminate creates or updates the Camera Notes camera on that frame.
+4. Move to another frame and draw from another angle.
+5. The Camera Notes camera keys to that new view, so students can scrub through notes from the same angles used when the marks were made.
 
 ### Timeline Notes
 

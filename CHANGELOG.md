@@ -1,0 +1,44 @@
+# Changelog
+
+## Unreleased
+
+- Renamed the user-facing tool to `Aminate`, including the main window, shelf button, installer message, and student package label.
+- Added `Animation Layer Tint` to Scene Helpers and the docked Student Core timeline bar so the active animation layer name and color stay visible above Maya's timeline.
+- Added a `Reference Manager` tab that saves the current scene and packages the packaged scene, Maya references, textures, image planes, audio, caches, and a manifest into one zip.
+- Added Reference Manager runtime packaging, GUI smoke coverage, screenshot capture coverage, and a standalone Maya smoke test.
+- Updated the drag-and-drop installer startup hook so Maya opens the combined workflow tools and the docked Student Core timeline bar on launch.
+- Removed the visible `Core` text from the Student Core timeline bar and added same-style icon buttons for each workflow tab.
+- Expanded timeline bar and Reference Manager tooltips so every icon and control explains what it does.
+- Moved the embedded Student Core strip out of Timeline Notes and kept it in Scene Helpers so it stays aligned with the docked Student Core timeline bar.
+- Replaced workflow-bar letter glyphs with drawn icons for the guide, scene helpers, package, parenting, holds, surface contact, pivot, IK/FK, retarget, picker, pencil, onion skin, rotation, skin, rig scale, video, and notes tools.
+- Added a `Student Core` tab with compact animBot-style color-coded shortcut buttons.
+- Added a small dockable Student Core timeline bar that opens above Maya's timeline for quick student timing work.
+- Added an `Open Timeline Bar` restore button in the Student Core panel and kept the shortcut strip available above Timeline Notes.
+- Added Student Core commands for key nudging, inbetween insert, current-frame key removal, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup.
+- Added `Animators Pencil` as a new tab with native Maya Blue Pencil buttons plus scene-native curve/text drawing fallback.
+- Added scene-backed pencil layers, layer ordering, camera moves, locked/static/animation layer states, undo/redo buttons, mark cut/copy/paste/delete, simple transforms, keys, duplicate previous key, retiming, frame markers, and ghost rebuilds.
+- Added icon-based Animators Pencil drawing and shape popup menus for pencil, brush, eraser, text, line, arrow, rectangle, and ellipse tools.
+- Added Camera Notes controls inside Animators Pencil so drawing a mark can create or update a review camera keyed to the exact current viewport view on that frame.
+- Stored script-managed pencil drawings as real Maya curve/text nodes with JSON attrs so annotations stay visible in the scene even without the script installed.
+- Added Animators Pencil runtime packaging, combined-tool integration, README coverage, screenshot capture coverage, and live smoke coverage.
+- Added `Control Picker` as a new tab in the Aminate dock.
+- Added scene-backed control discovery, category grouping, drag reordering, label edits, category edits, and keyable-attribute inspection for the new picker.
+- Added Face and Body list-view subgrouping with nested left/right sections for eyes, eyebrows, arms, and legs so mirrored rigs stay easier to scan and mirror later.
+- Merged face head and neck controls into one Face `Head` subgroup and removed head and neck from Body grouping so rows do not duplicate across sections.
+- Added face subgroups for cheeks, ears, upper lip, lower lip, lips, nose, jaw, and tongue, plus stricter `L_` / `R_` leg side matching so left and right leg rows stay separate.
+- Made Face and Body group rows selectable so picking a category or subgroup selects every leaf control beneath that row.
+- Folded plural eye/eyebrow variants together, plus added Body `COG` handling for center-of-gravity controls.
+- Wired the new picker into the combined launcher, installer bundle, live GUI smoke, screenshot capture list, README, and workspace map.
+- Broadened control discovery heuristics so plain rig controls without a strict `ctrl` suffix are more likely to be found.
+- Preserved manual picker order across rescans instead of forcing a label sort.
+- Added the new picker runtime to the packaged student bundle and refreshed the drag-and-drop installer path.
+- Added two-way picker selection sync with the Maya viewport.
+- Added a visual picker page alongside the list view, with side-aware chips for faster body-map navigation.
+- Made visual picker selection sticky in Maya and the viewport, with a multi-control marquee path that keeps broader visual picks from collapsing back to a single row.
+- Split Control Picker scanning into controls, geometry, and skeleton roots so the picker can stay organized by source type instead of grabbing everything in one pass.
+- Tightened Control Picker role filters so controls now resolve from NURBS curves and surfaces, geometry from real geometry shapes, and skeleton from joints only.
+- Broadened FK/IK grouping to catch fuzzy switching attrs like `switch`, `blend`, `mode`, or `fk_ik` style names on the control itself.
+- Added fuzzy FK/IK attribute detection so controls with switch/blend/mode style FK/IK attrs can land under the FK/IK group even when the attr name is not exact.
+- Tightened role filters so skeleton mode only accepts joints, geometry mode only accepts geometry shapes, and control mode only accepts NURBS curve or surface controls.
+- Disabled Control Picker row drag reorder so drag gestures stay selection-focused in the list view.
+- Reworked the Control Picker visual into a body-map layout with a mannequin-style backdrop and side-aware anchors for face, arms, hands, legs, and feet.
