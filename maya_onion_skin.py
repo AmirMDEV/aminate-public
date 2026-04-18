@@ -77,6 +77,7 @@ SCRUB_PREVIEW_MAX_OFFSETS = 8
 SCRUB_PREVIEW_MAX_MESHES = 24
 FAST_SILHOUETTE_LIVE_RESOLUTION = (640, 360)
 FAST_SILHOUETTE_REFINE_RESOLUTION = (1280, 720)
+FAST_SILHOUETTE_LIVE_CAPTURE_BUDGET = 3
 CAMERA_POLL_INTERVAL_MS = 80
 DEFORMER_NODE_TYPES = set(
     [
@@ -440,21 +441,27 @@ def _color_to_rgba_bytes(color, alpha_value):
 
 def _tint_silhouette_image(source_path, destination_path, color, alpha_value):
     if not (QtGui and os.path.exists(source_path)):
-        return False
+        return 0
     image = QtGui.QImage(source_path)
     if image.isNull():
-        return False
+        return 0
     output = QtGui.QImage(image.size(), QtGui.QImage.Format_ARGB32)
     output.fill(QtCore.Qt.transparent)
     fill_rgba = _color_to_rgba_bytes(color, alpha_value)
     threshold = 18
+    filled_pixels = 0
     for y_pos in range(image.height()):
         for x_pos in range(image.width()):
             pixel = image.pixelColor(x_pos, y_pos)
             if pixel.red() <= threshold and pixel.green() <= threshold and pixel.blue() <= threshold:
                 continue
             output.setPixelColor(x_pos, y_pos, QtGui.QColor(*fill_rgba))
-    return bool(output.save(destination_path, "PNG"))
+            filled_pixels += 1
+    if filled_pixels <= 0:
+        return 0
+    if not output.save(destination_path, "PNG"):
+        return 0
+    return filled_pixels
 
 
 class MayaOnionSkinController(object):
@@ -486,6 +493,10 @@ class MayaOnionSkinController(object):
         self._refresh_pending = False
         self._pending_rebuild = False
         self._pending_reason = "callback"
+        self._refresh_request_serial = 0
+        self._pending_request_serial = 0
+        self._active_refresh_serial = 0
+        self._stale_refresh_skip_count = 0
         self._completed_refresh_count = 0
         self._last_refresh_duration_ms = 0.0
         self._last_callback_request_at = 0.0
@@ -496,6 +507,10 @@ class MayaOnionSkinController(object):
         self._camera_signature = tuple()
         self._camera_poll_timer = None
         self._last_motion_at = 0.0
+        self._silhouette_capture_active = False
+        self._silhouette_live_cursor = 0
+        self._last_silhouette_warning = ""
+        self._last_silhouette_warning_at = 0.0
 
     def save_preferences(self):
         _save_option("display_mode", self.display_mode)
@@ -613,6 +628,9 @@ class MayaOnionSkinController(object):
         self._appearance_dirty = True
         self._cached_visible_mesh_entries = None
         self._visible_mesh_cache_dirty = True
+        self._camera_signature = tuple()
+        self._last_motion_at = 0.0
+        self._silhouette_live_cursor = 0
 
     def attachment_summary(self):
         if not self.attached_roots:
@@ -689,7 +707,7 @@ class MayaOnionSkinController(object):
     def shutdown(self):
         self.detach(clear_attachment=True)
 
-    def refresh(self, rebuild=False, reason="callback"):
+    def refresh(self, rebuild=False, reason="callback", request_serial=None):
         if self._updating:
             return True, "Update already running."
         if not self.attached_roots:
@@ -717,6 +735,7 @@ class MayaOnionSkinController(object):
             return True, "Past and future frame counts are both zero."
 
         self._updating = True
+        self._active_refresh_serial = int(request_serial or 0)
         refresh_started_at = time.perf_counter()
         current_time = cmds.currentTime(query=True)
         refresh_suspended = False
@@ -729,7 +748,7 @@ class MayaOnionSkinController(object):
                 self._delete_materials()
                 self.ghost_cache = {}
                 self.material_cache = {}
-                self._refresh_fast_silhouette(active_offsets, current_time)
+                self._refresh_fast_silhouette(active_offsets, current_time, refresh_serial=request_serial)
             else:
                 self._delete_silhouette_planes()
                 self._ensure_root_group()
@@ -788,6 +807,10 @@ class MayaOnionSkinController(object):
                     pass
             self._last_refresh_duration_ms = (time.perf_counter() - refresh_started_at) * 1000.0
             self._updating = False
+            self._active_refresh_serial = 0
+
+        if self.display_mode == MODE_FAST_SILHOUETTE:
+            self._camera_signature = self._current_view_signature(include_time=False)
 
         self._completed_refresh_count += 1
         return True, "Updated {0} ghost offsets across {1} roots around frame {2}.".format(
@@ -797,7 +820,7 @@ class MayaOnionSkinController(object):
         )
 
     def _on_time_changed(self, *args):
-        if not self.auto_update or self._updating or not self.attached_roots:
+        if not self.auto_update or self._updating or self._silhouette_capture_active or not self.attached_roots:
             return
         self._queue_callback_refresh(rebuild=False, reason="callback")
 
@@ -811,12 +834,14 @@ class MayaOnionSkinController(object):
             return
 
         self._last_callback_request_at = time.perf_counter()
+        self._refresh_request_serial += 1
         self._refresh_pending = True
         self._pending_rebuild = self._pending_rebuild or rebuild
         self._pending_reason = reason
+        self._pending_request_serial = self._refresh_request_serial
 
         timer = self._ensure_refresh_timer()
-        if timer and not timer.isActive():
+        if timer:
             timer.start(AUTO_UPDATE_INTERVAL_MS)
 
     def _ensure_refresh_timer(self):
@@ -842,40 +867,50 @@ class MayaOnionSkinController(object):
             self._camera_poll_timer.start(CAMERA_POLL_INTERVAL_MS)
         return self._camera_poll_timer
 
-    def _current_view_signature(self):
+    def _current_view_signature(self, include_time=True):
         panel_name = _active_model_panel(require_focus=False)
         camera_name = _active_camera(panel_name)
-        current_time = float(cmds.currentTime(query=True))
         if not camera_name or not cmds.objExists(camera_name):
-            return (panel_name, camera_name, round(current_time, 3))
+            if include_time:
+                return (panel_name, camera_name, round(float(cmds.currentTime(query=True)), 3))
+            return (panel_name, camera_name)
         matrix_values = cmds.xform(camera_name, query=True, matrix=True, worldSpace=True) or [0.0] * 16
         rounded_matrix = tuple(round(float(value), 4) for value in matrix_values)
-        return (panel_name, camera_name, round(current_time, 3), rounded_matrix)
+        if include_time:
+            return (panel_name, camera_name, round(float(cmds.currentTime(query=True)), 3), rounded_matrix)
+        return (panel_name, camera_name, rounded_matrix)
 
     def _on_camera_poll(self):
-        if self.display_mode != MODE_FAST_SILHOUETTE or not self.auto_update or not self.attached_roots:
+        if self.display_mode != MODE_FAST_SILHOUETTE or not self.auto_update or self._silhouette_capture_active or not self.attached_roots:
             return
-        current_signature = self._current_view_signature()
+        current_signature = self._current_view_signature(include_time=False)
         if current_signature != self._camera_signature:
             self._camera_signature = current_signature
             self._last_motion_at = time.perf_counter()
             self._queue_callback_refresh(rebuild=False, reason="view")
 
     def _process_queued_refresh(self):
-        if not self._refresh_pending or self._updating or not self.attached_roots:
+        if not self._refresh_pending or not self.attached_roots:
+            return
+        if self._updating:
+            timer = self._ensure_refresh_timer()
+            if timer:
+                timer.start(AUTO_UPDATE_INTERVAL_MS)
             return
 
         rebuild = self._pending_rebuild
         reason = self._pending_reason
+        request_serial = self._pending_request_serial
         self._refresh_pending = False
         self._pending_rebuild = False
         self._pending_reason = "callback"
+        self._pending_request_serial = 0
 
         if self.display_mode == MODE_3D_GHOST and self.full_fidelity_scrub and reason == "callback":
-            self.refresh(rebuild=rebuild, reason=reason)
+            self.refresh(rebuild=rebuild, reason=reason, request_serial=request_serial)
             return
 
-        self.refresh(rebuild=rebuild, reason=reason)
+        self.refresh(rebuild=rebuild, reason=reason, request_serial=request_serial)
 
         timer = self._ensure_refresh_timer()
         if not timer or timer.isActive():
@@ -891,6 +926,7 @@ class MayaOnionSkinController(object):
                 self._refresh_pending = True
                 self._pending_rebuild = False
                 self._pending_reason = reason
+                self._pending_request_serial = max(int(request_serial or 0), self._refresh_request_serial)
                 remaining_ms = max(int(SCRUB_SETTLE_DELAY_MS - elapsed_ms), AUTO_UPDATE_INTERVAL_MS)
                 timer.start(remaining_ms)
 
@@ -898,10 +934,16 @@ class MayaOnionSkinController(object):
         self._refresh_pending = False
         self._pending_rebuild = False
         self._pending_reason = "callback"
+        self._pending_request_serial = 0
         if self._refresh_timer and self._refresh_timer.isActive():
             self._refresh_timer.stop()
         if self._camera_poll_timer and self._camera_poll_timer.isActive() and self.display_mode != MODE_FAST_SILHOUETTE:
             self._camera_poll_timer.stop()
+
+    def _is_refresh_stale(self, refresh_serial):
+        if not refresh_serial:
+            return False
+        return int(refresh_serial) < int(self._refresh_request_serial)
 
     def _register_callbacks(self):
         self._remove_callbacks()
@@ -1280,6 +1322,14 @@ class MayaOnionSkinController(object):
             return FAST_SILHOUETTE_LIVE_RESOLUTION
         return FAST_SILHOUETTE_REFINE_RESOLUTION
 
+    def _warn_silhouette_once(self, message):
+        now = time.perf_counter()
+        if message == self._last_silhouette_warning and ((now - self._last_silhouette_warning_at) * 1000.0) < 1000.0:
+            return
+        self._last_silhouette_warning = message
+        self._last_silhouette_warning_at = now
+        _warning(message)
+
     def _delete_silhouette_planes(self):
         for entry in list(self.silhouette_image_planes.values()):
             for node_name in (entry.get("transform"), entry.get("shape")):
@@ -1320,12 +1370,120 @@ class MayaOnionSkinController(object):
         self.silhouette_image_planes[offset] = entry
         return entry
 
-    def _capture_silhouette_image(self, offset, sample_frame, resolution, color, alpha_value):
+    def _silhouette_cache_key(self, sample_frame, resolution, color, alpha_value, camera_signature):
+        return (
+            round(float(sample_frame), 3),
+            int(resolution[0]),
+            int(resolution[1]),
+            tuple(round(float(channel), 4) for channel in color),
+            round(float(alpha_value), 4),
+            camera_signature,
+        )
+
+    def _reuse_silhouette_cache(self, offset, sample_frame, resolution, color, alpha_value, camera_shape, camera_signature):
+        cache_key = self._silhouette_cache_key(sample_frame, resolution, color, alpha_value, camera_signature)
+        cache_entry = self.silhouette_cache.get(offset) or {}
+        image_path = cache_entry.get("image_path") or ""
+        if cache_entry.get("cache_key") != cache_key or not image_path or not os.path.exists(image_path):
+            return False
+        plane_entry = self._ensure_silhouette_plane(offset, camera_shape)
+        try:
+            cmds.setAttr(plane_entry["shape"] + ".imageName", image_path, type="string")
+            cmds.setAttr(plane_entry["shape"] + ".visibility", 1)
+        except Exception:
+            return False
+        return True
+
+    def _silhouette_capture_offsets(self, desired_offsets):
+        offsets = list(desired_offsets)
+        if not offsets:
+            return []
+        if not self._fast_silhouette_is_live_preview():
+            self._silhouette_live_cursor = 0
+            return offsets
+
+        budget = max(1, min(FAST_SILHOUETTE_LIVE_CAPTURE_BUDGET, len(offsets)))
+        missing = []
+        for offset in offsets:
+            plane_entry = self.silhouette_image_planes.get(offset) or {}
+            if not cmds.objExists(plane_entry.get("shape", "")):
+                missing.append(offset)
+        if len(missing) >= budget:
+            return missing[:budget]
+
+        chosen = list(missing)
+        remaining = [offset for offset in offsets if offset not in chosen]
+        if not remaining:
+            return chosen
+
+        start_index = self._silhouette_live_cursor % len(remaining)
+        rotated = remaining[start_index:] + remaining[:start_index]
+        needed = max(0, budget - len(chosen))
+        chosen.extend(rotated[:needed])
+        if needed:
+            self._silhouette_live_cursor = (start_index + needed) % len(remaining)
+        return chosen
+
+    def _silhouette_plane_visibility_state(self):
+        state = {}
+        for entry in list(self.silhouette_image_planes.values()):
+            shape_name = entry.get("shape") or ""
+            if not shape_name or not cmds.objExists(shape_name):
+                continue
+            try:
+                state[shape_name] = bool(cmds.getAttr(shape_name + ".visibility"))
+                cmds.setAttr(shape_name + ".visibility", 0)
+            except Exception:
+                pass
+        return state
+
+    def _restore_silhouette_plane_visibility(self, state):
+        for shape_name, is_visible in (state or {}).items():
+            if not cmds.objExists(shape_name):
+                continue
+            try:
+                cmds.setAttr(shape_name + ".visibility", int(bool(is_visible)))
+            except Exception:
+                pass
+
+    def _scene_mesh_visibility_state(self, allowed_mesh_transforms):
+        state = {}
+        allowed = set((cmds.ls(allowed_mesh_transforms or [], long=True) or []))
+        for mesh_shape in cmds.ls(type="mesh", long=True) or []:
+            parents = cmds.listRelatives(mesh_shape, parent=True, fullPath=True) or []
+            if not parents:
+                continue
+            transform_name = parents[0]
+            if transform_name in allowed or transform_name in state:
+                continue
+            try:
+                state[transform_name] = bool(cmds.getAttr(transform_name + ".visibility"))
+                cmds.setAttr(transform_name + ".visibility", 0)
+            except Exception:
+                state.pop(transform_name, None)
+        return state
+
+    def _restore_scene_mesh_visibility(self, state):
+        for transform_name, is_visible in (state or {}).items():
+            if not cmds.objExists(transform_name):
+                continue
+            try:
+                cmds.setAttr(transform_name + ".visibility", int(bool(is_visible)))
+            except Exception:
+                pass
+
+    def _capture_silhouette_image(self, offset, sample_frame, resolution, color, alpha_value, camera_signature=None, manage_scene_mesh_visibility=True, refresh_serial=None):
         panel_name = _active_model_panel(require_focus=False)
         camera_name = _active_camera(panel_name)
         camera_shape = _camera_shape(camera_name)
         if not panel_name or not camera_name or not camera_shape:
             raise RuntimeError("Pick an active viewport camera first.")
+        if self._is_refresh_stale(refresh_serial):
+            self._stale_refresh_skip_count += 1
+            return False
+        camera_signature = camera_signature or self._current_view_signature(include_time=False)
+        if self._reuse_silhouette_cache(offset, sample_frame, resolution, color, alpha_value, camera_shape, camera_signature):
+            return False
 
         cache_dir = _silhouette_cache_dir()
         suffix = "live" if resolution == FAST_SILHOUETTE_LIVE_RESOLUTION else "refine"
@@ -1336,14 +1494,15 @@ class MayaOnionSkinController(object):
 
         current_time = float(cmds.currentTime(query=True))
         original_selection = cmds.ls(selection=True, long=True) or []
-        isolate_state = False
-        isolate_set = ""
-        isolate_members = []
         editor_state = {}
         background_state = {}
+        hidden_plane_state = {}
+        hidden_mesh_state = {}
+        cache_key = self._silhouette_cache_key(sample_frame, resolution, color, alpha_value, camera_signature)
 
         try:
-            for flag_name in ("displayAppearance", "useDefaultMaterial", "displayTextures", "nurbsCurves", "joints", "locators", "manipulators"):
+            self._silhouette_capture_active = True
+            for flag_name in ("displayAppearance", "displayLights", "useDefaultMaterial", "displayTextures", "nurbsCurves", "joints", "locators", "manipulators"):
                 try:
                     editor_state[flag_name] = cmds.modelEditor(panel_name, query=True, **{flag_name: True})
                 except Exception:
@@ -1353,31 +1512,26 @@ class MayaOnionSkinController(object):
                     background_state[color_name] = cmds.displayRGBColor(color_name, query=True)
                 except Exception:
                     pass
-            try:
-                isolate_state = bool(cmds.isolateSelect(panel_name, query=True, state=True))
-                if isolate_state:
-                    isolate_set = cmds.isolateSelect(panel_name, query=True, viewObjects=True) or ""
-                    if isolate_set and cmds.objExists(isolate_set):
-                        isolate_members = cmds.sets(isolate_set, query=True) or []
-            except Exception:
-                isolate_state = False
 
+            hidden_plane_state = self._silhouette_plane_visibility_state()
+            if manage_scene_mesh_visibility:
+                hidden_mesh_state = self._scene_mesh_visibility_state([mesh_entry["transform"] for mesh_entry in self.source_meshes])
             if background_state:
                 for color_name in background_state:
                     cmds.displayRGBColor(color_name, 0.0, 0.0, 0.0)
             try:
-                cmds.modelEditor(panel_name, edit=True, displayAppearance="smoothShaded", useDefaultMaterial=True, displayTextures=False, nurbsCurves=False, joints=False, locators=False, manipulators=False)
-            except Exception:
-                pass
-
-            cmds.select(self.attached_roots, replace=True)
-            if not isolate_state:
-                try:
-                    cmds.isolateSelect(panel_name, state=True)
-                except Exception:
-                    pass
-            try:
-                cmds.isolateSelect(panel_name, loadSelected=True)
+                cmds.modelEditor(
+                    panel_name,
+                    edit=True,
+                    displayAppearance="smoothShaded",
+                    displayLights="default",
+                    useDefaultMaterial=True,
+                    displayTextures=False,
+                    nurbsCurves=False,
+                    joints=False,
+                    locators=False,
+                    manipulators=False,
+                )
             except Exception:
                 pass
 
@@ -1406,30 +1560,18 @@ class MayaOnionSkinController(object):
                     raw_path = matches[-1]
             if not os.path.exists(raw_path):
                 raise RuntimeError("Playblast did not create the silhouette image.")
-            if not _tint_silhouette_image(raw_path, tinted_path, color, alpha_value):
-                raise RuntimeError("Could not tint the silhouette image.")
+            if self._is_refresh_stale(refresh_serial):
+                self._stale_refresh_skip_count += 1
+                return False
+            filled_pixels = _tint_silhouette_image(raw_path, tinted_path, color, alpha_value)
+            if filled_pixels <= 0:
+                raise RuntimeError("Silhouette capture was empty.")
         finally:
+            self._silhouette_capture_active = False
             try:
                 cmds.currentTime(current_time, edit=True, update=True)
             except Exception:
                 pass
-            if isolate_state and isolate_set and cmds.objExists(isolate_set):
-                try:
-                    current_members = cmds.sets(isolate_set, query=True) or []
-                    if current_members:
-                        cmds.sets(current_members, remove=isolate_set)
-                except Exception:
-                    pass
-                if isolate_members:
-                    try:
-                        cmds.sets(isolate_members, add=isolate_set)
-                    except Exception:
-                        pass
-            else:
-                try:
-                    cmds.isolateSelect(panel_name, state=False)
-                except Exception:
-                    pass
             for flag_name, value in editor_state.items():
                 try:
                     cmds.modelEditor(panel_name, edit=True, **{flag_name: value})
@@ -1440,6 +1582,9 @@ class MayaOnionSkinController(object):
                     cmds.displayRGBColor(color_name, value[0], value[1], value[2])
                 except Exception:
                     pass
+            self._restore_silhouette_plane_visibility(hidden_plane_state)
+            if manage_scene_mesh_visibility:
+                self._restore_scene_mesh_visibility(hidden_mesh_state)
             if original_selection:
                 try:
                     cmds.select(original_selection, replace=True)
@@ -1451,6 +1596,9 @@ class MayaOnionSkinController(object):
                 except Exception:
                     pass
 
+        if self._is_refresh_stale(refresh_serial):
+            self._stale_refresh_skip_count += 1
+            return False
         plane_entry = self._ensure_silhouette_plane(offset, camera_shape)
         cmds.setAttr(plane_entry["shape"] + ".imageName", tinted_path, type="string")
         cmds.setAttr(plane_entry["shape"] + ".visibility", 1)
@@ -1459,24 +1607,49 @@ class MayaOnionSkinController(object):
             "resolution": resolution,
             "camera": camera_shape,
             "frame": float(sample_frame),
+            "cache_key": cache_key,
         }
+        return True
 
-    def _refresh_fast_silhouette(self, desired_offsets, current_time):
+    def _refresh_fast_silhouette(self, desired_offsets, current_time, refresh_serial=None):
         panel_name = _active_model_panel(require_focus=False)
         camera_name = _active_camera(panel_name)
         camera_shape = _camera_shape(camera_name)
         if not panel_name or not camera_shape:
             raise RuntimeError("Click into a Maya viewport first so Fast Silhouette knows which camera to use.")
         resolution = self._fast_silhouette_resolution()
-        for offset in desired_offsets:
-            sample_frame = float(current_time) + offset
-            self._capture_silhouette_image(
-                offset,
-                sample_frame,
-                resolution,
-                self._offset_color(offset),
-                self._offset_alpha(offset),
-            )
+        camera_signature = self._current_view_signature(include_time=False)
+        capture_offsets = self._silhouette_capture_offsets(desired_offsets)
+        capture_failures = []
+        any_visible = False
+        stale_refresh = False
+        hidden_mesh_state = self._scene_mesh_visibility_state([mesh_entry["transform"] for mesh_entry in self.source_meshes]) if capture_offsets else {}
+        try:
+            for offset in capture_offsets:
+                if self._is_refresh_stale(refresh_serial):
+                    stale_refresh = True
+                    break
+                sample_frame = float(current_time) + offset
+                try:
+                    self._capture_silhouette_image(
+                        offset,
+                        sample_frame,
+                        resolution,
+                        self._offset_color(offset),
+                        self._offset_alpha(offset),
+                        camera_signature=camera_signature,
+                        manage_scene_mesh_visibility=False,
+                        refresh_serial=refresh_serial,
+                    )
+                except Exception as exc:
+                    capture_failures.append("{0}: {1}".format(offset, exc))
+                if self._is_refresh_stale(refresh_serial):
+                    stale_refresh = True
+                    break
+        finally:
+            self._restore_scene_mesh_visibility(hidden_mesh_state)
+        if stale_refresh:
+            return
         active_keys = set(desired_offsets)
         for offset, entry in list(self.silhouette_image_planes.items()):
             if offset not in active_keys and cmds.objExists(entry.get("shape", "")):
@@ -1484,6 +1657,18 @@ class MayaOnionSkinController(object):
                     cmds.setAttr(entry["shape"] + ".visibility", 0)
                 except Exception:
                     pass
+                continue
+            if cmds.objExists(entry.get("shape", "")):
+                any_visible = True
+
+        if capture_failures:
+            self._warn_silhouette_once(
+                "Fast Silhouette kept the previous preview for some offsets while Maya updated: {0}".format(
+                    capture_failures[0]
+                )
+            )
+        if not any_visible and capture_failures:
+            raise RuntimeError(capture_failures[0])
 
     def _refresh_with_context(self, desired_offsets, current_time, visible_mesh_entries):
         for offset in desired_offsets:

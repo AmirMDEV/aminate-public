@@ -1,16 +1,24 @@
 """
 maya_anim_workflow_tools.py
 
-Canonical entrypoint for the combined Maya Anim Workflow Tools UI.
+Canonical entrypoint for the combined Aminate UI.
 """
 
 from __future__ import absolute_import, division, print_function
 
 import importlib
+import sys
 
 import maya_dynamic_parent_pivot as _impl  # noqa: F401
 import maya_dynamic_parenting_tool as _parenting  # noqa: F401
 import maya_contact_hold as _contact_hold  # noqa: F401
+import maya_crash_recovery as _crash_recovery  # noqa: F401
+import maya_animators_pencil as _animators_pencil  # noqa: F401
+import maya_control_picker as _control_picker  # noqa: F401
+import maya_face_retarget as _face_retarget  # noqa: F401
+import maya_reference_manager as _reference_manager  # noqa: F401
+import maya_surface_contact as _surface_contact  # noqa: F401
+import maya_timing_tools as _timing_tools  # noqa: F401
 import maya_onion_skin as _onion  # noqa: F401
 import maya_rotation_doctor as _rotation  # noqa: F401
 import maya_skinning_cleanup as _skin  # noqa: F401
@@ -19,16 +27,62 @@ import maya_video_reference_tool as _video_reference  # noqa: F401
 import maya_timeline_notes as _timeline_notes  # noqa: F401
 
 
+_WORKFLOW_MODULE_NAMES = (
+    "maya_dynamic_parenting_tool",
+    "maya_contact_hold",
+    "maya_crash_recovery",
+    "maya_animators_pencil",
+    "maya_control_picker",
+    "maya_face_retarget",
+    "maya_reference_manager",
+    "maya_surface_contact",
+    "maya_timing_tools",
+    "maya_onion_skin",
+    "maya_rotation_doctor",
+    "maya_skinning_cleanup",
+    "maya_rig_scale_export",
+    "maya_video_reference_tool",
+    "maya_timeline_notes",
+    "maya_dynamic_parent_pivot",
+)
+
+
+def _refresh_modules():
+    global _parenting, _contact_hold, _animators_pencil, _control_picker, _face_retarget, _reference_manager, _surface_contact
+    global _timing_tools, _onion, _rotation, _skin, _rig_scale, _video_reference, _timeline_notes
+    global _crash_recovery, _impl
+    for module_name in _WORKFLOW_MODULE_NAMES:
+        sys.modules.pop(module_name, None)
+    _parenting = importlib.import_module("maya_dynamic_parenting_tool")
+    _contact_hold = importlib.import_module("maya_contact_hold")
+    _crash_recovery = importlib.import_module("maya_crash_recovery")
+    _animators_pencil = importlib.import_module("maya_animators_pencil")
+    _control_picker = importlib.import_module("maya_control_picker")
+    _face_retarget = importlib.import_module("maya_face_retarget")
+    _reference_manager = importlib.import_module("maya_reference_manager")
+    _surface_contact = importlib.import_module("maya_surface_contact")
+    _timing_tools = importlib.import_module("maya_timing_tools")
+    _onion = importlib.import_module("maya_onion_skin")
+    _rotation = importlib.import_module("maya_rotation_doctor")
+    _skin = importlib.import_module("maya_skinning_cleanup")
+    _rig_scale = importlib.import_module("maya_rig_scale_export")
+    _video_reference = importlib.import_module("maya_video_reference_tool")
+    _timeline_notes = importlib.import_module("maya_timeline_notes")
+    _impl = importlib.import_module("maya_dynamic_parent_pivot")
+    global DEFAULT_SHELF_BUTTON_LABEL, DEFAULT_SHELF_NAME, DONATE_URL, FOLLOW_AMIR_URL
+    global MayaAnimWorkflowController, MayaAnimWorkflowWindow, SHELF_BUTTON_DOC_TAG
+    DEFAULT_SHELF_BUTTON_LABEL = _impl.DEFAULT_SHELF_BUTTON_LABEL
+    DEFAULT_SHELF_NAME = _impl.DEFAULT_SHELF_NAME
+    DONATE_URL = _impl.DONATE_URL
+    FOLLOW_AMIR_URL = _impl.FOLLOW_AMIR_URL
+    MayaAnimWorkflowController = _impl.MayaAnimWorkflowController
+    MayaAnimWorkflowWindow = _impl.MayaAnimWorkflowWindow
+    SHELF_BUTTON_DOC_TAG = _impl.SHELF_BUTTON_DOC_TAG
+    return _impl
+
+
 def _reloaded_impl():
-    importlib.reload(_parenting)
-    importlib.reload(_contact_hold)
-    importlib.reload(_onion)
-    importlib.reload(_rotation)
-    importlib.reload(_skin)
-    importlib.reload(_rig_scale)
-    importlib.reload(_video_reference)
-    importlib.reload(_timeline_notes)
-    return importlib.reload(_impl)
+    return _refresh_modules()
 
 
 DEFAULT_SHELF_BUTTON_LABEL = _impl.DEFAULT_SHELF_BUTTON_LABEL
@@ -42,6 +96,10 @@ SHELF_BUTTON_DOC_TAG = _impl.SHELF_BUTTON_DOC_TAG
 
 def launch_maya_anim_workflow_tools(dock=False, initial_tab="quick_start"):
     impl = _reloaded_impl()
+    try:
+        _crash_recovery.bootstrap_crash_recovery(startup_prompt=False)
+    except Exception:
+        pass
     return impl.launch_maya_dynamic_parent_pivot(dock=dock, initial_tab=initial_tab)
 
 

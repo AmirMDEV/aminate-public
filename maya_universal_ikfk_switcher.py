@@ -2,7 +2,7 @@
 maya_universal_ikfk_switcher.py
 
 Compatibility entrypoint for opening the IK/FK tab of the combined
-Maya Anim Workflow Tools window.
+Aminate window.
 """
 
 from __future__ import absolute_import, division, print_function

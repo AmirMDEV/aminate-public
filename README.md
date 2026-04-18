@@ -1,43 +1,69 @@
-# Maya Anim Workflow Tools
+# Aminate
 
 By Amir Mansaray
 
 A tabbed Maya toolset for animation workflow helpers.
 
-`Version 2.2 BETA`
-
 ## Sections In Use
 
 The sections in regular use in this beta are:
 
-- `Scene Helpers` for quick shot setup: the cyclorama, helper cameras, camera presets, and basic scene prep
-- `Controls Retargeter (Face and Body)` for retargeting motion between controls, skeletons, or skeleton-to-control setups, then baking onto controls
+- `Student Core` for compact color-coded timing buttons, a small dockable timeline bar, key nudging, inbetweens, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup
+- `Scene Helpers` for the Student Core strip, Animation Layer Tint, camera presets, render setup, texture loading, and game animation mode
+- `Reference Manager` for saving the current scene and packaging Maya references, textures, image planes, audio, caches, and a manifest into one zip
+- `Controls Retargeter (Face and Body)` for control-based retarget between rigs
+- `Control Picker` for scene control mapping, grouping, reordering, attr lookup, synced Maya selection, and list / visual control maps
+- `Animators Pencil` for Blue Pencil-style drawing, layers, frame markers, ghosting, retiming, and scene-native annotation marks
 - `Onion Skin` in `3D Ghost` mode
 - `Dynamic Parenting`
 - `Hand / Foot Hold`, mainly the foot-hold workflow
 - `Timeline Notes`
 
-The other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
+Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
+
+`Version 0.2 BETA`
 
 ## Install
 
-1. Download `Amirs_Maya_Anim_Workflow_Tools_v2.2_BETA.zip` from the latest release.
+1. Download `Aminate_v0.2_BETA.zip` from the latest release.
 2. Unzip it.
-3. Open the `maya_anim_workflow_tools` folder inside the extracted folder.
+3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
 5. Drag `install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
 6. The tool installs, opens, and docks automatically.
+7. After install, Maya opens Aminate and the Student Core timeline bar when Maya starts.
 
 ## How To Use
+
+### Student Core
+
+This section is for the small repeat jobs students do while blocking and polishing animation.
+
+Simple example:
+
+1. Select one or more animated controls.
+2. Use `-1` or `+1` to nudge the selected keys earlier or later.
+3. Use `In` to add an inbetween key on the current frame.
+4. Use `Cut` to remove a key on the current frame.
+5. Use `Zero` to reset selected controls to translate 0, rotate 0, and scale 1.
+6. Use `2s` to bake selected controls every two frames across the playback range.
+7. Use `Open Timeline Bar` if the small color-coded strip above Maya's timeline is closed.
+
+### Scene Helpers
+
+This section is for shot setup, timing cleanup, texture refresh, and the always-visible timeline helper strip.
+
+Simple example:
+
+1. Keep `Animation Layer Tint` on.
+2. Select or change an animation layer in Maya.
+3. The docked Student Core timeline bar shows that layer name and tint color above the timeline.
+4. Use `Game Animation Mode` for 30 fps realtime playback and student-safe autosave defaults.
+5. Use `Set Up Render Environment` for the helper cameras, light, and cyclorama.
 
 ### Dynamic Parenting
 
 This section is for props that need to move between parents, like a magazine moving between a hand, a gun, and world space.
-
-![Dynamic Parenting](release_screenshots/dynamic_parenting.png)
-
-Animated example:
-![Dynamic Parenting GIF](release_media/dynamic_parenting.gif)
 
 Simple example:
 
@@ -50,11 +76,23 @@ Simple example:
 7. Click `Switch to this Parent`.
 8. Use `World` when you want the object to let go.
 
+### Reference Manager
+
+This section is for moving a shot to another computer without hunting for referenced files by hand.
+
+Simple example:
+
+1. Save the current scene once.
+2. Open `Reference Manager`.
+3. Click `Refresh Needed Files`.
+4. Keep `Include Maya references` on.
+5. Keep `Include textures, audio, caches` on.
+6. Click `Package Scene To Zip`.
+7. Use the created zip on another machine.
+
 ### Hand / Foot Hold
 
 This section is for planted contact, especially when a foot should stay in place while the body keeps moving.
-
-![Hand / Foot Hold](release_screenshots/hand_foot_hold.png)
 
 Simple example:
 
@@ -65,40 +103,9 @@ Simple example:
 5. Save the hold.
 6. Use the saved hold list to turn rows on, off, update them, or delete them later.
 
-### Scene Helpers
-
-This section builds the shot setup used for quick scene prep: the cyclorama, helper cameras, camera presets, and the simple timing helpers.
-
-![Scene Helpers](release_screenshots/scene_helpers.png)
-
-Simple example:
-
-1. Select the character or object you want to frame.
-2. Open `Scene Helpers`.
-3. Click `Set Up Render Environment`.
-4. Use the `Camera Preset` menu to jump between `Perspective`, `Front`, `Side`, and `Three Quarter`.
-5. Use `Camera Height Offset` and `Camera Dolly Offset` if you want the framing higher, lower, tighter, or wider.
-6. Click `Delete Render Environment` when you want to remove that setup.
-
-### Controls Retargeter
-
-This section retargets animation between controls, between controls and skeletons, or from skeleton to control, then bakes the result onto the controls so the motion stays editable.
-
-![Controls Retargeter](release_screenshots/face_retarget.png)
-
-Simple example:
-
-1. Pick the source controls first.
-2. Pick the target controls second.
-3. Click `Load Selected Source` and `Load Selected Target` or use `Pair By Order`.
-4. Click `Retarget Selected Controls` for just one pair, or `Retarget All Controls` for every pair.
-5. Use `Delete` if you want to remove a source, target, or saved pair from the list.
-
 ### Onion Skin
 
 The dependable mode in the current beta is `3D Ghost`.
-
-![Onion Skin](release_screenshots/onion_skin.png)
 
 Simple example:
 
@@ -109,11 +116,24 @@ Simple example:
 5. Attach the preview.
 6. Scrub the timeline to see the ghosted poses.
 
+### Animators Pencil
+
+This section is for drawing animation notes, arcs, contact marks, timing plans, and simple 2D annotations inside Maya.
+
+Simple example:
+
+1. Open `Animators Pencil`.
+2. Use `Open Blue Pencil` if you want Maya's native Blue Pencil drawing tools.
+3. Use `Add Layer` for a script-managed layer.
+4. Pick a tool, color, size, and opacity.
+5. Click `Create Mark` to create a real Maya curve or text mark in front of the current camera.
+6. Use `Add Key`, `Duplicate Previous Key`, `Retime`, `Add Frame Marker`, or `Build Ghosts` for drawing animation timing.
+7. The script-managed marks are real Maya scene nodes, so the scene still shows them even without this script installed.
+
 ### Timeline Notes
 
 This section is for colored timeline ranges with readable notes attached to them.
-
-![Timeline Notes](release_screenshots/timeline_notes.png)
+Use `Scene Helpers` or the docked Student Core timeline bar when you need key nudging, inbetweens, reset pose, bake-on-twos, or Animation Layer Tint next to timeline review.
 
 Simple example:
 
@@ -128,12 +148,17 @@ Simple example:
 ## Tab Screenshots
 
 - [Quick Start](release_screenshots/quick_start.png)
-- [Scene Helpers](release_screenshots/scene_helpers.png)
+- [Student Core](release_screenshots/student_core.png)
+- [Student Timeline Bar](release_screenshots/student_timeline_bar.png)
+- [Reference Manager](release_screenshots/reference_manager.png)
 - [Dynamic Parenting](release_screenshots/dynamic_parenting.png)
 - [Hand / Foot Hold](release_screenshots/hand_foot_hold.png)
+- [Scene Helpers](release_screenshots/scene_helpers.png)
 - [Dynamic Pivot](release_screenshots/dynamic_pivot.png)
 - [Universal IK/FK](release_screenshots/universal_ikfk.png)
-- [Controls Retargeter](release_screenshots/face_retarget.png)
+- [Controls Retargeter](release_screenshots/controls_retargeter.png)
+- [Control Picker](release_screenshots/control_picker.png)
+- [Animators Pencil](release_screenshots/animators_pencil.png)
 - [Onion Skin](release_screenshots/onion_skin.png)
 - [Rotation Doctor](release_screenshots/rotation_doctor.png)
 - [Skinning Cleanup](release_screenshots/skinning_cleanup.png)
