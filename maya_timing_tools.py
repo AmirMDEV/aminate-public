@@ -44,6 +44,7 @@ STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME = STUDENT_TIMELINE_BAR_OBJECT_NAME +
 AUTO_SNAP_OPTION = "AmirMayaAnimWorkflowAutoSnapToFrames"
 ANIMATION_LAYER_TINT_OPTION = "AmirMayaAnimWorkflowAnimationLayerTint"
 GAME_ANIMATION_MODE_OPTION = "AmirMayaAnimWorkflowGameAnimationMode"
+ANIMATION_LAYER_CUSTOM_COLOR_ATTR = "aminateLayerColor"
 DEFAULT_AUTO_SNAP = True
 DEFAULT_ANIMATION_LAYER_TINT = True
 DEFAULT_GAME_ANIMATION_MODE = False
@@ -263,6 +264,17 @@ _open_external_url = hold_utils._open_external_url
 _maya_main_window = hold_utils._maya_main_window
 
 
+def _tool_button_popup_mode(member_name):
+    if not QtWidgets:
+        return 2
+    if hasattr(QtWidgets.QToolButton, member_name):
+        return getattr(QtWidgets.QToolButton, member_name)
+    scoped_enum = getattr(QtWidgets.QToolButton, "ToolButtonPopupMode", None)
+    if scoped_enum and hasattr(scoped_enum, member_name):
+        return getattr(scoped_enum, member_name)
+    return getattr(QtWidgets.QToolButton, "InstantPopup", 2)
+
+
 def _dedupe_preserve_order(values):
     seen = set()
     ordered = []
@@ -281,6 +293,46 @@ def _stable_palette_color(name):
     label = _short_name(name) or "Base Animation"
     total = sum(ord(char) for char in label)
     return ANIMATION_LAYER_TINT_PALETTE[total % len(ANIMATION_LAYER_TINT_PALETTE)]
+
+
+def _normalize_hex_color(value, fallback="#4A4A4A"):
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    if not text.startswith("#"):
+        text = "#" + text
+    if len(text) != 7:
+        return fallback
+    try:
+        int(text[1:], 16)
+    except Exception:
+        return fallback
+    return text.upper()
+
+
+def _hex_to_rgb01(color_hex):
+    color_hex = _normalize_hex_color(color_hex)
+    return (
+        int(color_hex[1:3], 16) / 255.0,
+        int(color_hex[3:5], 16) / 255.0,
+        int(color_hex[5:7], 16) / 255.0,
+    )
+
+
+def _maya_color_index_from_hex(color_hex):
+    target = _hex_to_rgb01(color_hex)
+    best_index = 0
+    best_distance = 999.0
+    for index in range(32):
+        maya_hex = _maya_color_index_to_hex(index)
+        if not maya_hex:
+            continue
+        candidate = _hex_to_rgb01(maya_hex)
+        distance = sum((candidate[channel] - target[channel]) ** 2 for channel in range(3))
+        if distance < best_distance:
+            best_distance = distance
+            best_index = index
+    return best_index
 
 
 def _maya_color_index_to_hex(index_value):
@@ -302,6 +354,13 @@ def _maya_color_index_to_hex(index_value):
 def _animation_layer_color(layer_name):
     if not cmds or not layer_name or not cmds.objExists(layer_name):
         return _stable_palette_color(layer_name)
+    try:
+        if cmds.attributeQuery(ANIMATION_LAYER_CUSTOM_COLOR_ATTR, node=layer_name, exists=True):
+            custom_color = cmds.getAttr("{0}.{1}".format(layer_name, ANIMATION_LAYER_CUSTOM_COLOR_ATTR))
+            if custom_color:
+                return _normalize_hex_color(custom_color, _stable_palette_color(layer_name))
+    except Exception:
+        pass
     for attr_name in ("color", "displayColor", "ghostColor"):
         try:
             if not cmds.attributeQuery(attr_name, node=layer_name, exists=True):
@@ -327,6 +386,84 @@ def _animation_layer_color(layer_name):
         except Exception:
             continue
     return _stable_palette_color(layer_name)
+
+
+def _animation_layer_names(include_base=False):
+    if not cmds:
+        return []
+    try:
+        layers = cmds.ls(type="animLayer") or []
+    except Exception:
+        layers = []
+    ordered = []
+    if include_base:
+        ordered.append("")
+    for layer_name in layers:
+        if layer_name and layer_name not in ordered:
+            ordered.append(layer_name)
+    return ordered
+
+
+def _set_animation_layer_selected(layer_name):
+    if not cmds:
+        return False, "This tool only works inside Maya."
+    if layer_name and not cmds.objExists(layer_name):
+        return False, "Animation layer no longer exists: {0}".format(layer_name)
+    changed = False
+    for other_layer in _animation_layer_names(include_base=False):
+        for flag_name in ("selected", "preferred"):
+            try:
+                cmds.animLayer(other_layer, edit=True, **{flag_name: bool(other_layer == layer_name)})
+                changed = True
+            except Exception:
+                continue
+    if layer_name:
+        return True, "Animation layer changed to {0}.".format(_short_name(layer_name))
+    return True, "Animation layer changed to Base Animation."
+
+
+def _rename_animation_layer(layer_name, new_name):
+    if not cmds:
+        return False, "This tool only works inside Maya.", layer_name
+    if not layer_name or not cmds.objExists(layer_name):
+        return False, "Pick an animation layer before renaming.", layer_name
+    cleaned = str(new_name or "").strip()
+    if not cleaned:
+        return False, "Type a new animation layer name.", layer_name
+    try:
+        renamed = cmds.rename(layer_name, cleaned)
+    except Exception as exc:
+        return False, "Could not rename animation layer: {0}".format(exc), layer_name
+    return True, "Renamed animation layer to {0}.".format(_short_name(renamed)), renamed
+
+
+def _set_animation_layer_color(layer_name, color_hex):
+    if not cmds:
+        return False, "This tool only works inside Maya."
+    if not layer_name or not cmds.objExists(layer_name):
+        return False, "Pick an animation layer before setting color."
+    color_hex = _normalize_hex_color(color_hex, _stable_palette_color(layer_name))
+    try:
+        if not cmds.attributeQuery(ANIMATION_LAYER_CUSTOM_COLOR_ATTR, node=layer_name, exists=True):
+            cmds.addAttr(layer_name, longName=ANIMATION_LAYER_CUSTOM_COLOR_ATTR, dataType="string")
+        cmds.setAttr("{0}.{1}".format(layer_name, ANIMATION_LAYER_CUSTOM_COLOR_ATTR), color_hex, type="string")
+    except Exception:
+        pass
+    r_value, g_value, b_value = _hex_to_rgb01(color_hex)
+    color_index = _maya_color_index_from_hex(color_hex)
+    for attr_name in ("color", "displayColor", "ghostColor"):
+        try:
+            if not cmds.attributeQuery(attr_name, node=layer_name, exists=True):
+                continue
+            attr_type = cmds.getAttr("{0}.{1}".format(layer_name, attr_name), type=True)
+            plug = "{0}.{1}".format(layer_name, attr_name)
+            if attr_type in ("double3", "float3"):
+                cmds.setAttr(plug, r_value, g_value, b_value, type=attr_type)
+            else:
+                cmds.setAttr(plug, color_index)
+        except Exception:
+            continue
+    return True, "Changed {0} color to {1}.".format(_short_name(layer_name), color_hex)
 
 
 def _animation_layer_is_selected(layer_name):
@@ -1774,6 +1911,35 @@ class MayaTimingToolsController(object):
             "color": _animation_layer_color(layer_name),
         }
 
+    def animation_layer_choices(self):
+        choices = [{"layer": "", "label": "Base Animation", "color": "#4A4A4A", "active": not _active_animation_layer_name()}]
+        active_layer = _active_animation_layer_name()
+        for layer_name in _animation_layer_names(include_base=False):
+            choices.append(
+                {
+                    "layer": layer_name,
+                    "label": _short_name(layer_name),
+                    "color": _animation_layer_color(layer_name),
+                    "active": bool(layer_name == active_layer),
+                }
+            )
+        return choices
+
+    def select_animation_layer_from_bar(self, layer_name):
+        success, message = _set_animation_layer_selected(layer_name)
+        self._emit_status(message, success)
+        return success, message
+
+    def rename_animation_layer_from_bar(self, layer_name, new_name):
+        success, message, renamed = _rename_animation_layer(layer_name, new_name)
+        self._emit_status(message, success)
+        return success, message, renamed
+
+    def color_animation_layer_from_bar(self, layer_name, color_hex):
+        success, message = _set_animation_layer_color(layer_name, color_hex)
+        self._emit_status(message, success)
+        return success, message
+
     def reset_scene_helpers_camera_offsets(self):
         self.scene_helpers_camera_height_offset = 0.0
         self.scene_helpers_camera_dolly_offset = 0.0
@@ -2573,14 +2739,18 @@ if QtWidgets:
             main_layout = QtWidgets.QVBoxLayout(self)
             main_layout.setContentsMargins(6, 3, 6, 4)
             main_layout.setSpacing(3)
-            self.animation_layer_tint_label = QtWidgets.QLabel("Base Animation")
+            self.animation_layer_tint_label = QtWidgets.QToolButton()
             self.animation_layer_tint_label.setObjectName("studentTimelineBarAnimationLayerTint")
-            self.animation_layer_tint_label.setAlignment(QtCore.Qt.AlignCenter)
+            self.animation_layer_tint_label.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+            self.animation_layer_tint_label.setPopupMode(_tool_button_popup_mode("InstantPopup"))
             self.animation_layer_tint_label.setMinimumHeight(16)
             self.animation_layer_tint_label.setMaximumHeight(18)
             self.animation_layer_tint_label.setToolTip(
-                "Animation Layer Tint: shows the current selected animation layer above the timeline so students know which layer they are editing."
+                "Animation Layer Tint: click to switch, rename, or recolor the current animation layer."
             )
+            self.animation_layer_tint_menu = QtWidgets.QMenu(self.animation_layer_tint_label)
+            self.animation_layer_tint_menu.aboutToShow.connect(self._refresh_animation_layer_menu)
+            self.animation_layer_tint_label.setMenu(self.animation_layer_tint_menu)
             main_layout.addWidget(self.animation_layer_tint_label)
 
             layout = QtWidgets.QHBoxLayout()
@@ -2652,7 +2822,7 @@ if QtWidgets:
             self.animation_layer_tint_label.setText(text)
             self.animation_layer_tint_label.setStyleSheet(
                 """
-                QLabel#studentTimelineBarAnimationLayerTint {{
+                QToolButton#studentTimelineBarAnimationLayerTint {{
                     background-color: {color};
                     color: {text_color};
                     border: 1px solid {border_color};
@@ -2661,8 +2831,75 @@ if QtWidgets:
                     font-weight: 700;
                     padding: 1px 8px;
                 }}
+                QToolButton#studentTimelineBarAnimationLayerTint::menu-indicator {{
+                    width: 0px;
+                }}
                 """.format(color=color_hex, text_color=text_color, border_color=border_color)
             )
+
+        def _refresh_animation_layer_menu(self):
+            if not getattr(self, "animation_layer_tint_menu", None):
+                return
+            self.animation_layer_tint_menu.clear()
+            title_action = self.animation_layer_tint_menu.addAction("Change Animation Layer")
+            title_action.setEnabled(False)
+            for choice in self.controller.animation_layer_choices():
+                action = self.animation_layer_tint_menu.addAction(
+                    _make_student_core_icon(choice.get("color") or "#4A4A4A", "bars"),
+                    choice.get("label") or "Base Animation",
+                )
+                action.setCheckable(True)
+                action.setChecked(bool(choice.get("active")))
+                action.triggered.connect(lambda _checked=False, layer=choice.get("layer", ""): self._select_animation_layer_from_bar(layer))
+            self.animation_layer_tint_menu.addSeparator()
+            rename_action = self.animation_layer_tint_menu.addAction("Rename Current Layer...")
+            rename_action.triggered.connect(self._rename_current_animation_layer_from_bar)
+            color_action = self.animation_layer_tint_menu.addAction("Pick Current Layer Color...")
+            color_action.triggered.connect(self._pick_current_animation_layer_color_from_bar)
+
+        def _select_animation_layer_from_bar(self, layer_name):
+            success, message = self.controller.select_animation_layer_from_bar(layer_name)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _rename_current_animation_layer_from_bar(self):
+            info = self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            if not layer_name:
+                if self.status_callback:
+                    self.status_callback("Pick an animation layer before renaming.", False)
+                return
+            current_name = info.get("label") or _short_name(layer_name)
+            new_name, accepted = QtWidgets.QInputDialog.getText(
+                self,
+                "Rename Animation Layer",
+                "New layer name:",
+                QtWidgets.QLineEdit.Normal,
+                current_name,
+            )
+            if not accepted:
+                return
+            success, message, _renamed = self.controller.rename_animation_layer_from_bar(layer_name, new_name)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _pick_current_animation_layer_color_from_bar(self):
+            info = self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            if not layer_name:
+                if self.status_callback:
+                    self.status_callback("Pick an animation layer before setting color.", False)
+                return
+            initial_color = QtGui.QColor(info.get("color") or "#4A4A4A")
+            color = QtWidgets.QColorDialog.getColor(initial_color, self, "Pick Animation Layer Color")
+            if not color.isValid():
+                return
+            success, message = self.controller.color_animation_layer_from_bar(layer_name, color.name().upper())
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
 
         def _run(self, command):
             success, message = self.controller.run_student_core_command(command)

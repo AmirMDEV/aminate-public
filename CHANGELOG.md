@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added Toolkit Bar animation-layer controls so the colored layer bar can switch layers, rename the current layer, and pick the current layer color.
 - Renamed the docked Student Core timeline bar to `Toolkit Bar` and added a far-right blue Game Animation Mode toggle with a custom game icon and active highlight.
 - Renamed the user-facing tool to `Aminate`, including the main window, shelf button, installer message, and student package label.
 - Added `Animation Layer Tint` to Scene Helpers and the docked Student Core timeline bar so the active animation layer name and color stay visible above Maya's timeline.

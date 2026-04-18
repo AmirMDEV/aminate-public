@@ -58,7 +58,8 @@ Simple example:
 1. Keep `Animation Layer Tint` on.
 2. Select or change an animation layer in Maya.
 3. The docked Toolkit Bar shows that layer name and tint color above the timeline.
-4. Use the blue game button at the far right of the Toolkit Bar for 30 fps realtime playback and student-safe autosave defaults.
+4. Click the colored layer bar to change the current animation layer, rename it, or pick its color.
+5. Use the blue game button at the far right of the Toolkit Bar for 30 fps realtime playback and student-safe autosave defaults.
 5. Use `Set Up Render Environment` for the helper cameras, light, and cyclorama.
 
 ### Dynamic Parenting
