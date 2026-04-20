@@ -216,3 +216,15 @@ Simple example:
 - [Rig Scale](release_screenshots/rig_scale.png)
 - [Video Reference](release_screenshots/video_reference.png)
 - [Timeline Notes](release_screenshots/timeline_notes.png)
+
+## License
+
+Aminate is proprietary source-available software under the [Aminate Proprietary Source-Available License](LICENSE).
+
+Plain-English summary:
+
+- You can use unmodified Aminate for private, educational, internal, commercial, studio, client, teaching, training, and production work.
+- You can redistribute unmodified copies if you keep the license, copyright notice, and credit links intact.
+- You cannot modify, patch, extend, fork, rebrand, sell modified versions, or claim Aminate or any part of Aminate as your own work without written permission from Amir Mansaray.
+- Public source access is for transparency, review, installation, and permitted use only. Aminate is not open source.
+- Redistribution must credit Amir Mansaray and include links to [GitHub](https://github.com/AmirMDEV/aminate-public), [followamir.com](https://followamir.com), and the [donation page](https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA).

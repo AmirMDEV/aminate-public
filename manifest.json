@@ -2,6 +2,13 @@
   "package_name": "Aminate",
   "version": "Version 0.3 BETA",
   "release_tag": "v0.3-beta",
+  "license": "Aminate Proprietary Source-Available License",
+  "license_file": "LICENSE",
+  "public_repository": "https://github.com/AmirMDEV/aminate-public",
+  "follow_amir": "https://followamir.com",
+  "donation_url": "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA",
+  "redistribution_notice": "Redistribution is allowed only for unmodified copies that keep the license, copyright, GitHub, followamir.com, and donation links.",
+  "modification_notice": "Modification, derivative works, forks, rebranding, and claims of ownership are not permitted without written permission.",
   "runtime_files": [
     "maya_anim_workflow_tools.py",
     "maya_animators_pencil.py",

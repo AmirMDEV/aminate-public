@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a proprietary source-available license for Aminate that allows unmodified private, educational, internal, commercial, and redistributed use with attribution, while prohibiting modification, derivative works, rebranding, forks, and claims of ownership.
+
 ## Version 0.3 BETA - 2026-04-20
 
 - Fixed Scene Helpers Teacher Demo rig duplication so duplicated constraints and skinClusters are copied with the rig, skinned mesh transforms avoid double-offset inheritance, and duplicated controls drive the duplicated skeleton and mesh with matching animation.

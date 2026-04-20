@@ -1,0 +1,93 @@
+Aminate Proprietary Source-Available License
+
+Copyright (c) 2026 Amir Mansaray. All rights reserved.
+
+This software, including all source files, installer files, icons, images,
+documentation, packages, and related assets in this repository or release
+package, is proprietary software owned by Amir Mansaray.
+
+1. Permission granted
+
+Subject to this license, Amir Mansaray grants you permission to:
+
+- use unmodified copies of Aminate for private, educational, internal,
+  commercial, studio, client, teaching, training, and production use;
+- make backup copies of unmodified Aminate files for your own permitted use;
+- redistribute unmodified copies of Aminate, including release zip files and
+  installer packages, only when all required attribution and notice terms below
+  are followed.
+
+2. Required attribution for redistribution
+
+Every redistributed copy of Aminate must include all of the following:
+
+- this complete license text;
+- the original copyright notice;
+- clear credit to Amir Mansaray as the creator;
+- a link to the public GitHub repository:
+  https://github.com/AmirMDEV/aminate-public
+- a link to Follow Amir:
+  https://followamir.com
+- the donation link:
+  https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA
+
+The donation link must be included as a link. Payment is not required.
+
+3. Restrictions
+
+You may not, without prior written permission from Amir Mansaray:
+
+- modify, edit, patch, adapt, translate, or alter any Aminate source file,
+  installer file, icon, image, documentation file, package file, or related
+  asset;
+- create, publish, distribute, or sell derivative works based on Aminate;
+- extend Aminate, fork Aminate, rebrand Aminate, or claim Aminate or any part of
+  Aminate as your own work;
+- remove, hide, alter, or misrepresent attribution, copyright notices, donation
+  links, GitHub links, Follow Amir links, version information, or license text;
+- distribute modified copies of Aminate;
+- sublicense Aminate or grant rights to Aminate beyond this license;
+- use Aminate in any way that suggests endorsement by Amir Mansaray unless
+  written permission has been given.
+
+Normal user configuration is allowed. Creating Maya scenes, animation data,
+student files, production files, settings, caches, backups, or outputs with
+Aminate does not make those files owned by Amir Mansaray. Those user-created
+files remain yours unless another agreement says otherwise.
+
+4. Source availability
+
+Public access to the source code is provided for transparency, installation,
+review, and permitted use only. This is not an open source license. No right to
+modify, create derivative works, or distribute modified versions is granted.
+
+5. Third-party software
+
+Third-party libraries, tools, Autodesk Maya components, Python, Qt, PySide, or
+other dependencies used with Aminate remain governed by their own licenses.
+This license applies only to Aminate files owned by Amir Mansaray.
+
+6. Termination
+
+Your rights under this license end automatically if you breach any term. After
+termination, you must stop using, copying, and distributing Aminate unless Amir
+Mansaray gives written permission to continue.
+
+7. Warranty disclaimer
+
+Aminate is provided "as is" without warranty of any kind, express or implied,
+including warranties of merchantability, fitness for a particular purpose, and
+non-infringement.
+
+8. Limitation of liability
+
+To the maximum extent permitted by law, Amir Mansaray is not liable for any
+claim, damage, data loss, lost profit, business interruption, production issue,
+or other liability arising from use, inability to use, distribution, or
+performance of Aminate.
+
+9. Permission requests
+
+For permission to modify, extend, fork, rebrand, redistribute modified files, or
+use Aminate outside these terms, contact Amir Mansaray through the public GitHub
+profile or Follow Amir links above.
