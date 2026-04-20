@@ -8,12 +8,13 @@ A tabbed Maya toolset for animation workflow helpers.
 
 The sections in regular use in this beta are:
 
-- `Student Core` for compact color-coded timing buttons, the dockable Toolkit Bar, key nudging, inbetweens, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup
-- `Scene Helpers` for the Student Core strip, Animation Layer Tint, camera presets, render setup, texture loading, and game animation mode
+- `Toolkit Bar` for compact color-coded timing buttons, the dockable Toolkit Bar, key nudging, inbetweens, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup
+- `Scene Helpers` for the Toolkit Bar strip, Animation Layer Tint, camera presets, render setup, texture loading, and game animation mode
 - `Reference Manager` for saving the current scene and packaging Maya references, textures, image planes, audio, caches, and a manifest into one zip
 - `Controls Retargeter (Face and Body)` for control-based retarget between rigs
 - `Control Picker` for scene control mapping, grouping, reordering, attr lookup, synced Maya selection, and list / visual control maps
 - `Animators Pencil` for Blue Pencil-style drawing, Photoshop-style shape tools, Camera Notes view keying, layers, frame markers, ghosting, retiming, and scene-native annotation marks
+- `History Timeline` for ZBrush-style scene snapshots, restore points, milestone notes, branch tracking, and custom auto-save rules
 - `Onion Skin` in `3D Ghost` mode
 - `Dynamic Parenting`
 - `Hand / Foot Hold`, mainly the foot-hold workflow
@@ -21,11 +22,23 @@ The sections in regular use in this beta are:
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
-`Version 0.2 BETA`
+`Version 0.3 BETA`
+
+## What Is New In 0.3 BETA
+
+- `Scene Helpers` is now usable for render setup, scene text notes, teacher-demo rig duplication, texture refresh, camera presets, and Game Animation Mode.
+- `Controls Retargeter (Face and Body)` now works for retargeting animation between controls, between skeletons, from skeletons to controls, and between different rig layouts.
+- `Toolkit Bar` now has the titleless compact bar, custom icons, Game Animation Mode, one-click package zip, animation-layer controls, and a small History Timeline strip.
+- `History Timeline` adds scene snapshot saves, restore points, branch tracking, milestones, per-scene history folders, custom auto-save triggers, and an Auto History toggle for performance.
+- `Control Picker` can scan selected control, geometry, and skeleton roots, group controls by body or face area, sync selection with Maya, and show list plus visual picker views.
+- `Animators Pencil` adds scene-backed drawing marks, shape tools, marquee selection, camera notes, layers, frame markers, ghosting, and retiming helpers.
+- `Reference Manager` can package the current scene and external files into a zip with clearer missing-file labels and safer copy-only packaging.
+- `Scene Text Notes` let teachers place visible notes in the viewport, resize them, color them, key visibility, and attach live pointer splines to animated controls.
+- `Teacher Demo` duplicates a selected rig for side-by-side animation feedback while preserving animation, visibility, colors, materials, skinning, and cleanup controls.
 
 ## Install
 
-1. Download `Aminate_v0.2_BETA.zip` from the latest release.
+1. Download `Aminate_v0.3_BETA.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
@@ -35,7 +48,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 ## How To Use
 
-### Student Core
+### Toolkit Bar
 
 This section is for the small repeat jobs students do while blocking and polishing animation.
 
@@ -51,7 +64,9 @@ Simple example:
 
 ### Scene Helpers
 
-This section is for shot setup, timing cleanup, texture refresh, and the always-visible timeline helper strip.
+This section is for shot setup, timing cleanup, texture refresh, scene text notes, and the always-visible timeline helper strip.
+
+Scene Text Notes let you place feedback directly in the Maya scene. Select a control or body part, type a note, pick a color, and click `Create Text Note`. You can key the note on or off, move it beside another selected control, recolor it, refresh the list, or delete it from the UI.
 
 Simple example:
 
@@ -143,6 +158,29 @@ Camera Notes example:
 4. Move to another frame and draw from another angle.
 5. The Camera Notes camera keys to that new view, so students can scrub through notes from the same angles used when the marks were made.
 
+### History Timeline
+
+This section is for saving bigger restore points than Maya undo can safely handle.
+
+Simple example:
+
+1. Save the Maya scene once.
+2. Open `History Timeline`.
+3. Click `Save Step` before trying a risky change.
+4. Click `Save Milestone` for important poses such as `good blocking` or `before polish`.
+5. Pick a row and click `Restore` to return the whole scene to that snapshot.
+6. Use the small history blocks above the animation-layer bar on the Toolkit Bar for quick save and restore while animating.
+7. Restoring a snapshot jumps to that saved scene state without creating a new snapshot or moving the history order.
+8. If you restore an older snapshot and keep working, Aminate creates a new colored branch instead of overwriting later saves.
+9. The Toolkit Bar history squares keep showing all snapshots, so future work stays visible when you jump back.
+10. Use the Branch menu and `Switch Branch` to jump between different save branches, or `Rename Branch` to give a branch a clearer name.
+11. Check `History size` to see how much disk space the saved scene snapshots use together.
+12. Use `Set Snapshot Cap` to limit automatic history growth. `0` means no cap.
+13. Use `Delete All Snapshots` if you want to clear the scene history folder and remove all small snapshot squares.
+14. By default, Aminate also watches for Maya action changes and saves sidecar snapshots after actions when the scene has already been saved.
+15. Use `Auto History Save Rules` to keep full save mode on, or turn it off and tick only the custom triggers you want, such as keyframes, constraints, nodes, animation layers, parenting, references, transforms, or materials.
+16. Notes, colors, branch ids, auto-save rules, and changed-node metadata are stored in the sidecar history folder beside the scene.
+
 ### Timeline Notes
 
 This section is for colored timeline ranges with readable notes attached to them.
@@ -161,7 +199,7 @@ Simple example:
 ## Tab Screenshots
 
 - [Quick Start](release_screenshots/quick_start.png)
-- [Student Core](release_screenshots/student_core.png)
+- [Toolkit Bar](release_screenshots/student_core.png)
 - [Toolkit Bar](release_screenshots/student_timeline_bar.png)
 - [Reference Manager](release_screenshots/reference_manager.png)
 - [Dynamic Parenting](release_screenshots/dynamic_parenting.png)
@@ -169,7 +207,7 @@ Simple example:
 - [Scene Helpers](release_screenshots/scene_helpers.png)
 - [Dynamic Pivot](release_screenshots/dynamic_pivot.png)
 - [Universal IK/FK](release_screenshots/universal_ikfk.png)
-- [Controls Retargeter](release_screenshots/controls_retargeter.png)
+- [Controls Retargeter](release_screenshots/face_retarget.png)
 - [Control Picker](release_screenshots/control_picker.png)
 - [Animators Pencil](release_screenshots/animators_pencil.png)
 - [Onion Skin](release_screenshots/onion_skin.png)

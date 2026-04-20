@@ -18,6 +18,7 @@ import maya_contact_hold
 import maya_dynamic_parenting_tool
 import maya_control_picker
 import maya_face_retarget
+import maya_history_timeline
 import maya_reference_manager
 import maya_onion_skin
 import maya_surface_contact
@@ -30,12 +31,14 @@ import maya_video_reference_tool
 
 try:
     import maya.cmds as cmds
+    import maya.mel as mel
     import maya.api.OpenMaya as om
     import maya.OpenMayaUI as omui
 
     MAYA_AVAILABLE = True
 except Exception:
     cmds = None
+    mel = None
     om = None
     omui = None
     MAYA_AVAILABLE = False
@@ -66,7 +69,7 @@ LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.2 BETA"
+VERSION_LABEL = "Version 0.3 BETA"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
@@ -91,6 +94,7 @@ TAB_IKFK = "Universal IK/FK"
 TAB_FACE_RETARGET = "Controls Retargeter (Face and Body)"
 TAB_CONTROL_PICKER = "Control Picker"
 TAB_ANIMATORS_PENCIL = "Animators Pencil"
+TAB_HISTORY_TIMELINE = "History Timeline"
 TAB_ONION = "Onion Skin"
 TAB_ROTATION = "Rotation Doctor"
 TAB_SKIN = "Skinning Cleanup"
@@ -98,9 +102,180 @@ TAB_RIG_SCALE = "Rig Scale"
 TAB_VIDEO = "Video Reference"
 TAB_TIMELINE = "Timeline Notes"
 TAB_GUIDE = "Quick Start"
-TAB_STUDENT_CORE = "Student Core"
+TAB_STUDENT_CORE = "Toolkit Bar"
 TAB_TIMING = "Scene Helpers"
 TAB_REFERENCE_MANAGER = "Reference Manager"
+AMINATE_WINDOW_STYLESHEET = """
+QDialog#mayaAnimWorkflowToolsWindow {
+    background-color: #2B2B2B;
+    color: #E8E8E8;
+}
+QWidget[aminateTabPage="true"] {
+    background-color: #2B2B2B;
+    color: #E8E8E8;
+}
+QScrollArea#mayaAnimWorkflowTabScroll {
+    background-color: #2B2B2B;
+    border: 0px;
+}
+QScrollArea#mayaAnimWorkflowTabScroll > QWidget > QWidget {
+    background-color: #2B2B2B;
+}
+QTabWidget#mayaAnimWorkflowTabWidget::pane {
+    background-color: #2B2B2B;
+    border: 1px solid #3C3C3C;
+    border-radius: 8px;
+    top: -1px;
+}
+QTabBar::tab {
+    background-color: #242424;
+    color: #CFCFCF;
+    border: 1px solid #3C3C3C;
+    border-bottom-color: #2B2B2B;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 7px 10px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background-color: #3A3A3A;
+    color: #F2F2F2;
+    border-color: #4CC9F0;
+}
+QTabBar::tab:hover {
+    background-color: #333333;
+    color: #FFFFFF;
+}
+QFrame#mayaAnimWorkflowTabIntro {
+    background-color: #353535;
+    color: #E8E8E8;
+    border: 1px solid #4A4A4A;
+    border-left: 4px solid #4CC9F0;
+    border-radius: 8px;
+}
+QLabel#mayaAnimWorkflowIntroTitle {
+    color: #F2F2F2;
+    font-weight: 700;
+}
+QLabel#mayaAnimWorkflowStatusLabel {
+    background-color: #202020;
+    color: #E8E8E8;
+    border: 1px solid #3C3C3C;
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+QLabel#mayaAnimWorkflowBrandLabel,
+QLabel#mayaAnimWorkflowVersionLabel {
+    color: #BDBDBD;
+}
+QPushButton,
+QToolButton {
+    background-color: #3A3A3A;
+    color: #F2F2F2;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    padding: 5px 8px;
+}
+QPushButton:hover,
+QToolButton:hover {
+    background-color: #454545;
+    border-color: #6A6A6A;
+}
+QPushButton:pressed,
+QToolButton:pressed {
+    background-color: #2F5D66;
+    border-color: #4CC9F0;
+}
+QPushButton:disabled,
+QToolButton:disabled {
+    background-color: #262626;
+    color: #777777;
+    border-color: #363636;
+}
+QLineEdit,
+QPlainTextEdit,
+QTextEdit,
+QComboBox,
+QSpinBox,
+QDoubleSpinBox {
+    background-color: #1E1E1E;
+    color: #F2F2F2;
+    border: 1px solid #444444;
+    border-radius: 5px;
+    padding: 4px;
+    selection-background-color: #335C67;
+}
+QLineEdit:focus,
+QPlainTextEdit:focus,
+QTextEdit:focus,
+QComboBox:focus,
+QSpinBox:focus,
+QDoubleSpinBox:focus {
+    border-color: #4CC9F0;
+}
+QComboBox::drop-down {
+    border: 0px;
+    width: 20px;
+}
+QCheckBox,
+QRadioButton,
+QLabel {
+    color: #E8E8E8;
+}
+QGroupBox {
+    background-color: #303030;
+    color: #F2F2F2;
+    border: 1px solid #444444;
+    border-radius: 8px;
+    margin-top: 14px;
+    padding: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0px 4px;
+    color: #F2F2F2;
+}
+QTableWidget,
+QTreeWidget,
+QListWidget {
+    background-color: #202020;
+    color: #EFEFEF;
+    gridline-color: #3C3C3C;
+    border: 1px solid #3C3C3C;
+    border-radius: 6px;
+    selection-background-color: #335C67;
+    selection-color: #FFFFFF;
+}
+QHeaderView::section {
+    background-color: #303030;
+    color: #F2F2F2;
+    border: 1px solid #444444;
+    padding: 4px;
+}
+QScrollBar:vertical,
+QScrollBar:horizontal {
+    background-color: #202020;
+    border: 0px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
+    background-color: #4A4A4A;
+    border-radius: 4px;
+    min-height: 24px;
+    min-width: 24px;
+}
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
+    background-color: #5A5A5A;
+}
+QScrollBar::add-line,
+QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+}
+"""
 TAB_HELP_TEXT = {
     TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
     TAB_STUDENT_CORE: "Use this when you want compact animBot-style timing buttons and the dockable Toolkit Bar above Maya's timeline: nudge keys, insert or remove an inbetween, reset selected controls, bake on twos, select animated controls, and clean static curves.",
@@ -114,6 +289,7 @@ TAB_HELP_TEXT = {
     TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. If you grab too many, remove the extra source or target control(s). Load Selected Source fills the source list in the order you picked. Load Selected Target fills the target list in the order you picked. Pair By Order maps source item 1 to target item 1, source item 2 to target item 2, and so on. Auto Map By Name can guess similar controls for you. Retarget selected controls for one control pair row or retarget all controls for every control pair row. Quick Pair Edit only changes the saved row you click first.",
     TAB_CONTROL_PICKER: "Use this when you want a synced list and visual control map for a rig. It auto-finds likely controls by name, groups them by face, body, side, tail, wings, and FK/IK, keeps Maya and the picker in sync, lets you reorder the list, and shows the keyable attrs for the control you pick.",
     TAB_ANIMATORS_PENCIL: "Use this when you want expanded Blue Pencil-style drawing stored as real Maya curves and text in the scene. Pencil marks stay visible without this tool installed. Use it for 2D animation notes, layers, frame markers, ghosting, retiming, camera-based drawings, and quick annotation shapes.",
+    TAB_HISTORY_TIMELINE: "Use this when you want ZBrush-style restore points for animation work. It saves full Maya scene snapshots beside the scene, tracks branches, notes, file size, custom auto-save rules, and protected milestones.",
     TAB_ONION: "Use this when you want to see ghosted past and future poses to judge spacing, arcs, and timing.",
     TAB_ROTATION: "Use this when rotations are flipping, gimbaling, or reading strangely and you want the safest fix suggestion.",
     TAB_SKIN: "Use this when a skinned mesh has bad transform scale and you need a clean copy without losing weights or look.",
@@ -405,6 +581,18 @@ def _widget_has_ancestor_object_name(widget, object_name):
     return False
 
 
+def _widget_is_ancestor(possible_ancestor, widget):
+    walker = widget
+    while walker is not None:
+        if walker is possible_ancestor:
+            return True
+        try:
+            walker = walker.parentWidget()
+        except Exception:
+            return False
+    return False
+
+
 def _find_docked_workflow_widget():
     for widget in _workflow_widgets():
         if widget.objectName() == WINDOW_OBJECT_NAME and _widget_has_ancestor_object_name(widget, WORKSPACE_CONTROL_NAME):
@@ -416,11 +604,31 @@ def _cleanup_duplicate_workflow_widgets(keep_widget=None):
     for widget in _workflow_widgets():
         if keep_widget is not None and widget is keep_widget:
             continue
+        if keep_widget is not None and _widget_is_ancestor(widget, keep_widget):
+            continue
         try:
             widget.close()
+            widget.setParent(None)
             widget.deleteLater()
         except Exception:
             pass
+        try:
+            if shiboken and widget.objectName() in (WINDOW_OBJECT_NAME, DOCK_HOST_OBJECT_NAME) and shiboken.isValid(widget):
+                shiboken.delete(widget)
+        except Exception:
+            pass
+    try:
+        QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    except Exception:
+        pass
+
+
+def _ensure_single_workflow_widget(keep_widget=None):
+    if not QtWidgets:
+        return
+    _process_qt_events()
+    _cleanup_duplicate_workflow_widgets(keep_widget=keep_widget)
+    _process_qt_events()
 
 
 def _close_existing_window():
@@ -1276,6 +1484,7 @@ class MayaAnimWorkflowController(object):
         self.surface_contact_controller = maya_surface_contact.MayaSurfaceContactController() if MAYA_AVAILABLE else None
         self.animators_pencil_controller = maya_animators_pencil.AnimatorsPencilController() if MAYA_AVAILABLE else None
         self.control_picker_controller = maya_control_picker.ControlPickerController() if MAYA_AVAILABLE else None
+        self.history_timeline_controller = maya_history_timeline.MayaHistoryTimelineController() if MAYA_AVAILABLE else None
         self.timing_controller = maya_timing_tools.MayaTimingToolsController() if MAYA_AVAILABLE else None
         self.onion_controller = maya_onion_skin.MayaOnionSkinController() if MAYA_AVAILABLE else None
         self.rotation_controller = maya_rotation_doctor.MayaRotationDoctorController() if MAYA_AVAILABLE else None
@@ -1353,6 +1562,11 @@ class MayaAnimWorkflowController(object):
         if self.face_retarget_controller:
             try:
                 self.face_retarget_controller.shutdown()
+            except Exception:
+                pass
+        if self.history_timeline_controller:
+            try:
+                self.history_timeline_controller.shutdown()
             except Exception:
                 pass
         self._remove_scene_callbacks()
@@ -1907,22 +2121,103 @@ if QtWidgets:
             self._build_ui()
             self._populate_profile_names()
             self._set_initial_tab(initial_tab)
+            self._install_key_passthrough_filter()
+
+        def _install_key_passthrough_filter(self):
+            app = QtWidgets.QApplication.instance()
+            if not app:
+                return
+            try:
+                app.installEventFilter(self)
+            except Exception:
+                pass
+
+        def _remove_key_passthrough_filter(self):
+            app = QtWidgets.QApplication.instance()
+            if not app:
+                return
+            try:
+                app.removeEventFilter(self)
+            except Exception:
+                pass
+
+        def _is_widget_inside_window(self, widget):
+            walker = widget
+            while walker is not None:
+                if walker is self:
+                    return True
+                try:
+                    walker = walker.parentWidget()
+                except Exception:
+                    return False
+            return False
+
+        def _is_text_entry_widget(self, widget):
+            text_widgets = (
+                QtWidgets.QLineEdit,
+                QtWidgets.QPlainTextEdit,
+                QtWidgets.QTextEdit,
+                QtWidgets.QSpinBox,
+                QtWidgets.QDoubleSpinBox,
+                QtWidgets.QComboBox,
+            )
+            return bool(widget and isinstance(widget, text_widgets))
+
+        def _is_plain_s_key_event(self, event):
+            if not event or event.type() != QtCore.QEvent.KeyPress:
+                return False
+            if event.key() != QtCore.Qt.Key_S:
+                return False
+            return int(event.modifiers()) == int(QtCore.Qt.NoModifier)
+
+        def _set_key_from_maya_hotkey(self):
+            if not MAYA_AVAILABLE or not cmds:
+                return False
+            try:
+                if mel:
+                    mel.eval('performSetKeyframeArgList 1 {"0", "animationList"}')
+                else:
+                    cmds.setKeyframe()
+                self._set_status("Set key on current selection.", True)
+                return True
+            except Exception as exc:
+                self._set_status("Could not set key from S: {0}".format(exc), False)
+                return False
+
+        def eventFilter(self, obj, event):
+            try:
+                if self._is_plain_s_key_event(event) and self._is_widget_inside_window(obj):
+                    focus_widget = QtWidgets.QApplication.focusWidget()
+                    if self._is_text_entry_widget(focus_widget):
+                        return False
+                    if self._set_key_from_maya_hotkey():
+                        return True
+            except Exception:
+                pass
+            return super(MayaAnimWorkflowWindow, self).eventFilter(obj, event)
 
         def _make_scroll_tab(self):
             page = QtWidgets.QWidget()
+            page.setObjectName("mayaAnimWorkflowTabPage")
+            page.setProperty("aminateTabPage", True)
             if hasattr(page, "setSizePolicy"):
                 page.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             scroll = QtWidgets.QScrollArea()
+            scroll.setObjectName("mayaAnimWorkflowTabScroll")
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-            scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
+            scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAlwaysOff", QtCore.Qt.ScrollBarAlwaysOff))
             scroll.setVerticalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
             scroll.setWidget(page)
             return page, scroll
 
         def _build_ui(self):
+            self.setStyleSheet(AMINATE_WINDOW_STYLESHEET)
             main_layout = QtWidgets.QVBoxLayout(self)
+            main_layout.setContentsMargins(8, 8, 8, 8)
+            main_layout.setSpacing(8)
             self.tab_widget = QtWidgets.QTabWidget()
+            self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
             self.tab_widget.setUsesScrollButtons(True)
             self.tab_widget.setMovable(True)
             main_layout.addWidget(self.tab_widget, 1)
@@ -1934,6 +2229,7 @@ if QtWidgets:
             self.face_retarget_page, self.face_retarget_tab = self._make_scroll_tab()
             self.control_picker_page, self.control_picker_tab = self._make_scroll_tab()
             self.animators_pencil_page, self.animators_pencil_tab = self._make_scroll_tab()
+            self.history_timeline_page, self.history_timeline_tab = self._make_scroll_tab()
             self.onion_page, self.onion_tab = self._make_scroll_tab()
             self.rotation_page, self.rotation_tab = self._make_scroll_tab()
             self.skin_page, self.skin_tab = self._make_scroll_tab()
@@ -1956,6 +2252,7 @@ if QtWidgets:
             self.tab_widget.addTab(self.face_retarget_tab, TAB_FACE_RETARGET)
             self.tab_widget.addTab(self.control_picker_tab, TAB_CONTROL_PICKER)
             self.tab_widget.addTab(self.animators_pencil_tab, TAB_ANIMATORS_PENCIL)
+            self.tab_widget.addTab(self.history_timeline_tab, TAB_HISTORY_TIMELINE)
             self.tab_widget.addTab(self.onion_tab, TAB_ONION)
             self.tab_widget.addTab(self.rotation_tab, TAB_ROTATION)
             self.tab_widget.addTab(self.skin_tab, TAB_SKIN)
@@ -1971,6 +2268,7 @@ if QtWidgets:
             self._build_face_retarget_tab()
             self._build_control_picker_tab()
             self._build_animators_pencil_tab()
+            self._build_history_timeline_tab()
             self._build_onion_tab()
             self._build_rotation_tab()
             self._build_skin_tab()
@@ -1982,15 +2280,18 @@ if QtWidgets:
             self._build_timing_tab()
             self._build_reference_manager_tab()
             self.status_label = QtWidgets.QLabel("Ready.")
+            self.status_label.setObjectName("mayaAnimWorkflowStatusLabel")
             self.status_label.setWordWrap(True)
             main_layout.addWidget(self.status_label)
             footer_layout = QtWidgets.QHBoxLayout()
             self.brand_label = QtWidgets.QLabel('Built by Amir. Follow Amir at <a href="{0}">followamir.com</a>.'.format(FOLLOW_AMIR_URL))
+            self.brand_label.setObjectName("mayaAnimWorkflowBrandLabel")
             self.brand_label.setOpenExternalLinks(False)
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
             self.version_label = QtWidgets.QLabel(VERSION_LABEL)
+            self.version_label.setObjectName("mayaAnimWorkflowVersionLabel")
             self.version_label.setToolTip("Current public student release label.")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
@@ -2004,18 +2305,11 @@ if QtWidgets:
             frame = QtWidgets.QFrame()
             frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
             frame.setObjectName("mayaAnimWorkflowTabIntro")
-            frame.setStyleSheet(
-                """
-                QFrame#mayaAnimWorkflowTabIntro {
-                    border: 1px solid #4A4A4A;
-                    border-radius: 6px;
-                    background-color: #353535;
-                }
-                """
-            )
             inner = QtWidgets.QVBoxLayout(frame)
+            inner.setContentsMargins(10, 8, 10, 8)
+            inner.setSpacing(4)
             title = QtWidgets.QLabel("What This Tab Helps With")
-            title.setStyleSheet("font-weight: 600;")
+            title.setObjectName("mayaAnimWorkflowIntroTitle")
             body = QtWidgets.QLabel(TAB_HELP_TEXT.get(tab_name, ""))
             body.setWordWrap(True)
             inner.addWidget(title)
@@ -2037,6 +2331,10 @@ if QtWidgets:
                 pass
             try:
                 panel.setParent(host_parent)
+            except Exception:
+                pass
+            try:
+                panel.setProperty("aminateEmbeddedPanel", True)
             except Exception:
                 pass
             panel.setMinimumWidth(0)
@@ -2263,6 +2561,17 @@ if QtWidgets:
             )
             layout.addWidget(self.animators_pencil_panel, 1)
 
+        def _build_history_timeline_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.history_timeline_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_HISTORY_TIMELINE))
+            self.history_timeline_panel = maya_history_timeline.MayaHistoryTimelinePanel(
+                controller=self.controller.history_timeline_controller,
+                status_callback=self._set_status,
+                parent=self.history_timeline_page,
+            )
+            layout.addWidget(self.history_timeline_panel, 1)
+
         def _build_onion_tab(self):
             layout = QtWidgets.QVBoxLayout(self.onion_page)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -2329,14 +2638,14 @@ if QtWidgets:
             guide = QtWidgets.QPlainTextEdit()
             guide.setReadOnly(True)
             guide.setPlainText(
-                "Student Core\n"
+                "Toolkit Bar\n"
                 "- Use this when you want compact, color-coded, animBot-style buttons for the basic animation jobs students repeat all day.\n"
                 "- Use -1 and +1 to nudge selected Graph Editor keys, or all keys on selected controls.\n"
                 "- Use In to add an inbetween key on the current frame, and Cut to remove keys on the current frame.\n"
                 "- Use Zero to reset selected controls, 2s to bake selected controls every two frames, Anim to pick animated controls, and Clean to remove static curves.\n"
-                "- Open Scene Helpers when you want the full Student Core strip inside a tab, or use the docked Toolkit Bar.\n\n"
+                "- Open Scene Helpers when you want the full Toolkit Bar strip inside a tab, or use the docked Toolkit Bar.\n\n"
                 "Scene Helpers\n"
-                "- Use this when you want the Student Core strip plus Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons.\n"
+                "- Use this when you want the Toolkit Bar strip plus Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons.\n"
                 "- Use Auto Key when you want Maya to key changes as you animate.\n"
                 "- Leave Auto Snap To Frames on if you want the tool to watch for timing changes for you.\n"
                 "- Click Snap Selected Keys To Frames if keys are already off-frame.\n"
@@ -2385,6 +2694,13 @@ if QtWidgets:
                 "- Use Static layers for notes that stay visible, Animation layers for frame-based drawings, and Locked layers when you do not want accidental edits.\n"
                 "- Use Add Key, Duplicate Previous Key, Retime, Frame Marker, and Ghosts for drawing animation timing.\n"
                 "- Use Copy, Cut, Paste, Erase Selected, or Maya's Move/Rotate/Scale tools to edit marks.\n\n"
+                "History Timeline\n"
+                "- Use this when you want ZBrush-style restore points that are safer than a long Maya undo chain.\n"
+                "- Save the Maya scene once first so Aminate knows where to keep the history folder.\n"
+                "- Click Save Step for normal work states or Save Milestone for protected important poses.\n"
+                "- Click a block in the Toolkit Bar history strip, or pick a row in the History Timeline tab and click Restore.\n"
+                "- Restoring saves a safety snapshot first, then opens the chosen full-scene snapshot.\n"
+                "- Snapshot metadata is recorded for changed nodes, animation curves, constraints, branches, and notes.\n\n"
                 "Hand / Foot Hold\n"
                 "- Use this when a planted hand or foot should stay in the same place on chosen world axes while the body keeps moving.\n"
                 "- Pick the hand or foot control.\n"
@@ -2482,7 +2798,7 @@ if QtWidgets:
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
             help_box.setPlainText(
-                "Student Core buttons are short, dockable, color-coded animation helpers.\n\n"
+                "Toolkit Bar buttons are short, dockable, color-coded animation helpers.\n\n"
                 "- -1 and +1 move selected Graph Editor keys, or all keys on selected controls.\n"
                 "- In inserts an inbetween key on the current frame.\n"
                 "- Cut removes keys on the current frame.\n"
@@ -2570,6 +2886,11 @@ if QtWidgets:
                 "animator_pencil": "animators_pencil",
                 "pencil": "animators_pencil",
                 "blue_pencil": "animators_pencil",
+                "history": "history_timeline",
+                "history_timeline": "history_timeline",
+                "snapshots": "history_timeline",
+                "snapshot": "history_timeline",
+                "restore": "history_timeline",
                 "onion": "onion_skin",
                 "onion_skin": "onion_skin",
                 "rotation": "rotation_doctor",
@@ -2855,6 +3176,7 @@ if QtWidgets:
                 self._set_status("Could not open the Donate link from this Maya session.", False)
 
         def closeEvent(self, event):
+            self._remove_key_passthrough_filter()
             try:
                 self.controller.shutdown()
             except Exception:
@@ -2914,10 +3236,14 @@ def _shelf_button_command(repo_path):
         "import importlib\n"
         "import sys\n"
         "repo_path = r\"{0}\"\n"
-        "if repo_path not in sys.path:\n"
-        "    sys.path.insert(0, repo_path)\n"
+        "while repo_path in sys.path:\n"
+        "    sys.path.remove(repo_path)\n"
+        "sys.path.insert(0, repo_path)\n"
+        "for module_name in list(sys.modules):\n"
+        "    if module_name == 'maya_anim_workflow_tools' or module_name.startswith('maya_'):\n"
+        "        sys.modules.pop(module_name, None)\n"
+        "importlib.invalidate_caches()\n"
         "import maya_anim_workflow_tools\n"
-        "importlib.reload(maya_anim_workflow_tools)\n"
         "maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True)\n"
     ).format(repo_path.replace("\\", "\\\\"))
 
@@ -2986,6 +3312,7 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
             GLOBAL_WINDOW.activateWindow()
     except Exception:
         pass
+    _ensure_single_workflow_widget(keep_widget=GLOBAL_WINDOW)
     return GLOBAL_WINDOW
 
 

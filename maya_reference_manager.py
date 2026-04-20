@@ -29,13 +29,16 @@ except Exception:
 WINDOW_OBJECT_NAME = "mayaReferenceManagerWindow"
 PACKAGE_FOLDER_NAME = "reference_packages"
 MANIFEST_FILE_NAME = "reference_package_manifest.json"
+MAYA_ASCII_TYPE = "mayaAscii"
+MAYA_BINARY_TYPE = "mayaBinary"
+UNKNOWN_NODE_TYPES = ("unknown", "unknownDag", "unknownTransform")
 
 REFERENCE_MANAGER_ATTR_SPECS = (
-    ("file", "fileTextureName", "sourceimages"),
-    ("imagePlane", "imageName", "sourceimages"),
-    ("audio", "filename", "audio"),
-    ("AlembicNode", "abc_File", "cache"),
-    ("gpuCache", "cacheFileName", "cache"),
+    ("file", "fileTextureName", "sourceimages", "Material Texture"),
+    ("imagePlane", "imageName", "sourceimages", "Image Plane"),
+    ("audio", "filename", "audio", "Audio"),
+    ("AlembicNode", "abc_File", "cache", "Alembic Cache"),
+    ("gpuCache", "cacheFileName", "cache", "GPU Cache"),
 )
 
 
@@ -108,6 +111,14 @@ def _scene_folder():
     return _workspace_root() or os.getcwd()
 
 
+def _scene_file_type(scene_path=None):
+    scene_path = scene_path or _scene_path()
+    ext = os.path.splitext(scene_path or "")[1].lower()
+    if ext == ".mb":
+        return MAYA_BINARY_TYPE, ".mb"
+    return MAYA_ASCII_TYPE, ".ma"
+
+
 def _safe_slug(value, fallback="scene"):
     value = os.path.splitext(os.path.basename(value or ""))[0] or fallback
     cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)
@@ -163,10 +174,22 @@ def _rewrite_packaged_scene_paths(package_scene_path, package_dir, copied_record
     updated_text = scene_text
     for record in copied_records:
         absolute_path = _normalize_path(record.get("package_path", ""))
+        source_path = _normalize_path(record.get("source", ""))
+        raw_source = str(record.get("raw_source", "") or "")
         if not absolute_path:
             continue
-        relative_path = _relative_to_package(package_dir, absolute_path)
+        relative_path = _relative_to_scene(package_scene_path, absolute_path)
         path_variants = [
+            source_path,
+            source_path.replace(os.sep, "/"),
+            source_path.replace("/", "\\"),
+            source_path.replace("\\", "/"),
+            source_path.replace("\\", "\\\\"),
+            raw_source,
+            raw_source.replace(os.sep, "/"),
+            raw_source.replace("/", "\\"),
+            raw_source.replace("\\", "/"),
+            raw_source.replace("\\", "\\\\"),
             absolute_path,
             absolute_path.replace(os.sep, "/"),
             absolute_path.replace("/", "\\"),
@@ -197,6 +220,27 @@ def _dedupe_records(records):
     return deduped
 
 
+def _dependency_display_kind(record):
+    return record.get("display_kind") or record.get("kind") or "File"
+
+
+def _missing_dependency_summary(records):
+    counts = {}
+    for record in records:
+        if record.get("exists"):
+            continue
+        display_kind = _dependency_display_kind(record)
+        counts[display_kind] = counts.get(display_kind, 0) + 1
+    if not counts:
+        return ""
+    parts = []
+    for display_kind in sorted(counts):
+        count = counts[display_kind]
+        suffix = "" if count == 1 else "s"
+        parts.append("{0} {1}{2}".format(count, display_kind, suffix))
+    return ", ".join(parts)
+
+
 def _reference_node_path(ref_node):
     try:
         return cmds.referenceQuery(ref_node, filename=True, withoutCopyNumber=True)
@@ -225,8 +269,10 @@ def _collect_reference_records():
         records.append(
             {
                 "kind": "reference",
+                "display_kind": "Maya Reference",
                 "node": ref_node,
                 "attr": "",
+                "raw_source": _reference_node_path(ref_node),
                 "source": source_path,
                 "folder": "references",
                 "loaded": loaded,
@@ -243,7 +289,7 @@ def _collect_external_records():
         available_node_types = set(cmds.allNodeTypes() or [])
     except Exception:
         available_node_types = set()
-    for node_type, attr_name, folder_name in REFERENCE_MANAGER_ATTR_SPECS:
+    for node_type, attr_name, folder_name, display_kind in REFERENCE_MANAGER_ATTR_SPECS:
         if available_node_types and node_type not in available_node_types:
             continue
         try:
@@ -251,26 +297,119 @@ def _collect_external_records():
         except Exception:
             nodes = []
         for node_name in nodes:
+            raw_source = ""
             try:
                 if not cmds.attributeQuery(attr_name, node=node_name, exists=True):
                     continue
-                source_path = cmds.getAttr("{0}.{1}".format(node_name, attr_name)) or ""
+                raw_source = cmds.getAttr("{0}.{1}".format(node_name, attr_name)) or ""
             except Exception:
-                source_path = ""
+                raw_source = ""
+            source_path = raw_source
             source_path = _resolve_existing_path(source_path)
             if not source_path:
                 continue
             records.append(
                 {
                     "kind": "external",
+                    "display_kind": display_kind,
+                    "node_type": node_type,
                     "node": node_name,
                     "attr": attr_name,
+                    "raw_source": raw_source,
                     "source": source_path,
                     "folder": folder_name,
                     "loaded": True,
                 }
             )
     return _dedupe_records(records)
+
+
+def _unknown_nodes():
+    if not cmds:
+        return []
+    nodes = []
+    for node_type in UNKNOWN_NODE_TYPES:
+        try:
+            nodes.extend(cmds.ls(type=node_type, long=True) or [])
+        except Exception:
+            continue
+    seen = set()
+    result = []
+    for node_name in nodes:
+        if node_name in seen:
+            continue
+        seen.add(node_name)
+        result.append(node_name)
+    return result
+
+
+def _unknown_plugins():
+    if not cmds:
+        return []
+    try:
+        return cmds.unknownPlugin(query=True, list=True) or []
+    except Exception:
+        return []
+
+
+def _inspect_unknown_scene_data():
+    nodes = _unknown_nodes()
+    plugins = _unknown_plugins()
+    node_records = []
+    for node_name in nodes:
+        node_type = ""
+        plugin_name = ""
+        try:
+            node_type = cmds.nodeType(node_name)
+        except Exception:
+            pass
+        try:
+            plugin_name = cmds.unknownNode(node_name, query=True, plugin=True) or ""
+        except Exception:
+            plugin_name = ""
+        node_records.append({"node": node_name, "type": node_type, "plugin": plugin_name})
+    return {
+        "nodes": node_records,
+        "plugins": plugins,
+        "node_count": len(node_records),
+        "plugin_count": len(plugins),
+    }
+
+
+def _clean_unknown_scene_data(remove_nodes=True, remove_plugins=True):
+    report = _inspect_unknown_scene_data()
+    deleted_nodes = []
+    removed_plugins = []
+    failed = []
+    if remove_nodes:
+        for record in report["nodes"]:
+            node_name = record.get("node")
+            if not node_name or not cmds.objExists(node_name):
+                continue
+            try:
+                cmds.lockNode(node_name, lock=False)
+            except Exception:
+                pass
+            try:
+                cmds.delete(node_name)
+                deleted_nodes.append(node_name)
+            except Exception as exc:
+                failed.append("Could not delete {0}: {1}".format(node_name, exc))
+    if remove_plugins:
+        for plugin_name in report["plugins"]:
+            try:
+                cmds.unknownPlugin(plugin_name, remove=True)
+                removed_plugins.append(plugin_name)
+            except Exception as exc:
+                failed.append("Could not remove unknown plugin {0}: {1}".format(plugin_name, exc))
+    refreshed = _inspect_unknown_scene_data()
+    return {
+        "before": report,
+        "after": refreshed,
+        "deleted_nodes": deleted_nodes,
+        "removed_plugins": removed_plugins,
+        "failed": failed,
+    }
 
 
 class ReferencePackageController(object):
@@ -298,6 +437,28 @@ class ReferencePackageController(object):
             "records": _dedupe_records(records),
         }
 
+    def inspect_unknown_scene_data(self):
+        if not MAYA_AVAILABLE:
+            raise RuntimeError("Reference Manager must run inside Maya.")
+        return _inspect_unknown_scene_data()
+
+    def clean_unknown_scene_data(self):
+        if not MAYA_AVAILABLE:
+            raise RuntimeError("Reference Manager must run inside Maya.")
+        report = _clean_unknown_scene_data(remove_nodes=True, remove_plugins=True)
+        deleted = len(report.get("deleted_nodes") or [])
+        removed = len(report.get("removed_plugins") or [])
+        failed = len(report.get("failed") or [])
+        remaining = (report.get("after") or {}).get("node_count", 0) + (report.get("after") or {}).get("plugin_count", 0)
+        ok = failed == 0 and remaining == 0
+        message = "Cleaned {0} unknown node(s) and {1} unknown plugin record(s).".format(deleted, removed)
+        if failed:
+            message += " {0} cleanup item(s) failed.".format(failed)
+        if remaining:
+            message += " {0} unknown item(s) still remain.".format(remaining)
+        self._emit_status(message, ok)
+        return report
+
     def default_output_dir(self):
         return os.path.join(_scene_folder(), PACKAGE_FOLDER_NAME)
 
@@ -307,7 +468,7 @@ class ReferencePackageController(object):
         package_name=None,
         include_references=True,
         include_external=True,
-        save_scene=True,
+        save_scene=False,
         retarget_package_scene=True,
     ):
         if not MAYA_AVAILABLE:
@@ -315,8 +476,13 @@ class ReferencePackageController(object):
         original_scene = _scene_path()
         if not original_scene:
             raise RuntimeError("Save the scene once before packaging.")
+        warnings = []
         if save_scene:
             cmds.file(save=True, force=True)
+        elif cmds.file(query=True, modified=True):
+            warnings.append(
+                "Current scene has unsaved changes. Package used the last saved scene file because Save current scene first is off."
+            )
 
         dependencies = self.collect_dependencies(include_references=include_references, include_external=include_external)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -325,9 +491,9 @@ class ReferencePackageController(object):
         package_dir = _unique_path(os.path.join(output_dir, "{0}_{1}".format(base_name, timestamp)))
         scenes_dir = os.path.join(package_dir, "scenes")
         os.makedirs(scenes_dir)
-        package_scene_path = os.path.join(scenes_dir, "{0}_packaged.ma".format(base_name))
+        scene_type, scene_ext = _scene_file_type(original_scene)
+        package_scene_path = os.path.join(scenes_dir, "{0}_packaged{1}".format(base_name, scene_ext))
 
-        copy_map = {}
         copied_records = []
         missing_records = []
         for record in dependencies["records"]:
@@ -341,51 +507,33 @@ class ReferencePackageController(object):
             packaged_record = dict(record)
             packaged_record["package_path"] = destination_path
             packaged_record["package_relpath"] = os.path.relpath(destination_path, package_dir).replace(os.sep, "/")
-            copy_map[source_path.lower()] = packaged_record
             copied_records.append(packaged_record)
 
-        warnings = []
-        old_selection = cmds.ls(selection=True, long=True) or []
-        try:
-            cmds.file(rename=package_scene_path)
-            if retarget_package_scene:
-                for record in copied_records:
-                    node_name = record.get("node") or ""
-                    attr_name = record.get("attr") or ""
-                    if record.get("kind") == "reference" and node_name:
-                        try:
-                            cmds.file(record["package_path"], loadReference=node_name)
-                        except Exception as exc:
-                            warnings.append("Could not retarget reference {0}: {1}".format(node_name, exc))
-                    elif node_name and attr_name and cmds.objExists(node_name):
-                        try:
-                            if cmds.attributeQuery(attr_name, node=node_name, exists=True):
-                                cmds.setAttr("{0}.{1}".format(node_name, attr_name), record["package_path"], type="string")
-                        except Exception as exc:
-                            warnings.append("Could not retarget {0}.{1}: {2}".format(node_name, attr_name, exc))
-            cmds.file(save=True, type="mayaAscii", force=True)
-            if retarget_package_scene:
-                _rewrite_packaged_scene_paths(package_scene_path, package_dir, copied_records)
-        finally:
-            try:
-                cmds.file(original_scene, open=True, force=True, prompt=False)
-            except Exception as exc:
-                warnings.append("Packaged scene saved, but original scene could not reopen: {0}".format(exc))
-            if old_selection:
-                try:
-                    cmds.select(old_selection, replace=True)
-                except Exception:
-                    pass
+        _copy_file(original_scene, package_scene_path)
+        if retarget_package_scene:
+            if package_scene_path.lower().endswith(".ma"):
+                rewrote_paths = _rewrite_packaged_scene_paths(package_scene_path, package_dir, copied_records)
+                if not rewrote_paths:
+                    warnings.append("Packaged Maya ASCII scene was copied safely, but no dependency paths needed text retargeting.")
+            else:
+                warnings.append(
+                    "Packaged Maya Binary scene was copied safely without opening the scene. "
+                    "Dependencies are included in the zip, but binary scene paths are not rewritten."
+                )
 
         manifest = {
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "original_scene": original_scene,
+            "scene_file_type": scene_type,
             "packaged_scene": os.path.relpath(package_scene_path, package_dir).replace(os.sep, "/"),
             "copied_files": [
                 {
                     "kind": record.get("kind"),
+                    "display_kind": record.get("display_kind"),
+                    "node_type": record.get("node_type"),
                     "node": record.get("node"),
                     "attr": record.get("attr"),
+                    "raw_source": record.get("raw_source"),
                     "source": record.get("source"),
                     "package_relpath": record.get("package_relpath"),
                     "loaded": record.get("loaded"),
@@ -412,7 +560,8 @@ class ReferencePackageController(object):
         self.last_result = result
         message = "Packaged scene zip with {0} file(s): {1}".format(len(copied_records), zip_path)
         if missing_records:
-            message += " Missing {0} file(s).".format(len(missing_records))
+            missing_summary = _missing_dependency_summary(missing_records)
+            message += " Missing {0}.".format(missing_summary or "{0} file(s)".format(len(missing_records)))
         self._emit_status(message, not bool(missing_records))
         return result
 
@@ -463,8 +612,10 @@ if QtWidgets:
 
             options_row = QtWidgets.QHBoxLayout()
             self.save_scene_box = QtWidgets.QCheckBox("Save current scene first")
-            self.save_scene_box.setChecked(True)
-            self.save_scene_box.setToolTip("Save current Maya file before copying dependencies so latest edits get packaged.")
+            self.save_scene_box.setChecked(False)
+            self.save_scene_box.setToolTip(
+                "Off by default for safety. Leave off to package the last saved file without changing the open scene."
+            )
             self.references_box = QtWidgets.QCheckBox("Include Maya references")
             self.references_box.setChecked(True)
             self.references_box.setToolTip("Copy referenced Maya scenes from reference nodes into package references folder.")
@@ -483,7 +634,7 @@ if QtWidgets:
             self.refresh_button = QtWidgets.QPushButton("Refresh Needed Files")
             self.refresh_button.setToolTip("Scan current Maya scene for references plus external files before packaging.")
             self.package_button = QtWidgets.QPushButton("Package Scene To Zip")
-            self.package_button.setToolTip("Save scene, copy needed files, write manifest, create final zip package.")
+            self.package_button.setToolTip("Copy the saved scene and needed files, write a manifest, and create a final zip package.")
             self.open_folder_button = QtWidgets.QPushButton("Open Package Folder")
             self.open_folder_button.setToolTip("Open folder containing latest package zip in Windows Explorer.")
             action_row.addWidget(self.refresh_button)
@@ -492,11 +643,25 @@ if QtWidgets:
             action_row.addStretch(1)
             layout.addLayout(action_row)
 
+            cleanup_row = QtWidgets.QHBoxLayout()
+            self.scan_unknown_button = QtWidgets.QPushButton("Scan Unknown Data")
+            self.scan_unknown_button.setToolTip(
+                "Check for unknown Maya nodes or unknown plugin records that can block file format changes."
+            )
+            self.clean_unknown_button = QtWidgets.QPushButton("Clean Unknown Data")
+            self.clean_unknown_button.setToolTip(
+                "Delete unknown nodes and remove unknown plugin records after a confirmation prompt. Save a backup first."
+            )
+            cleanup_row.addWidget(self.scan_unknown_button)
+            cleanup_row.addWidget(self.clean_unknown_button)
+            cleanup_row.addStretch(1)
+            layout.addLayout(cleanup_row)
+
             self.files_table = QtWidgets.QTableWidget(0, 4)
             self.files_table.setHorizontalHeaderLabels(["Type", "Node", "Source", "Status"])
             self.files_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             self.files_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-            self.files_table.setToolTip("Shows each referenced or external file found, source path, node, found or missing state.")
+            self.files_table.setToolTip("Shows each referenced scene, material texture, image plane, audio file, or cache path plus found or missing state.")
             self.files_table.horizontalHeader().setStretchLastSection(True)
             self.files_table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
             layout.addWidget(self.files_table, 1)
@@ -509,6 +674,8 @@ if QtWidgets:
             self.package_button.clicked.connect(self.package_scene)
             self.open_folder_button.clicked.connect(self.open_package_folder)
             self.browse_button.clicked.connect(self.pick_output_folder)
+            self.scan_unknown_button.clicked.connect(self.scan_unknown_data)
+            self.clean_unknown_button.clicked.connect(self.clean_unknown_data)
 
         def _set_status(self, message, ok=True):
             self.status_label.setText(message)
@@ -535,14 +702,18 @@ if QtWidgets:
                 row = self.files_table.rowCount()
                 self.files_table.insertRow(row)
                 values = [
-                    record.get("kind", ""),
+                    _dependency_display_kind(record),
                     record.get("node", ""),
                     record.get("source", ""),
-                    "Found" if record.get("exists") else "Missing",
+                    "Found" if record.get("exists") else "Missing {0}".format(_dependency_display_kind(record)),
                 ]
                 for column, value in enumerate(values):
                     self.files_table.setItem(row, column, QtWidgets.QTableWidgetItem(str(value)))
-            self._set_status("Found {0} file(s) needed by this scene.".format(len(data["records"])), True)
+            missing_summary = _missing_dependency_summary(data["records"])
+            message = "Found {0} file(s) needed by this scene.".format(len(data["records"]))
+            if missing_summary:
+                message += " Missing {0}.".format(missing_summary)
+            self._set_status(message, not bool(missing_summary))
 
         def package_scene(self):
             try:
@@ -559,6 +730,52 @@ if QtWidgets:
                 return
             self._set_status("Zip ready: {0}".format(result["zip_path"]), True)
             self.refresh_files()
+
+        def scan_unknown_data(self):
+            try:
+                report = self.controller.inspect_unknown_scene_data()
+            except Exception as exc:
+                self._set_status(str(exc), False)
+                return
+            self._set_status(
+                "Unknown data scan: {0} unknown node(s), {1} unknown plugin record(s).".format(
+                    report.get("node_count", 0),
+                    report.get("plugin_count", 0),
+                ),
+                report.get("node_count", 0) == 0 and report.get("plugin_count", 0) == 0,
+            )
+
+        def clean_unknown_data(self):
+            try:
+                report = self.controller.inspect_unknown_scene_data()
+            except Exception as exc:
+                self._set_status(str(exc), False)
+                return
+            total = int(report.get("node_count", 0)) + int(report.get("plugin_count", 0))
+            if not total:
+                self._set_status("No unknown data found.", True)
+                return
+            message = (
+                "This deletes {0} unknown node(s) and removes {1} unknown plugin record(s).\n\n"
+                "Save a backup first if this is an important scene.\n\nContinue?"
+            ).format(report.get("node_count", 0), report.get("plugin_count", 0))
+            result = QtWidgets.QMessageBox.question(self, "Clean Unknown Data", message)
+            if result != QtWidgets.QMessageBox.Yes:
+                self._set_status("Unknown data cleanup cancelled.", False)
+                return
+            try:
+                cleanup = self.controller.clean_unknown_scene_data()
+            except Exception as exc:
+                self._set_status(str(exc), False)
+                return
+            after = cleanup.get("after") or {}
+            self._set_status(
+                "Unknown data cleanup done. Remaining: {0} node(s), {1} plugin record(s).".format(
+                    after.get("node_count", 0),
+                    after.get("plugin_count", 0),
+                ),
+                not cleanup.get("failed") and not after.get("node_count", 0) and not after.get("plugin_count", 0),
+            )
 
         def open_package_folder(self):
             result = self.controller.last_result or {}

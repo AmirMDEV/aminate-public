@@ -7,6 +7,7 @@ Canonical entrypoint for the combined Aminate UI.
 from __future__ import absolute_import, division, print_function
 
 import importlib
+import os
 import sys
 
 import maya_dynamic_parent_pivot as _impl  # noqa: F401
@@ -16,6 +17,7 @@ import maya_crash_recovery as _crash_recovery  # noqa: F401
 import maya_animators_pencil as _animators_pencil  # noqa: F401
 import maya_control_picker as _control_picker  # noqa: F401
 import maya_face_retarget as _face_retarget  # noqa: F401
+import maya_history_timeline as _history_timeline  # noqa: F401
 import maya_reference_manager as _reference_manager  # noqa: F401
 import maya_surface_contact as _surface_contact  # noqa: F401
 import maya_timing_tools as _timing_tools  # noqa: F401
@@ -34,6 +36,7 @@ _WORKFLOW_MODULE_NAMES = (
     "maya_animators_pencil",
     "maya_control_picker",
     "maya_face_retarget",
+    "maya_history_timeline",
     "maya_reference_manager",
     "maya_surface_contact",
     "maya_timing_tools",
@@ -47,10 +50,21 @@ _WORKFLOW_MODULE_NAMES = (
 )
 
 
+_MODULE_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _force_own_root_first():
+    while _MODULE_ROOT in sys.path:
+        sys.path.remove(_MODULE_ROOT)
+    sys.path.insert(0, _MODULE_ROOT)
+    importlib.invalidate_caches()
+
+
 def _refresh_modules():
-    global _parenting, _contact_hold, _animators_pencil, _control_picker, _face_retarget, _reference_manager, _surface_contact
+    global _parenting, _contact_hold, _animators_pencil, _control_picker, _face_retarget, _history_timeline, _reference_manager, _surface_contact
     global _timing_tools, _onion, _rotation, _skin, _rig_scale, _video_reference, _timeline_notes
     global _crash_recovery, _impl
+    _force_own_root_first()
     for module_name in _WORKFLOW_MODULE_NAMES:
         sys.modules.pop(module_name, None)
     _parenting = importlib.import_module("maya_dynamic_parenting_tool")
@@ -59,6 +73,7 @@ def _refresh_modules():
     _animators_pencil = importlib.import_module("maya_animators_pencil")
     _control_picker = importlib.import_module("maya_control_picker")
     _face_retarget = importlib.import_module("maya_face_retarget")
+    _history_timeline = importlib.import_module("maya_history_timeline")
     _reference_manager = importlib.import_module("maya_reference_manager")
     _surface_contact = importlib.import_module("maya_surface_contact")
     _timing_tools = importlib.import_module("maya_timing_tools")

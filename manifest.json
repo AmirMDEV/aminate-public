@@ -1,0 +1,28 @@
+{
+  "package_name": "Aminate",
+  "version": "Version 0.3 BETA",
+  "release_tag": "v0.3-beta",
+  "runtime_files": [
+    "maya_anim_workflow_tools.py",
+    "maya_animators_pencil.py",
+    "maya_contact_hold.py",
+    "maya_crash_recovery.py",
+    "maya_dynamic_parent_pivot.py",
+    "maya_dynamic_parenting_tool.py",
+    "maya_control_picker.py",
+    "maya_face_retarget.py",
+    "maya_history_timeline.py",
+    "maya_reference_manager.py",
+    "maya_onion_skin.py",
+    "maya_surface_contact.py",
+    "maya_rig_scale_export.py",
+    "maya_rotation_doctor.py",
+    "maya_timing_tools.py",
+    "maya_shelf_utils.py",
+    "maya_skinning_cleanup.py",
+    "maya_timeline_notes.py",
+    "maya_universal_ikfk_switcher.py",
+    "maya_video_reference_tool.py",
+    "maya_anim_workflow_tools_icon.png"
+  ]
+}

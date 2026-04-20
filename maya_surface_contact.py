@@ -83,6 +83,27 @@ def _warning(message):
         om.MGlobal.displayWarning("[Maya Surface Contact] {0}".format(message))
 
 
+def _kill_script_jobs_with_marker(marker):
+    if not MAYA_AVAILABLE or not cmds:
+        return 0
+    killed = 0
+    try:
+        jobs = cmds.scriptJob(listJobs=True) or []
+    except Exception:
+        jobs = []
+    for job_text in jobs:
+        text = str(job_text)
+        if marker not in text:
+            continue
+        try:
+            job_id = int(text.split(":", 1)[0].strip())
+            cmds.scriptJob(kill=job_id, force=True)
+            killed += 1
+        except Exception:
+            pass
+    return killed
+
+
 def _safe_token(node_name):
     return "".join(character if character.isalnum() else "_" for character in _short_name(node_name)).strip("_") or "node"
 
@@ -682,8 +703,6 @@ class MayaSurfaceContactController(object):
         self._live_solve_force = False
         self._solving = False
         if MAYA_AVAILABLE:
-            self._install_time_callbacks()
-            self._install_idle_callback()
             self._refresh_live_callbacks()
 
     def shutdown(self):
@@ -704,6 +723,8 @@ class MayaSurfaceContactController(object):
 
     def _install_time_callbacks(self):
         if not MAYA_AVAILABLE:
+            return
+        if self.callback_ids or self.script_job_id:
             return
         try:
             callback_id = om.MEventMessage.addEventCallback("timeChanged", self._on_time_changed)
@@ -733,6 +754,7 @@ class MayaSurfaceContactController(object):
         if not MAYA_AVAILABLE or self.idle_script_job_id:
             return
         try:
+            _kill_script_jobs_with_marker("MayaSurfaceContactController._on_idle")
             self.idle_script_job_id = cmds.scriptJob(idleEvent=self._on_idle, protected=True)
         except Exception as exc:
             _warning("Could not install idle solver callback: {0}".format(exc))
@@ -802,6 +824,8 @@ class MayaSurfaceContactController(object):
         for payload in [_contact_payload(record_node) for record_node in _all_contact_records()]:
             if not payload:
                 continue
+            if not payload.get("enabled", True):
+                continue
             for node_name in (payload.get("control", ""), payload.get("surface", "")):
                 if node_name and cmds.objExists(node_name):
                     nodes.append(_node_long_name(node_name))
@@ -811,7 +835,14 @@ class MayaSurfaceContactController(object):
         if not MAYA_AVAILABLE:
             return
         self._remove_live_callbacks()
-        for node_name in self._live_callback_nodes():
+        live_nodes = self._live_callback_nodes()
+        if not live_nodes:
+            self._remove_time_callbacks()
+            self._remove_idle_callback()
+            return
+        self._install_time_callbacks()
+        self._install_idle_callback()
+        for node_name in live_nodes:
             mobject = _node_mobject(node_name)
             if mobject is None:
                 continue
@@ -1337,7 +1368,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.2 BETA")
+            self.version_label = QtWidgets.QLabel("Version 0.3 BETA")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)

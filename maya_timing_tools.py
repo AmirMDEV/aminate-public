@@ -4,9 +4,11 @@ import collections
 import json
 import math
 import os
+import re
 
 import maya_contact_hold as hold_utils
 import maya_crash_recovery as crash_recovery
+import maya_history_timeline
 
 try:
     import maya.cmds as cmds
@@ -57,6 +59,36 @@ DEFAULT_RENDER_ENV_SCALE_MULTIPLIER = 3.5
 DEFAULT_SCENE_HELPERS_CAMERA_BASE_HEIGHT = 5.0
 DEFAULT_SCENE_HELPERS_CAMERA_HEIGHT_OFFSET = 0.0
 DEFAULT_SCENE_HELPERS_CAMERA_DOLLY_OFFSET = 0.0
+DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X = 50.0
+TEACHER_RIG_DUPLICATE_SUFFIX = "_AMINATE_TEACHER"
+TEACHER_RIG_DUPLICATE_GROUP_SUFFIX = "_OFFSET_GRP"
+TEACHER_RIG_DUPLICATE_LAYER_NAME = "aminateTeacherDuplicate_LYR"
+TEACHER_RIG_DUPLICATE_MARKER_ATTR = "aminateTeacherDemoDuplicate"
+TEACHER_RIG_DUPLICATE_SOURCE_ATTR = "teacherDemoSource"
+SCENE_TEXT_NOTE_ROOT_PREFIX = "aminateSceneTextNote"
+SCENE_TEXT_NOTE_GROUP_NAME = "aminateSceneTextNotes_GRP"
+SCENE_TEXT_NOTE_ATTR = "aminateSceneTextNote"
+SCENE_TEXT_NOTE_TEXT_ATTR = "noteText"
+SCENE_TEXT_NOTE_ANCHOR_ATTR = "anchorNode"
+SCENE_TEXT_NOTE_COLOR_ATTR = "noteColor"
+SCENE_TEXT_NOTE_LINE_ATTR = "lineNode"
+SCENE_TEXT_NOTE_SIZE_ATTR = "noteSize"
+SCENE_TEXT_NOTE_DEFAULT_COLOR = "#F6C85F"
+SCENE_TEXT_NOTE_DEFAULT_SCALE = 15.0
+SCENE_TEXT_NOTE_MIN_SCALE = 0.1
+SCENE_TEXT_NOTE_MAX_SCALE = 500.0
+SCENE_TEXT_NOTE_OFFSET = (0.0, 0.0, 0.0)
+SCENE_TEXT_NOTE_COLORS = collections.OrderedDict(
+    (
+        ("Yellow", "#F6C85F"),
+        ("White", "#F4F4F4"),
+        ("Cyan", "#55CBCD"),
+        ("Green", "#7BD88F"),
+        ("Red", "#EF6F6C"),
+        ("Blue", "#72B7F2"),
+        ("Pink", "#EF476F"),
+    )
+)
 SCENE_HELPERS_ROOT_NAME = "amirSceneHelpers_GRP"
 SCENE_HELPERS_RENDER_ROOT_NAME = "amirSceneRenderEnv_GRP"
 SCENE_HELPERS_CAMERA_ROOT_NAME = "amirSceneRenderCameras_GRP"
@@ -85,6 +117,876 @@ ANIMATION_LAYER_TINT_PALETTE = (
     "#577590",
     "#CDB4DB",
 )
+
+
+def _kill_script_jobs_with_marker(marker):
+    if not MAYA_AVAILABLE or not cmds:
+        return 0
+    killed = 0
+    try:
+        jobs = cmds.scriptJob(listJobs=True) or []
+    except Exception:
+        jobs = []
+    for job_text in jobs:
+        text = str(job_text)
+        if marker not in text:
+            continue
+        try:
+            job_id = int(text.split(":", 1)[0].strip())
+            cmds.scriptJob(kill=job_id, force=True)
+            killed += 1
+        except Exception:
+            pass
+    return killed
+
+
+def _node_short_name(node_name):
+    return (node_name or "").split("|")[-1]
+
+
+def _node_base_name(node_name):
+    return _node_short_name(node_name).split(":")[-1]
+
+
+def _safe_scene_node_name(raw_name, fallback="aminateNode"):
+    safe_name = re.sub(r"[^A-Za-z0-9_]+", "_", raw_name or "").strip("_")
+    if not safe_name:
+        safe_name = fallback
+    if safe_name[0].isdigit():
+        safe_name = "n_" + safe_name
+    return safe_name
+
+
+def _unique_scene_node_name(base_name):
+    base_name = _safe_scene_node_name(base_name)
+    if not MAYA_AVAILABLE or not cmds or not cmds.objExists(base_name):
+        return base_name
+    index = 1
+    while cmds.objExists("{0}{1}".format(base_name, index)):
+        index += 1
+    return "{0}{1}".format(base_name, index)
+
+
+def _long_scene_name(node_name):
+    matches = cmds.ls(node_name, long=True) or []
+    return matches[0] if matches else node_name
+
+
+def _selected_transform_roots():
+    if not MAYA_AVAILABLE or not cmds:
+        return []
+    selected = cmds.ls(selection=True, long=True) or []
+    transforms = []
+    for node_name in selected:
+        node_type = cmds.nodeType(node_name)
+        transform_node = node_name
+        if node_type != "transform" and node_type != "joint":
+            parent = cmds.listRelatives(node_name, parent=True, fullPath=True) or []
+            if parent and cmds.nodeType(parent[0]) in ("transform", "joint"):
+                transform_node = parent[0]
+            else:
+                continue
+        long_name = _long_scene_name(transform_node)
+        if long_name not in transforms:
+            transforms.append(long_name)
+    roots = []
+    for candidate in transforms:
+        candidate_is_child = False
+        for other in transforms:
+            if candidate != other and candidate.startswith(other + "|"):
+                candidate_is_child = True
+                break
+        if not candidate_is_child:
+            roots.append(candidate)
+    return roots
+
+
+def _dag_hierarchy_in_order(root_node):
+    root_node = _long_scene_name(root_node)
+    ordered = [root_node]
+
+    def _walk(parent_node):
+        children = cmds.listRelatives(parent_node, children=True, fullPath=True) or []
+        for child in children:
+            ordered.append(child)
+            _walk(child)
+
+    _walk(root_node)
+    return ordered
+
+
+def _copy_keyed_attributes(source_node, target_node):
+    copied_attrs = 0
+    attrs = set(cmds.listAttr(source_node, keyable=True) or [])
+    attrs.update(cmds.listAttr(source_node, channelBox=True) or [])
+    for attr_name in sorted(attrs):
+        target_attr = "{0}.{1}".format(target_node, attr_name)
+        if not cmds.objExists(target_attr):
+            continue
+        try:
+            if cmds.getAttr(target_attr, lock=True):
+                continue
+        except Exception:
+            continue
+        try:
+            key_count = cmds.copyKey(source_node, attribute=attr_name)
+        except Exception:
+            key_count = 0
+        if not key_count:
+            continue
+        try:
+            cmds.cutKey(target_node, attribute=attr_name, clear=True)
+        except Exception:
+            pass
+        try:
+            cmds.pasteKey(target_node, attribute=attr_name, option="replaceCompletely")
+            copied_attrs += 1
+        except Exception:
+            pass
+    return copied_attrs
+
+
+def _copy_hierarchy_keyframes(source_root, duplicate_root):
+    source_nodes = _dag_hierarchy_in_order(source_root)
+    duplicate_nodes = _dag_hierarchy_in_order(duplicate_root)
+    copied_attrs = 0
+    for source_node, duplicate_node in zip(source_nodes, duplicate_nodes):
+        try:
+            copied_attrs += _copy_keyed_attributes(source_node, duplicate_node)
+        except Exception:
+            pass
+    return copied_attrs
+
+
+def _remove_nodes_from_display_layers(nodes):
+    removed = 0
+    for node_name in nodes:
+        if not node_name or not cmds.objExists(node_name):
+            continue
+        had_layer = bool(_display_layers_for_node(node_name))
+        try:
+            cmds.editDisplayLayerMembers("defaultLayer", node_name, noRecurse=True)
+            if had_layer:
+                removed += 1
+        except Exception:
+            try:
+                cmds.editDisplayLayerMembers("defaultLayer", _node_short_name(node_name), noRecurse=True)
+                if had_layer:
+                    removed += 1
+            except Exception:
+                pass
+    return removed
+
+
+def _display_layers_for_node(node_name):
+    return [layer for layer in (cmds.listConnections(node_name, type="displayLayer") or []) if layer != "defaultLayer"]
+
+
+def _source_display_layer_visible(node_name):
+    for layer_name in _display_layers_for_node(node_name):
+        try:
+            if not bool(cmds.getAttr(layer_name + ".visibility")):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def _copy_numeric_attr_value(source_node, target_node, attr_name):
+    source_attr = "{0}.{1}".format(source_node, attr_name)
+    target_attr = "{0}.{1}".format(target_node, attr_name)
+    if not cmds.objExists(source_attr) or not cmds.objExists(target_attr):
+        return
+    try:
+        if cmds.getAttr(target_attr, lock=True):
+            return
+    except Exception:
+        pass
+    try:
+        value = cmds.getAttr(source_attr)
+    except Exception:
+        return
+    try:
+        if attr_name == "overrideColorRGB":
+            if isinstance(value, (list, tuple)) and value:
+                rgb_value = value[0] if isinstance(value[0], (list, tuple)) else value
+                cmds.setAttr(target_attr, float(rgb_value[0]), float(rgb_value[1]), float(rgb_value[2]), type="double3")
+        else:
+            cmds.setAttr(target_attr, value)
+    except Exception:
+        pass
+
+
+def _copy_visual_state(source_node, target_node):
+    for attr_name in (
+        "visibility",
+        "lodVisibility",
+        "overrideEnabled",
+        "overrideDisplayType",
+        "overrideLevelOfDetail",
+        "overrideShading",
+        "overrideTexturing",
+        "overridePlayback",
+        "overrideVisibility",
+        "overrideRGBColors",
+        "overrideColor",
+        "overrideColorRGB",
+        "hideOnPlayback",
+        "displayLocalAxis",
+        "drawStyle",
+        "radius",
+    ):
+        _copy_numeric_attr_value(source_node, target_node, attr_name)
+    if not _source_display_layer_visible(source_node) and cmds.objExists(target_node + ".visibility"):
+        try:
+            cmds.setAttr(target_node + ".visibility", False)
+        except Exception:
+            pass
+
+
+def _copy_visual_state_for_pairs(pairs):
+    for source_node, duplicate_node in pairs:
+        try:
+            _copy_visual_state(source_node, duplicate_node)
+        except Exception:
+            pass
+
+
+def _copy_shading_assignments_for_pairs(pairs):
+    copied = 0
+    for source_node, duplicate_node in pairs:
+        try:
+            if cmds.nodeType(source_node) not in ("mesh", "nurbsSurface", "subdiv"):
+                continue
+        except Exception:
+            continue
+        shading_groups = cmds.listConnections(source_node, source=False, destination=True, type="shadingEngine") or []
+        for shading_group in _dedupe_preserve_order(shading_groups):
+            try:
+                cmds.sets(duplicate_node, edit=True, forceElement=shading_group)
+                copied += 1
+            except Exception:
+                pass
+    return copied
+
+
+def _skin_clusters_under_root(root_node):
+    skin_clusters = []
+    for node_name in _dag_hierarchy_in_order(root_node):
+        try:
+            node_type = cmds.nodeType(node_name)
+        except Exception:
+            continue
+        if node_type not in ("mesh", "nurbsSurface", "subdiv", "transform", "joint"):
+            continue
+        for history_node in cmds.listHistory(node_name) or []:
+            try:
+                if cmds.nodeType(history_node) == "skinCluster":
+                    skin_clusters.append(history_node)
+            except Exception:
+                pass
+    return _dedupe_preserve_order(skin_clusters)
+
+
+def _disable_skinned_geometry_inherits_transform(root_node):
+    # The offset group moves controls and joints. Skinned meshes must not inherit
+    # that same group offset or the geometry gets transformed twice.
+    changed = 0
+    seen_transforms = set()
+    for node_name in _dag_hierarchy_in_order(root_node):
+        try:
+            if cmds.nodeType(node_name) not in ("mesh", "nurbsSurface", "subdiv"):
+                continue
+        except Exception:
+            continue
+        has_skin_cluster = False
+        for history_node in cmds.listHistory(node_name) or []:
+            try:
+                if cmds.nodeType(history_node) == "skinCluster":
+                    has_skin_cluster = True
+                    break
+            except Exception:
+                pass
+        if not has_skin_cluster:
+            continue
+        parents = cmds.listRelatives(node_name, parent=True, fullPath=True) or []
+        if not parents:
+            continue
+        transform_node = parents[0]
+        if transform_node in seen_transforms or not cmds.objExists(transform_node + ".inheritsTransform"):
+            continue
+        seen_transforms.add(transform_node)
+        try:
+            if bool(cmds.getAttr(transform_node + ".inheritsTransform")):
+                cmds.setAttr(transform_node + ".inheritsTransform", False)
+                changed += 1
+        except Exception:
+            pass
+    return changed
+
+
+def _node_from_uuid(uuid_value):
+    if not uuid_value:
+        return ""
+    try:
+        matches = cmds.ls(uuid_value, long=True) or []
+        return matches[0] if matches else ""
+    except Exception:
+        return ""
+
+
+def _resolve_uuid_pairs(uuid_pairs):
+    resolved_pairs = []
+    for source_node, duplicate_uuid in uuid_pairs:
+        duplicate_node = _node_from_uuid(duplicate_uuid)
+        if duplicate_node and cmds.objExists(source_node) and cmds.objExists(duplicate_node):
+            resolved_pairs.append((source_node, duplicate_node))
+    return resolved_pairs
+
+
+def _create_teacher_duplicate_display_layer(offset_group):
+    layer_name = _unique_scene_node_name(TEACHER_RIG_DUPLICATE_LAYER_NAME)
+    try:
+        layer_name = cmds.createDisplayLayer(name=layer_name, empty=True)
+        cmds.editDisplayLayerMembers(layer_name, offset_group, noRecurse=True)
+        return layer_name
+    except Exception:
+        return ""
+
+
+def _rename_teacher_duplicate_hierarchy(source_root, duplicate_root):
+    source_nodes = _dag_hierarchy_in_order(source_root)
+    duplicate_nodes = _dag_hierarchy_in_order(duplicate_root)
+    paired_nodes = []
+    for source_node, duplicate_node in zip(source_nodes, duplicate_nodes):
+        duplicate_uuid = ""
+        try:
+            duplicate_uuid = (cmds.ls(duplicate_node, uuid=True) or [""])[0]
+        except Exception:
+            duplicate_uuid = ""
+        paired_nodes.append((source_node, duplicate_node, duplicate_uuid))
+    renamed = {}
+    for source_node, duplicate_node, _duplicate_uuid in sorted(paired_nodes, key=lambda pair: pair[1].count("|"), reverse=True):
+        base_name = _safe_scene_node_name(_node_base_name(source_node), "teacherDuplicate")
+        target_name = _unique_scene_node_name(base_name + TEACHER_RIG_DUPLICATE_SUFFIX)
+        try:
+            renamed[duplicate_node] = cmds.rename(duplicate_node, target_name)
+        except Exception:
+            renamed[duplicate_node] = duplicate_node
+    duplicate_root = renamed.get(duplicate_root, duplicate_root)
+    uuid_pairs = [(source_node, duplicate_uuid) for source_node, _duplicate_node, duplicate_uuid in paired_nodes]
+    return _long_scene_name(duplicate_root), uuid_pairs
+
+
+def _teacher_demo_duplicate_roots():
+    roots = []
+    for node_name in cmds.ls(type="transform", long=True) or []:
+        is_teacher_duplicate = False
+        if cmds.objExists(node_name + "." + TEACHER_RIG_DUPLICATE_MARKER_ATTR):
+            try:
+                is_teacher_duplicate = bool(cmds.getAttr(node_name + "." + TEACHER_RIG_DUPLICATE_MARKER_ATTR))
+            except Exception:
+                is_teacher_duplicate = True
+        if not is_teacher_duplicate and TEACHER_RIG_DUPLICATE_SUFFIX in _node_short_name(node_name):
+            is_teacher_duplicate = True
+        if is_teacher_duplicate:
+            roots.append(node_name)
+    top_roots = []
+    for candidate in roots:
+        has_teacher_parent = False
+        for other in roots:
+            if candidate != other and candidate.startswith(other + "|"):
+                has_teacher_parent = True
+                break
+        if not has_teacher_parent:
+            top_roots.append(candidate)
+    return _dedupe_preserve_order(top_roots)
+
+
+def _delete_teacher_demo_duplicate_layers():
+    deleted = 0
+    for layer_name in cmds.ls(TEACHER_RIG_DUPLICATE_LAYER_NAME + "*", type="displayLayer") or []:
+        if layer_name == "defaultLayer":
+            continue
+        try:
+            cmds.delete(layer_name)
+            deleted += 1
+        except Exception:
+            pass
+    return deleted
+
+
+def _delete_teacher_demo_duplicates():
+    roots = _teacher_demo_duplicate_roots()
+    deleted = 0
+    for root_name in roots:
+        if not cmds.objExists(root_name):
+            continue
+        try:
+            cmds.delete(root_name)
+            deleted += 1
+        except Exception:
+            pass
+    deleted_layers = _delete_teacher_demo_duplicate_layers()
+    return deleted, deleted_layers
+
+
+def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X):
+    root_node = _long_scene_name(root_node)
+    root_base = _safe_scene_node_name(_node_base_name(root_node), "rig")
+    offset_group = None
+    duplicate_root = None
+    copied_attrs = 0
+    try:
+        cmds.undoInfo(openChunk=True, chunkName="AminateDuplicateRigForTeacherDemo")
+    except Exception:
+        pass
+    try:
+        duplicate_nodes = cmds.duplicate(
+            root_node,
+            renameChildren=True,
+            upstreamNodes=True,
+            inputConnections=False,
+            returnRootsOnly=True,
+        ) or []
+        if not duplicate_nodes:
+            return False, "Could not duplicate selected rig root.", {}
+        duplicate_root = _long_scene_name(duplicate_nodes[0])
+        copied_attrs = _copy_hierarchy_keyframes(root_node, duplicate_root)
+        duplicate_root, uuid_pairs = _rename_teacher_duplicate_hierarchy(root_node, duplicate_root)
+        offset_group_name = _unique_scene_node_name(root_base + TEACHER_RIG_DUPLICATE_SUFFIX + TEACHER_RIG_DUPLICATE_GROUP_SUFFIX)
+        offset_group = cmds.group(empty=True, name=offset_group_name)
+        _ensure_bool_attr(offset_group, TEACHER_RIG_DUPLICATE_MARKER_ATTR, True)
+        _ensure_string_attr(offset_group, TEACHER_RIG_DUPLICATE_SOURCE_ATTR, root_node)
+        duplicate_root = _long_scene_name((cmds.parent(duplicate_root, offset_group) or [duplicate_root])[0])
+        cmds.setAttr(offset_group + ".translateX", float(offset_x))
+        disabled_skin_inherits = _disable_skinned_geometry_inherits_transform(duplicate_root)
+        _remove_nodes_from_display_layers([offset_group] + _dag_hierarchy_in_order(duplicate_root))
+        current_pairs = _resolve_uuid_pairs(uuid_pairs)
+        _copy_visual_state_for_pairs(current_pairs)
+        copied_shading = _copy_shading_assignments_for_pairs(current_pairs)
+        layer_name = _create_teacher_duplicate_display_layer(offset_group)
+        try:
+            cmds.select(offset_group, replace=True)
+        except Exception:
+            pass
+        detail = {
+            "offset_group": offset_group,
+            "duplicate_root": _long_scene_name(duplicate_root),
+            "display_layer": layer_name,
+            "copied_keyed_attributes": copied_attrs,
+            "copied_shading_assignments": copied_shading,
+            "disabled_skin_geometry_inherits": disabled_skin_inherits,
+            "offset_x": float(offset_x),
+        }
+        message = "Duplicated rig for teacher demo: {0}. Copied keyframes on {1} attribute(s), copied {2} shading assignment(s), isolated {3} skinned mesh transform(s), and offset X by {4:g}.".format(
+            _node_short_name(offset_group),
+            copied_attrs,
+            copied_shading,
+            disabled_skin_inherits,
+            float(offset_x),
+        )
+        return True, message, detail
+    except Exception as exc:
+        if offset_group and cmds.objExists(offset_group):
+            try:
+                cmds.delete(offset_group)
+            except Exception:
+                pass
+        elif duplicate_root and cmds.objExists(duplicate_root):
+            try:
+                cmds.delete(duplicate_root)
+            except Exception:
+                pass
+        return False, "Rig duplicate failed: {0}".format(exc), {}
+    finally:
+        try:
+            cmds.undoInfo(closeChunk=True)
+        except Exception:
+            pass
+
+
+def _ensure_bool_attr(node_name, attr_name, default_value=False):
+    if not cmds.objExists(node_name + "." + attr_name):
+        cmds.addAttr(node_name, longName=attr_name, attributeType="bool")
+    try:
+        cmds.setAttr(node_name + "." + attr_name, bool(default_value))
+    except Exception:
+        pass
+
+
+def _ensure_string_attr(node_name, attr_name, value=""):
+    if not cmds.objExists(node_name + "." + attr_name):
+        cmds.addAttr(node_name, longName=attr_name, dataType="string")
+    try:
+        cmds.setAttr(node_name + "." + attr_name, value or "", type="string")
+    except Exception:
+        pass
+
+
+def _ensure_double_attr(node_name, attr_name, value=0.0):
+    if not cmds.objExists(node_name + "." + attr_name):
+        cmds.addAttr(node_name, longName=attr_name, attributeType="double")
+    try:
+        cmds.setAttr(node_name + "." + attr_name, float(value))
+    except Exception:
+        pass
+
+
+def _scene_text_note_nodes():
+    if not MAYA_AVAILABLE or not cmds:
+        return []
+    _migrate_scene_text_notes_to_root()
+    notes = []
+    for node_name in cmds.ls(type="transform", long=True) or []:
+        if not cmds.objExists(node_name + "." + SCENE_TEXT_NOTE_ATTR):
+            continue
+        try:
+            if bool(cmds.getAttr(node_name + "." + SCENE_TEXT_NOTE_ATTR)):
+                notes.append(node_name)
+        except Exception:
+            pass
+    return sorted(notes, key=lambda item: _node_short_name(item).lower())
+
+
+def _ensure_scene_text_note_root():
+    if cmds.objExists(SCENE_TEXT_NOTE_GROUP_NAME):
+        return _long_scene_name(SCENE_TEXT_NOTE_GROUP_NAME)
+    root = cmds.createNode("transform", name=SCENE_TEXT_NOTE_GROUP_NAME)
+    try:
+        cmds.setAttr(root + ".visibility", True)
+    except Exception:
+        pass
+    return _long_scene_name(root)
+
+
+def _migrate_scene_text_notes_to_root():
+    if not MAYA_AVAILABLE or not cmds:
+        return ""
+    root = _ensure_scene_text_note_root()
+    root_long = _long_scene_name(root)
+    for node_name in cmds.ls(type="transform", long=True) or []:
+        if node_name == root_long or node_name.startswith(root_long + "|"):
+            continue
+        if not cmds.objExists(node_name + "." + SCENE_TEXT_NOTE_ATTR):
+            continue
+        try:
+            if bool(cmds.getAttr(node_name + "." + SCENE_TEXT_NOTE_ATTR)):
+                cmds.parent(node_name, root_long)
+        except Exception:
+            pass
+    return root_long
+
+
+def _hex_to_rgb(color_hex):
+    color_hex = (color_hex or SCENE_TEXT_NOTE_DEFAULT_COLOR).strip()
+    if color_hex.startswith("#"):
+        color_hex = color_hex[1:]
+    if len(color_hex) != 6:
+        color_hex = SCENE_TEXT_NOTE_DEFAULT_COLOR[1:]
+    try:
+        return (
+            int(color_hex[0:2], 16) / 255.0,
+            int(color_hex[2:4], 16) / 255.0,
+            int(color_hex[4:6], 16) / 255.0,
+        )
+    except Exception:
+        return _hex_to_rgb(SCENE_TEXT_NOTE_DEFAULT_COLOR)
+
+
+def _set_display_color(node_name, color_hex):
+    red, green, blue = _hex_to_rgb(color_hex)
+    nodes = [node_name] + (cmds.listRelatives(node_name, allDescendents=True, fullPath=True) or [])
+    for item in nodes:
+        if not cmds.objExists(item):
+            continue
+        for attr_name, value in (
+            ("overrideEnabled", True),
+            ("overrideRGBColors", True),
+            ("overrideColorRGB", (red, green, blue)),
+        ):
+            if not cmds.objExists(item + "." + attr_name):
+                continue
+            try:
+                if isinstance(value, tuple):
+                    cmds.setAttr(item + "." + attr_name, value[0], value[1], value[2], type="double3")
+                else:
+                    cmds.setAttr(item + "." + attr_name, value)
+            except Exception:
+                pass
+
+
+def _force_scene_text_note_visible(node_name):
+    nodes = [node_name] + (cmds.listRelatives(node_name, allDescendents=True, fullPath=True) or [])
+    for item in nodes:
+        if not cmds.objExists(item):
+            continue
+        if cmds.objExists(item + ".visibility"):
+            try:
+                cmds.setAttr(item + ".visibility", True)
+            except Exception:
+                pass
+        if cmds.objExists(item + ".intermediateObject"):
+            try:
+                cmds.setAttr(item + ".intermediateObject", False)
+            except Exception:
+                pass
+
+
+def _top_level_nodes_from_nodes(nodes):
+    long_nodes = []
+    for node_name in nodes or []:
+        try:
+            matches = cmds.ls(node_name, long=True) or []
+            long_nodes.extend(matches)
+        except Exception:
+            pass
+    unique_nodes = _dedupe_preserve_order(long_nodes)
+    unique_lookup = set(unique_nodes)
+    top_nodes = []
+    for node_name in unique_nodes:
+        parent_nodes = cmds.listRelatives(node_name, parent=True, fullPath=True) or []
+        if parent_nodes and parent_nodes[0] in unique_lookup:
+            continue
+        top_nodes.append(node_name)
+    return top_nodes
+
+
+def _clamp_scene_text_note_size(size):
+    try:
+        size = float(size)
+    except Exception:
+        size = SCENE_TEXT_NOTE_DEFAULT_SCALE
+    return max(SCENE_TEXT_NOTE_MIN_SCALE, min(SCENE_TEXT_NOTE_MAX_SCALE, size))
+
+
+def _scene_text_note_text_holders(note_node):
+    note_node = _long_scene_name(note_node)
+    holders = []
+    for child in cmds.listRelatives(note_node, children=True, type="transform", fullPath=True) or []:
+        if _node_short_name(child).endswith("_TEXT_GRP"):
+            holders.append(child)
+    return holders
+
+
+def _apply_scene_text_note_size(note_node, size):
+    note_node = _long_scene_name(note_node)
+    size = _clamp_scene_text_note_size(size)
+    _ensure_double_attr(note_node, SCENE_TEXT_NOTE_SIZE_ATTR, size)
+    for holder in _scene_text_note_text_holders(note_node):
+        try:
+            cmds.setAttr(holder + ".scale", size, size, size, type="double3")
+        except Exception:
+            pass
+    return size
+
+
+def _world_center(node_name):
+    if node_name and cmds.objExists(node_name):
+        try:
+            box = cmds.exactWorldBoundingBox(node_name)
+            return (
+                (box[0] + box[3]) * 0.5,
+                (box[1] + box[4]) * 0.5,
+                (box[2] + box[5]) * 0.5,
+            )
+        except Exception:
+            pass
+        try:
+            position = cmds.xform(node_name, query=True, worldSpace=True, translation=True)
+            return (float(position[0]), float(position[1]), float(position[2]))
+        except Exception:
+            pass
+    return (0.0, 0.0, 0.0)
+
+
+def _world_transform_position(node_name):
+    if node_name and cmds.objExists(node_name):
+        try:
+            position = cmds.xform(node_name, query=True, worldSpace=True, translation=True)
+            return (float(position[0]), float(position[1]), float(position[2]))
+        except Exception:
+            pass
+    return _world_center(node_name)
+
+
+def _vector_add(a_value, b_value):
+    return (
+        float(a_value[0]) + float(b_value[0]),
+        float(a_value[1]) + float(b_value[1]),
+        float(a_value[2]) + float(b_value[2]),
+    )
+
+
+def _vector_subtract(a_value, b_value):
+    return (
+        float(a_value[0]) - float(b_value[0]),
+        float(a_value[1]) - float(b_value[1]),
+        float(a_value[2]) - float(b_value[2]),
+    )
+
+
+def _selected_scene_text_anchor(exclude_note=None):
+    selected_roots = _selected_transform_roots()
+    exclude_long = _long_scene_name(exclude_note) if exclude_note else ""
+    for node_name in selected_roots:
+        if exclude_long and _long_scene_name(node_name) == exclude_long:
+            continue
+        if cmds.objExists(node_name + "." + SCENE_TEXT_NOTE_ATTR):
+            continue
+        return _long_scene_name(node_name)
+    return ""
+
+
+def _scene_text_note_data(note_node):
+    note_node = _long_scene_name(note_node)
+    text_value = ""
+    anchor_value = ""
+    color_value = SCENE_TEXT_NOTE_DEFAULT_COLOR
+    line_value = ""
+    size_value = SCENE_TEXT_NOTE_DEFAULT_SCALE
+    for attr_name, fallback in (
+        (SCENE_TEXT_NOTE_TEXT_ATTR, ""),
+        (SCENE_TEXT_NOTE_ANCHOR_ATTR, ""),
+        (SCENE_TEXT_NOTE_COLOR_ATTR, SCENE_TEXT_NOTE_DEFAULT_COLOR),
+        (SCENE_TEXT_NOTE_LINE_ATTR, ""),
+        (SCENE_TEXT_NOTE_SIZE_ATTR, SCENE_TEXT_NOTE_DEFAULT_SCALE),
+    ):
+        try:
+            value = cmds.getAttr(note_node + "." + attr_name) or fallback
+        except Exception:
+            value = fallback
+        if attr_name == SCENE_TEXT_NOTE_TEXT_ATTR:
+            text_value = value
+        elif attr_name == SCENE_TEXT_NOTE_ANCHOR_ATTR:
+            anchor_value = value
+        elif attr_name == SCENE_TEXT_NOTE_COLOR_ATTR:
+            color_value = value
+        elif attr_name == SCENE_TEXT_NOTE_LINE_ATTR:
+            line_value = value
+        elif attr_name == SCENE_TEXT_NOTE_SIZE_ATTR:
+            size_value = _clamp_scene_text_note_size(value)
+    if not cmds.objExists(note_node + "." + SCENE_TEXT_NOTE_SIZE_ATTR):
+        holders = _scene_text_note_text_holders(note_node)
+        if holders and cmds.objExists(holders[0] + ".scaleX"):
+            try:
+                size_value = _clamp_scene_text_note_size(cmds.getAttr(holders[0] + ".scaleX"))
+            except Exception:
+                pass
+    visible = True
+    try:
+        visible = bool(cmds.getAttr(note_node + ".visibility"))
+    except Exception:
+        pass
+    return {
+        "node": note_node,
+        "name": _node_short_name(note_node),
+        "text": text_value,
+        "anchor": anchor_value,
+        "color": color_value,
+        "line": line_value,
+        "size": size_value,
+        "visible": visible,
+    }
+
+
+def _scene_text_note_list():
+    return [_scene_text_note_data(node_name) for node_name in _scene_text_note_nodes()]
+
+
+def _rebuild_scene_text_note_line(note_node):
+    note_node = _long_scene_name(note_node)
+    data = _scene_text_note_data(note_node)
+    old_line = data.get("line")
+    if old_line and cmds.objExists(old_line):
+        try:
+            cmds.delete(old_line)
+        except Exception:
+            pass
+    anchor_node = data.get("anchor") or ""
+    if not anchor_node or not cmds.objExists(anchor_node):
+        _ensure_string_attr(note_node, SCENE_TEXT_NOTE_LINE_ATTR, "")
+        return ""
+    note_position = cmds.xform(note_node, query=True, worldSpace=True, translation=True)
+    try:
+        anchor_position = cmds.xform(anchor_node, query=True, worldSpace=True, translation=True)
+    except Exception:
+        anchor_position = _world_center(anchor_node)
+    note_root = _ensure_scene_text_note_root()
+    line_group = cmds.createNode("transform", name=_unique_scene_node_name(_node_base_name(note_node) + "_LINE_GRP"), parent=note_root)
+    line_curve = cmds.curve(name=_unique_scene_node_name(_node_base_name(note_node) + "_LINE_CRV"), degree=1, point=[note_position, anchor_position])
+    line_curve = cmds.parent(line_curve, line_group)[0]
+    try:
+        start_cluster, start_handle = cmds.cluster(line_curve + ".cv[0]", name=_unique_scene_node_name(_node_base_name(note_node) + "_LINE_START_CLS"))
+        end_cluster, end_handle = cmds.cluster(line_curve + ".cv[1]", name=_unique_scene_node_name(_node_base_name(note_node) + "_LINE_END_CLS"))
+        cmds.parent([start_handle, end_handle], line_group)
+        cmds.pointConstraint(note_node, start_handle, maintainOffset=False)
+        cmds.pointConstraint(anchor_node, end_handle, maintainOffset=False)
+        for helper_node in (start_handle, end_handle):
+            if cmds.objExists(helper_node + ".visibility"):
+                cmds.setAttr(helper_node + ".visibility", False)
+    except Exception:
+        pass
+    line_group = _long_scene_name(line_group)
+    _set_display_color(line_curve, data.get("color") or SCENE_TEXT_NOTE_DEFAULT_COLOR)
+    _ensure_string_attr(note_node, SCENE_TEXT_NOTE_LINE_ATTR, line_group)
+    return line_group
+
+
+def _create_scene_text_note(text, color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR, anchor_node=None, size=SCENE_TEXT_NOTE_DEFAULT_SCALE):
+    text = (text or "Student note").strip() or "Student note"
+    color_hex = color_hex or SCENE_TEXT_NOTE_DEFAULT_COLOR
+    size = _clamp_scene_text_note_size(size)
+    anchor_node = _long_scene_name(anchor_node) if anchor_node else _selected_scene_text_anchor()
+    anchor_position = _world_transform_position(anchor_node) if anchor_node else (0.0, 0.0, 0.0)
+    note_position = _vector_add(anchor_position, SCENE_TEXT_NOTE_OFFSET)
+    base_name = _safe_scene_node_name("{0}_{1}".format(SCENE_TEXT_NOTE_ROOT_PREFIX, text[:24]), SCENE_TEXT_NOTE_ROOT_PREFIX)
+    note_group = cmds.group(empty=True, name=_unique_scene_node_name(base_name + "_GRP"))
+    note_root = _ensure_scene_text_note_root()
+    note_group = cmds.parent(note_group, note_root)[0]
+    note_group = _long_scene_name(note_group)
+    cmds.xform(note_group, worldSpace=True, translation=note_position)
+    text_holder = cmds.createNode("transform", name=_unique_scene_node_name(_node_base_name(note_group) + "_TEXT_GRP"), parent=note_group)
+    try:
+        text_nodes = cmds.textCurves(
+            name=_unique_scene_node_name(_node_base_name(note_group) + "_TEXT"),
+            text=text,
+            font="Arial",
+            constructionHistory=False,
+        )
+    except Exception:
+        text_nodes = [cmds.curve(name=_unique_scene_node_name(_node_base_name(note_group) + "_TEXT"), degree=1, point=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)])]
+    text_roots = _top_level_nodes_from_nodes(text_nodes)
+    for text_root in text_roots:
+        try:
+            cmds.parent(text_root, text_holder, relative=True)
+        except Exception:
+            pass
+    try:
+        cmds.setAttr(text_holder + ".scale", size, size, size, type="double3")
+    except Exception:
+        pass
+    _ensure_bool_attr(note_group, SCENE_TEXT_NOTE_ATTR, True)
+    _ensure_string_attr(note_group, SCENE_TEXT_NOTE_TEXT_ATTR, text)
+    _ensure_string_attr(note_group, SCENE_TEXT_NOTE_ANCHOR_ATTR, anchor_node or "")
+    _ensure_string_attr(note_group, SCENE_TEXT_NOTE_COLOR_ATTR, color_hex)
+    _ensure_string_attr(note_group, SCENE_TEXT_NOTE_LINE_ATTR, "")
+    _ensure_double_attr(note_group, SCENE_TEXT_NOTE_SIZE_ATTR, size)
+    _force_scene_text_note_visible(note_group)
+    _set_display_color(note_group, color_hex)
+    line_node = _rebuild_scene_text_note_line(note_group)
+    try:
+        cmds.select(note_group, replace=True)
+    except Exception:
+        pass
+    return {
+        "node": _long_scene_name(note_group),
+        "text": text,
+        "anchor": anchor_node or "",
+        "color": color_hex,
+        "line": line_node,
+        "size": size,
+    }
 
 _CYCLORAMA_POINTS = [
     (-336.44533901151135, 0.0, 173.6245593460942),
@@ -232,6 +1134,14 @@ STUDENT_CORE_TOOLS = (
         "glyph": "clean",
         "tooltip": "Delete static animation curves on selected controls when every keyed value is the same.",
     },
+    {
+        "command": "package_scene_zip",
+        "label": "Zip",
+        "group": "Package",
+        "color": "#F4A261",
+        "glyph": "folder",
+        "tooltip": "One click: save the scene, zip the scene plus references, textures, image planes, audio, and caches, then open the package folder.",
+    },
 )
 WORKFLOW_BAR_TOOLS = (
     {"command": "workflow_quick_start", "tab": "quick_start", "label": "QS", "color": "#9AA4FF", "glyph": "guide", "tooltip": "Quick Start: plain-language guide for every tab, with beginner steps for picking correct tool."},
@@ -245,6 +1155,7 @@ WORKFLOW_BAR_TOOLS = (
     {"command": "workflow_retarget", "tab": "controls_retargeter", "label": "RT", "color": "#EF476F", "glyph": "retarget", "tooltip": "Controls Retargeter: pair source controls to target controls, bake animation onto target controls for editable retarget."},
     {"command": "workflow_picker", "tab": "control_picker", "label": "CP", "color": "#06D6A0", "glyph": "picker", "tooltip": "Control Picker: scan rig controls, group body plus face areas, sync picker selection with Maya selection."},
     {"command": "workflow_pencil", "tab": "animators_pencil", "label": "PN", "color": "#90BE6D", "glyph": "pencil", "tooltip": "Animators Pencil: draw notes, arcs, frame markers, ghosts, retiming marks as scene-native Maya curves or text."},
+    {"command": "workflow_history", "tab": "history_timeline", "label": "HT", "color": "#4CC9F0", "glyph": "history", "tooltip": "History Timeline: save full-scene snapshots, restore milestones, and track V2 change metadata."},
     {"command": "workflow_onion", "tab": "onion_skin", "label": "OS", "color": "#B8F2E6", "glyph": "onion", "tooltip": "Onion Skin: create 3D ghosts for past plus future poses to judge spacing, arcs, timing."},
     {"command": "workflow_rotation", "tab": "rotation_doctor", "label": "RD", "color": "#F77F00", "glyph": "rotation", "tooltip": "Rotation Doctor: inspect selected animated rotations, flag flips or gimbal risk, suggest safest fix."},
     {"command": "workflow_skin", "tab": "skinning_cleanup", "label": "SK", "color": "#CDB4DB", "glyph": "skin", "tooltip": "Skinning Cleanup: check skinned mesh scale problems, make clean replacement copy while preserving skin weights."},
@@ -289,10 +1200,37 @@ def _short_name(node_name):
     return (node_name or "").split("|")[-1]
 
 
+def _is_base_animation_layer(layer_name):
+    label = _short_name(layer_name).lower()
+    compact = "".join(char for char in label if char.isalnum())
+    return compact in ("baseanimation", "baseanim")
+
+
+def _base_animation_layer_name(layers=None):
+    for layer_name in layers or (cmds.ls(type="animLayer") if cmds else []) or []:
+        if _is_base_animation_layer(layer_name):
+            return layer_name
+    return ""
+
+
+def _animation_layer_label(layer_name):
+    return "Base Animation" if _is_base_animation_layer(layer_name) else _short_name(layer_name)
+
+
 def _stable_palette_color(name):
-    label = _short_name(name) or "Base Animation"
+    label = _animation_layer_label(name) or "Base Animation"
     total = sum(ord(char) for char in label)
     return ANIMATION_LAYER_TINT_PALETTE[total % len(ANIMATION_LAYER_TINT_PALETTE)]
+
+
+def _next_animation_layer_palette_color(layer_name):
+    current_color = _normalize_hex_color(_animation_layer_color(layer_name), _stable_palette_color(layer_name))
+    palette = [_normalize_hex_color(color) for color in ANIMATION_LAYER_TINT_PALETTE]
+    try:
+        current_index = palette.index(current_color)
+    except ValueError:
+        current_index = sum(ord(char) for char in _animation_layer_label(layer_name)) % len(palette)
+    return palette[(current_index + 1) % len(palette)]
 
 
 def _normalize_hex_color(value, fallback="#4A4A4A"):
@@ -396,29 +1334,43 @@ def _animation_layer_names(include_base=False):
     except Exception:
         layers = []
     ordered = []
-    if include_base:
-        ordered.append("")
     for layer_name in layers:
-        if layer_name and layer_name not in ordered:
+        if not layer_name:
+            continue
+        if _is_base_animation_layer(layer_name) and not include_base:
+            continue
+        if layer_name not in ordered:
             ordered.append(layer_name)
+    if include_base and not _base_animation_layer_name(ordered):
+        ordered.insert(0, "")
     return ordered
 
 
 def _set_animation_layer_selected(layer_name):
     if not cmds:
         return False, "This tool only works inside Maya."
-    if layer_name and not cmds.objExists(layer_name):
+    target_layer = layer_name or _base_animation_layer_name()
+    if not target_layer:
+        for other_layer in _animation_layer_names(include_base=True):
+            if other_layer:
+                for flag_name in ("selected", "preferred"):
+                    try:
+                        cmds.animLayer(other_layer, edit=True, **{flag_name: False})
+                    except Exception:
+                        continue
+        return True, "Animation layer changed to Base Animation."
+    if target_layer and not cmds.objExists(target_layer):
         return False, "Animation layer no longer exists: {0}".format(layer_name)
     changed = False
-    for other_layer in _animation_layer_names(include_base=False):
+    for other_layer in _animation_layer_names(include_base=True):
         for flag_name in ("selected", "preferred"):
             try:
-                cmds.animLayer(other_layer, edit=True, **{flag_name: bool(other_layer == layer_name)})
+                cmds.animLayer(other_layer, edit=True, **{flag_name: bool(other_layer == target_layer)})
                 changed = True
             except Exception:
                 continue
-    if layer_name:
-        return True, "Animation layer changed to {0}.".format(_short_name(layer_name))
+    if target_layer:
+        return True, "Animation layer changed to {0}.".format(_animation_layer_label(target_layer))
     return True, "Animation layer changed to Base Animation."
 
 
@@ -427,6 +1379,8 @@ def _rename_animation_layer(layer_name, new_name):
         return False, "This tool only works inside Maya.", layer_name
     if not layer_name or not cmds.objExists(layer_name):
         return False, "Pick an animation layer before renaming.", layer_name
+    if _is_base_animation_layer(layer_name):
+        return False, "Base Animation cannot be renamed.", layer_name
     cleaned = str(new_name or "").strip()
     if not cleaned:
         return False, "Type a new animation layer name.", layer_name
@@ -442,6 +1396,8 @@ def _set_animation_layer_color(layer_name, color_hex):
         return False, "This tool only works inside Maya."
     if not layer_name or not cmds.objExists(layer_name):
         return False, "Pick an animation layer before setting color."
+    if _is_base_animation_layer(layer_name):
+        return False, "Base Animation uses Maya's default layer color."
     color_hex = _normalize_hex_color(color_hex, _stable_palette_color(layer_name))
     try:
         if not cmds.attributeQuery(ANIMATION_LAYER_CUSTOM_COLOR_ATTR, node=layer_name, exists=True):
@@ -464,6 +1420,114 @@ def _set_animation_layer_color(layer_name, color_hex):
         except Exception:
             continue
     return True, "Changed {0} color to {1}.".format(_short_name(layer_name), color_hex)
+
+
+def _unique_animation_layer_name(base_name="AnimLayer"):
+    if not cmds:
+        return base_name
+    safe_base = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(base_name or "AnimLayer")).strip("_") or "AnimLayer"
+    if not cmds.objExists(safe_base):
+        return safe_base
+    index = 1
+    while cmds.objExists("{0}{1}".format(safe_base, index)):
+        index += 1
+    return "{0}{1}".format(safe_base, index)
+
+
+def _create_animation_layer(name=None, add_selected=True):
+    if not cmds:
+        return False, "This tool only works inside Maya.", ""
+    layer_name = _unique_animation_layer_name(name or "AnimLayer")
+    try:
+        created_layer = cmds.animLayer(layer_name)
+        if add_selected and cmds.ls(selection=True):
+            try:
+                cmds.animLayer(created_layer, edit=True, addSelectedObjects=True)
+            except Exception:
+                pass
+        _set_animation_layer_selected(created_layer)
+    except Exception as exc:
+        return False, "Could not create animation layer: {0}".format(exc), ""
+    return True, "Created animation layer {0}.".format(_short_name(created_layer)), created_layer
+
+
+def _delete_animation_layer(layer_name):
+    if not cmds:
+        return False, "This tool only works inside Maya."
+    if not layer_name or not cmds.objExists(layer_name):
+        return False, "Pick an animation layer before deleting."
+    if _is_base_animation_layer(layer_name):
+        return False, "Base Animation cannot be deleted."
+    try:
+        cmds.delete(layer_name)
+    except Exception as exc:
+        return False, "Could not delete animation layer: {0}".format(exc)
+    return True, "Deleted animation layer {0}.".format(_short_name(layer_name))
+
+
+def _animation_layer_state(layer_name):
+    state = {"can_edit": bool(layer_name and cmds and cmds.objExists(layer_name) and not _is_base_animation_layer(layer_name)), "mute": False, "solo": False, "lock": False, "weight": 1.0}
+    if not state["can_edit"]:
+        return state
+    for flag_name in ("mute", "solo", "lock"):
+        try:
+            state[flag_name] = bool(cmds.animLayer(layer_name, query=True, **{flag_name: True}))
+        except Exception:
+            state[flag_name] = False
+    try:
+        state["weight"] = float(cmds.animLayer(layer_name, query=True, weight=True))
+    except Exception:
+        state["weight"] = 1.0
+    return state
+
+
+def _set_animation_layer_flag(layer_name, flag_name, enabled):
+    if not cmds:
+        return False, "This tool only works inside Maya."
+    if flag_name not in ("mute", "solo", "lock"):
+        return False, "Unknown animation layer flag: {0}".format(flag_name)
+    if not layer_name or not cmds.objExists(layer_name):
+        return False, "Pick an animation layer before changing {0}.".format(flag_name)
+    if _is_base_animation_layer(layer_name):
+        return False, "Base Animation cannot change {0}.".format(flag_name)
+    try:
+        cmds.animLayer(layer_name, edit=True, **{flag_name: bool(enabled)})
+    except Exception as exc:
+        return False, "Could not change {0}: {1}".format(flag_name, exc)
+    return True, "Set {0} {1} to {2}.".format(_short_name(layer_name), flag_name, "on" if enabled else "off")
+
+
+def _set_animation_layer_weight(layer_name, weight):
+    if not cmds:
+        return False, "This tool only works inside Maya."
+    if not layer_name or not cmds.objExists(layer_name):
+        return False, "Pick an animation layer before setting weight."
+    if _is_base_animation_layer(layer_name):
+        return False, "Base Animation weight cannot be changed."
+    try:
+        clamped = max(0.0, min(1.0, float(weight)))
+        cmds.animLayer(layer_name, edit=True, weight=clamped)
+    except Exception as exc:
+        return False, "Could not set animation layer weight: {0}".format(exc)
+    return True, "Set {0} weight to {1:.2f}.".format(_short_name(layer_name), clamped)
+
+
+def _edit_selected_objects_on_animation_layer(layer_name, add=True):
+    if not cmds:
+        return False, "This tool only works inside Maya."
+    if not layer_name or not cmds.objExists(layer_name):
+        return False, "Pick an animation layer first."
+    if _is_base_animation_layer(layer_name):
+        return False, "Base Animation membership is controlled by Maya."
+    if not cmds.ls(selection=True):
+        return False, "Select controls before changing layer membership."
+    flag_name = "addSelectedObjects" if add else "removeSelectedObjects"
+    try:
+        cmds.animLayer(layer_name, edit=True, **{flag_name: True})
+    except Exception as exc:
+        return False, "Could not update selected controls on layer: {0}".format(exc)
+    verb = "Added selected controls to" if add else "Removed selected controls from"
+    return True, "{0} {1}.".format(verb, _short_name(layer_name))
 
 
 def _animation_layer_is_selected(layer_name):
@@ -491,9 +1555,9 @@ def _active_animation_layer_name():
         if _animation_layer_is_selected(layer_name):
             return layer_name
     for layer_name in layers:
-        if _short_name(layer_name).lower() not in ("baseanimation", "base animation"):
+        if not _is_base_animation_layer(layer_name):
             return layer_name
-    return layers[0]
+    return _base_animation_layer_name(layers)
 
 
 def _option_var_bool(option_name, default):
@@ -930,6 +1994,28 @@ def _make_student_core_icon(color_hex, glyph):
             painter.drawLine(8, 11, 15, 7)
             painter.drawLine(22, 11, 15, 7)
             painter.drawLine(15, 7, 15, 17)
+        elif glyph == "folder":
+            painter.setBrush(light)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#2C2C2C"), 2))
+            painter.drawRoundedRect(7, 11, 16, 10, 2, 2)
+            painter.drawRect(9, 8, 7, 4)
+            painter.setPen(QtGui.QPen(color.darker(190), 2))
+            painter.drawLine(10, 16, 20, 16)
+            painter.drawLine(10, 19, 18, 19)
+        elif glyph == "drag":
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(light)
+            for x_pos in (11, 18):
+                for y_pos in (9, 15, 21):
+                    painter.drawEllipse(QtCore.QPoint(x_pos, y_pos), 2, 2)
+        elif glyph == "history":
+            painter.setPen(QtGui.QPen(QtGui.QColor("#2C2C2C"), 2))
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawArc(8, 8, 14, 14, 40 * 16, 285 * 16)
+            painter.drawLine(10, 9, 9, 15)
+            painter.drawLine(10, 9, 15, 8)
+            painter.setBrush(light)
+            painter.drawRoundedRect(13, 13, 8, 6, 2, 2)
         elif glyph == "parent":
             painter.setBrush(QtCore.Qt.NoBrush)
             painter.drawEllipse(8, 8, 6, 6)
@@ -1017,19 +2103,16 @@ def _make_student_core_icon(color_hex, glyph):
             painter.drawLine(12, 16, 18, 16)
             painter.drawLine(12, 20, 16, 20)
         elif glyph == "game":
-            painter.setPen(QtGui.QPen(light, 2))
-            painter.setBrush(QtCore.Qt.NoBrush)
-            painter.drawRect(8, 8, 14, 14)
-            painter.drawLine(19, 12, 22, 12)
-            painter.drawLine(22, 12, 22, 18)
-            painter.drawLine(22, 18, 19, 18)
+            painter.setPen(QtGui.QPen(light, 3, QtCore.Qt.SolidLine, QtCore.Qt.RoundCap, QtCore.Qt.RoundJoin))
             painter.setBrush(light)
-            painter.drawEllipse(11, 8, 4, 4)
-            painter.drawLine(13, 13, 13, 18)
-            painter.drawLine(13, 15, 9, 18)
-            painter.drawLine(13, 15, 17, 18)
-            painter.drawLine(13, 18, 10, 22)
-            painter.drawLine(13, 18, 17, 22)
+            painter.drawEllipse(12, 7, 6, 6)
+            painter.drawLine(15, 14, 15, 20)
+            painter.drawLine(15, 15, 10, 18)
+            painter.drawLine(15, 15, 20, 18)
+            painter.drawLine(15, 20, 11, 24)
+            painter.drawLine(15, 20, 21, 24)
+            painter.drawLine(11, 24, 9, 24)
+            painter.drawLine(21, 24, 23, 24)
         else:
             painter.setPen(QtGui.QPen(light, 2))
             font = painter.font()
@@ -1096,6 +2179,41 @@ def _style_student_timeline_bar_button(button, color_hex):
         QToolButton:pressed {
             background-color: %(color)s;
             color: #111111;
+        }
+        """
+        % {"color": color_hex or "#55CBCD"}
+    )
+
+
+def _style_animation_layer_bar_button(button, color_hex="#55CBCD"):
+    if not button:
+        return
+    button.setMinimumHeight(24)
+    button.setMaximumHeight(28)
+    button.setStyleSheet(
+        """
+        QToolButton {
+            background-color: #202020;
+            color: #F2F2F2;
+            border: 1px solid #3A3A3A;
+            border-bottom: 2px solid %(color)s;
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        QToolButton:hover {
+            background-color: #303030;
+            border-color: %(color)s;
+        }
+        QToolButton:checked {
+            background-color: %(color)s;
+            color: #111111;
+        }
+        QToolButton:disabled {
+            color: #777777;
+            background-color: #242424;
+            border-color: #333333;
         }
         """
         % {"color": color_hex or "#55CBCD"}
@@ -1194,9 +2312,37 @@ def _delete_if_exists(node_name):
         return
     try:
         if cmds.objExists(node_name):
+            try:
+                cmds.lockNode(node_name, lock=False)
+            except Exception:
+                pass
             cmds.delete(node_name)
     except Exception:
         pass
+
+
+def _delete_numbered_scene_helper_nodes(base_name):
+    if not cmds or not base_name:
+        return
+    candidates = set()
+    try:
+        candidates.update(cmds.ls(base_name, long=True) or [])
+    except Exception:
+        pass
+    if any(char.isspace() for char in base_name):
+        _delete_if_exists(base_name)
+        return
+    try:
+        candidates.update(cmds.ls(base_name + "*", long=True) or [])
+    except Exception:
+        pass
+    for node_name in sorted(candidates, key=len, reverse=True):
+        short_name = _short_name(node_name)
+        if short_name == base_name:
+            _delete_if_exists(node_name)
+            continue
+        if short_name.startswith(base_name) and short_name[len(base_name):].isdigit():
+            _delete_if_exists(node_name)
 
 
 def _selected_render_targets():
@@ -1365,9 +2511,9 @@ def _delete_existing_scene_helpers():
         SCENE_HELPERS_INFINITY_WALL_NAME,
         SCENE_HELPERS_LEGACY_INFINITY_WALL_NAME,
     ):
-        _delete_if_exists(node_name)
+        _delete_numbered_scene_helper_nodes(node_name)
     for node_name in list(SCENE_HELPERS_CAMERA_NAMES.values()) + list(SCENE_HELPERS_BOOKMARK_NAMES.values()) + [SCENE_HELPERS_FLOOR_NAME, SCENE_HELPERS_BACKDROP_NAME, SCENE_HELPERS_INFINITY_WALL_MAT_NAME, SCENE_HELPERS_INFINITY_WALL_SG_NAME]:
-        _delete_if_exists(node_name)
+        _delete_numbered_scene_helper_nodes(node_name)
 
 
 def _set_arnold_light_settings(light_shape, exposure):
@@ -1861,6 +3007,7 @@ class MayaTimingToolsController(object):
         self._last_time_unit = _current_time_unit()
         self._idle_script_job_id = None
         self.status_callback = None
+        self._history_auto_snapshot_controller = None
         self.last_render_camera_preset = "perspective"
         self.scene_helpers_camera_height_offset = 0.0
         self.scene_helpers_camera_dolly_offset = 0.0
@@ -1907,22 +3054,24 @@ class MayaTimingToolsController(object):
         return {
             "enabled": True,
             "layer": layer_name,
-            "label": _short_name(layer_name),
+            "label": _animation_layer_label(layer_name),
             "color": _animation_layer_color(layer_name),
         }
 
     def animation_layer_choices(self):
-        choices = [{"layer": "", "label": "Base Animation", "color": "#4A4A4A", "active": not _active_animation_layer_name()}]
         active_layer = _active_animation_layer_name()
-        for layer_name in _animation_layer_names(include_base=False):
+        choices = []
+        for layer_name in _animation_layer_names(include_base=True):
             choices.append(
                 {
                     "layer": layer_name,
-                    "label": _short_name(layer_name),
+                    "label": _animation_layer_label(layer_name),
                     "color": _animation_layer_color(layer_name),
                     "active": bool(layer_name == active_layer),
                 }
             )
+        if not choices:
+            choices.append({"layer": "", "label": "Base Animation", "color": "#4A4A4A", "active": True})
         return choices
 
     def select_animation_layer_from_bar(self, layer_name):
@@ -1937,6 +3086,95 @@ class MayaTimingToolsController(object):
 
     def color_animation_layer_from_bar(self, layer_name, color_hex):
         success, message = _set_animation_layer_color(layer_name, color_hex)
+        self._emit_status(message, success)
+        return success, message
+
+    def create_history_auto_snapshot(self, reason):
+        try:
+            if self._history_auto_snapshot_controller is None:
+                self._history_auto_snapshot_controller = maya_history_timeline.MayaHistoryTimelineController()
+            history_controller = self._history_auto_snapshot_controller
+            success, message, _record = history_controller.create_auto_snapshot(reason)
+            return success, message
+        except Exception as exc:
+            return False, "History Timeline auto snapshot skipped: {0}".format(exc)
+
+    def create_animation_layer_from_bar(self, name=None, add_selected=True):
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="ToolkitBarCreateAnimationLayer")
+        except Exception:
+            pass
+        try:
+            success, message, created = _create_animation_layer(name=name, add_selected=add_selected)
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self._emit_status(message, success)
+        return success, message, created
+
+    def delete_animation_layer_from_bar(self, layer_name):
+        self.create_history_auto_snapshot("Before animation layer delete")
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="ToolkitBarDeleteAnimationLayer")
+        except Exception:
+            pass
+        try:
+            success, message = _delete_animation_layer(layer_name)
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self._emit_status(message, success)
+        return success, message
+
+    def animation_layer_state(self, layer_name):
+        return _animation_layer_state(layer_name)
+
+    def set_animation_layer_flag_from_bar(self, layer_name, flag_name, enabled):
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="ToolkitBarSetAnimationLayerFlag")
+        except Exception:
+            pass
+        try:
+            success, message = _set_animation_layer_flag(layer_name, flag_name, enabled)
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self._emit_status(message, success)
+        return success, message
+
+    def set_animation_layer_weight_from_bar(self, layer_name, weight):
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="ToolkitBarSetAnimationLayerWeight")
+        except Exception:
+            pass
+        try:
+            success, message = _set_animation_layer_weight(layer_name, weight)
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self._emit_status(message, success)
+        return success, message
+
+    def edit_selected_objects_on_animation_layer_from_bar(self, layer_name, add=True):
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="ToolkitBarEditAnimationLayerMembership")
+        except Exception:
+            pass
+        try:
+            success, message = _edit_selected_objects_on_animation_layer(layer_name, add=add)
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
         self._emit_status(message, success)
         return success, message
 
@@ -1973,6 +3211,7 @@ class MayaTimingToolsController(object):
         if not cmds or not self.auto_snap_enabled:
             return
         self._remove_idle_watch()
+        _kill_script_jobs_with_marker("MayaTimingToolsController._on_idle")
         try:
             self._idle_script_job_id = cmds.scriptJob(event=["idle", self._on_idle], protected=True)
         except Exception:
@@ -2316,6 +3555,43 @@ class MayaTimingToolsController(object):
             return True, "No static curves needed cleaning on selected controls."
         return True, "Deleted {0} static animation curve(s) on selected controls.".format(deleted)
 
+    def package_scene_to_zip_from_bar(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        self.create_history_auto_snapshot("Before Reference Manager package")
+        try:
+            import maya_reference_manager
+            controller = maya_reference_manager.ReferencePackageController()
+            result = controller.package_current_scene(
+                include_references=True,
+                include_external=True,
+                save_scene=True,
+                retarget_package_scene=True,
+            )
+        except Exception as exc:
+            return False, "Could not package scene to zip: {0}".format(exc)
+
+        package_dir = result.get("package_dir") or os.path.dirname(result.get("zip_path") or "")
+        opened_folder = False
+        if package_dir and os.path.isdir(package_dir):
+            try:
+                os.startfile(package_dir)
+                opened_folder = True
+            except Exception:
+                opened_folder = False
+        zip_path = result.get("zip_path") or ""
+        copied_count = int(result.get("copied_count") or 0)
+        missing_count = int(result.get("missing_count") or 0)
+        if opened_folder:
+            message = "Packaged scene zip and opened folder: {0}".format(zip_path)
+        else:
+            message = "Packaged scene zip: {0}".format(zip_path)
+        if copied_count or missing_count:
+            message = "{0} Copied {1} file(s), missing {2}.".format(message, copied_count, missing_count)
+        success = not bool(missing_count)
+        self._emit_status(message, success)
+        return success, message
+
     def run_student_core_command(self, command):
         command = (command or "").strip().lower()
         if command == "nudge_left":
@@ -2334,7 +3610,9 @@ class MayaTimingToolsController(object):
             return self.select_animated_controls()
         if command == "clean_static":
             return self.remove_static_animation_curves()
-        return False, "Unknown Student Core command: {0}".format(command)
+        if command == "package_scene_zip":
+            return self.package_scene_to_zip_from_bar()
+        return False, "Unknown Toolkit Bar command: {0}".format(command)
 
     def apply_game_animation_mode(self):
         if not MAYA_AVAILABLE:
@@ -2481,6 +3759,7 @@ class MayaTimingToolsController(object):
                 message = "{0} {1}".format(message, preset_message)
             self._emit_status(message, True)
             return True, message
+        self.create_history_auto_snapshot("Before render environment delete")
         _delete_existing_scene_helpers()
         self.reset_scene_helpers_camera_offsets()
         self.last_render_camera_preset = "perspective"
@@ -2490,6 +3769,217 @@ class MayaTimingToolsController(object):
             message = "{0} {1}".format(message, preset_message)
         self._emit_status(message, True)
         return True, message
+
+    def duplicate_selected_rig_for_teacher_demo(self, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya.", {}
+        roots = _selected_transform_roots()
+        if not roots:
+            message = "Select one rig root group, then click Duplicate Rig For Teacher Demo."
+            self._emit_status(message, False)
+            return False, message, {}
+        if len(roots) > 1:
+            message = "Select only one rig root group. Found {0} selected roots.".format(len(roots))
+            self._emit_status(message, False)
+            return False, message, {}
+        success, message, detail = _duplicate_rig_root_for_teacher_demo(roots[0], offset_x=offset_x)
+        self._emit_status(message, success)
+        return success, message, detail
+
+    def delete_teacher_demo_duplicates(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="AminateDeleteTeacherDemoDuplicates")
+        except Exception:
+            pass
+        try:
+            deleted, deleted_layers = _delete_teacher_demo_duplicates()
+            if not deleted and not deleted_layers:
+                message = "No teacher demo duplicates found."
+                self._emit_status(message, True)
+                return True, message
+            message = "Deleted {0} teacher demo duplicate(s) and {1} teacher demo layer(s).".format(deleted, deleted_layers)
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not delete teacher demo duplicates: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def list_scene_text_notes(self):
+        if not MAYA_AVAILABLE:
+            return []
+        return _scene_text_note_list()
+
+    def create_scene_text_note(self, text, color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR, size=SCENE_TEXT_NOTE_DEFAULT_SCALE):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya.", {}
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersCreateTextNote")
+        except Exception:
+            pass
+        try:
+            note = _create_scene_text_note(text, color_hex=color_hex, size=size)
+            message = "Created scene text note: {0}.".format(_node_short_name(note.get("node")))
+            self._emit_status(message, True)
+            return True, message, note
+        except Exception as exc:
+            message = "Could not create scene text note: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message, {}
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def set_scene_text_note_size(self, note_node, size):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersSetTextNoteSize")
+        except Exception:
+            pass
+        try:
+            applied_size = _apply_scene_text_note_size(note_node, size)
+            message = "Changed text note size to {0:g}: {1}.".format(applied_size, _node_short_name(note_node))
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not change text note size: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def key_scene_text_note_visibility(self, note_node, visible=True):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        frame = cmds.currentTime(query=True)
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersKeyTextNoteVisibility")
+        except Exception:
+            pass
+        try:
+            cmds.setAttr(note_node + ".visibility", bool(visible))
+            cmds.setKeyframe(note_node, attribute="visibility", time=frame, value=1 if visible else 0)
+            message = "Keyed {0} {1} on frame {2:g}.".format(
+                _node_short_name(note_node),
+                "on" if visible else "off",
+                frame,
+            )
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not key scene text note visibility: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def set_scene_text_note_color(self, note_node, color_hex):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        color_hex = color_hex or SCENE_TEXT_NOTE_DEFAULT_COLOR
+        try:
+            _ensure_string_attr(note_node, SCENE_TEXT_NOTE_COLOR_ATTR, color_hex)
+            _set_display_color(note_node, color_hex)
+            _rebuild_scene_text_note_line(note_node)
+            message = "Changed text note color: {0}.".format(_node_short_name(note_node))
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not change text note color: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+
+    def move_scene_text_note_to_selection(self, note_node):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        anchor_node = _selected_scene_text_anchor(exclude_note=note_node)
+        if not anchor_node:
+            return False, "Select a body part or control to move the text note beside."
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersMoveTextNote")
+        except Exception:
+            pass
+        try:
+            note_position = _vector_add(_world_transform_position(anchor_node), SCENE_TEXT_NOTE_OFFSET)
+            cmds.xform(note_node, worldSpace=True, translation=note_position)
+            _ensure_string_attr(note_node, SCENE_TEXT_NOTE_ANCHOR_ATTR, anchor_node)
+            _rebuild_scene_text_note_line(note_node)
+            message = "Moved {0} beside {1}.".format(_node_short_name(note_node), _node_short_name(anchor_node))
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not move scene text note: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def delete_scene_text_note(self, note_node):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersDeleteTextNote")
+        except Exception:
+            pass
+        try:
+            note_name = _node_short_name(note_node)
+            line_node = ""
+            try:
+                line_node = cmds.getAttr(note_node + "." + SCENE_TEXT_NOTE_LINE_ATTR) or ""
+            except Exception:
+                line_node = ""
+            if line_node and cmds.objExists(line_node):
+                try:
+                    cmds.delete(line_node)
+                except Exception:
+                    pass
+            cmds.delete(note_node)
+            message = "Deleted scene text note: {0}.".format(note_name)
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not delete scene text note: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
 
     def set_scene_helpers_camera_offsets(self, height_offset=None, dolly_offset=None):
         if height_offset is not None:
@@ -2662,7 +4152,7 @@ if QtWidgets:
             layout.setSpacing(8)
 
             header = QtWidgets.QHBoxLayout()
-            title = QtWidgets.QLabel("Student Core")
+            title = QtWidgets.QLabel("Toolkit Bar")
             title.setObjectName("studentCoreTitle")
             header.addWidget(title)
             hint = QtWidgets.QLabel("Compact color buttons for the timing jobs students use most.")
@@ -2681,12 +4171,11 @@ if QtWidgets:
             track_layout = QtWidgets.QHBoxLayout(track)
             track_layout.setContentsMargins(8, 6, 8, 6)
             track_layout.setSpacing(6)
-            for index in range(8):
+            for index, tool in enumerate(STUDENT_CORE_TOOLS):
                 tick = QtWidgets.QLabel("|")
                 tick.setStyleSheet("color: #4D4D4D;")
                 tick.setAlignment(QtCore.Qt.AlignCenter)
                 track_layout.addWidget(tick)
-                tool = STUDENT_CORE_TOOLS[index]
                 button = QtWidgets.QToolButton()
                 button.setObjectName("studentCoreTool_{0}".format(tool["command"]))
                 button.setText(tool["label"])
@@ -2716,14 +4205,17 @@ if QtWidgets:
             self.controller = controller
             self.status_callback = status_callback
             self.owns_controller = bool(owns_controller)
+            self.history_controller = maya_history_timeline.MayaHistoryTimelineController(status_callback=status_callback)
             self.setObjectName(STUDENT_TIMELINE_BAR_OBJECT_NAME)
-            self.setWindowTitle("Toolkit Bar")
-            self.setMinimumSize(760, 56)
-            self.setMaximumHeight(64)
+            self.setWindowTitle("")
+            self.setMinimumSize(900, 78)
+            self.setMaximumHeight(92)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             self._layer_tint_timer = None
+            self._refreshing_animation_layer_controls = False
             self._build_ui()
+            self.history_controller.start_default_action_snapshots(parent=self, interval_ms=2000)
             self._refresh_animation_layer_tint()
             self._start_animation_layer_tint_timer()
 
@@ -2736,22 +4228,165 @@ if QtWidgets:
                 }
                 """
             )
-            main_layout = QtWidgets.QVBoxLayout(self)
-            main_layout.setContentsMargins(6, 3, 6, 4)
-            main_layout.setSpacing(3)
+            root_layout = QtWidgets.QHBoxLayout(self)
+            root_layout.setContentsMargins(3, 3, 6, 4)
+            root_layout.setSpacing(4)
+
+            self.drag_grip = QtWidgets.QToolButton()
+            self.drag_grip.setObjectName("toolkitBarDragGrip")
+            self.drag_grip.setIcon(_make_student_core_icon("#6C757D", "drag"))
+            self.drag_grip.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+            self.drag_grip.setToolTip("Dock grip: drag the Maya dock edge or tab area to move the Toolkit Bar.")
+            self.drag_grip.setEnabled(False)
+            self.drag_grip.setMinimumSize(20, 56)
+            self.drag_grip.setMaximumSize(22, 64)
+            self.drag_grip.setIconSize(QtCore.QSize(18, 18))
+            self.drag_grip.setStyleSheet(
+                """
+                QToolButton#toolkitBarDragGrip {
+                    background-color: #202020;
+                    border: 1px solid #3A3A3A;
+                    border-radius: 4px;
+                    padding: 2px;
+                }
+                QToolButton#toolkitBarDragGrip:disabled {
+                    background-color: #202020;
+                    border: 1px solid #3A3A3A;
+                }
+                """
+            )
+            root_layout.addWidget(self.drag_grip)
+
+            main_layout = QtWidgets.QVBoxLayout()
+            main_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.setSpacing(2)
+            root_layout.addLayout(main_layout, 1)
+
+            history_layout = QtWidgets.QHBoxLayout()
+            history_layout.setContentsMargins(0, 0, 0, 0)
+            history_layout.setSpacing(4)
+            self.history_strip = maya_history_timeline.HistoryTimelineStrip(
+                controller=self.history_controller,
+                status_callback=self.status_callback,
+                parent=self,
+                max_markers=18,
+            )
+            self.history_strip.setToolTip(
+                "History Timeline: small ZBrush-style snapshot strip. Saves after Maya actions by default. Click H+ to save now, or click a block to restore."
+            )
+            history_layout.addWidget(self.history_strip)
+            main_layout.addLayout(history_layout)
+
+            layer_layout = QtWidgets.QHBoxLayout()
+            layer_layout.setContentsMargins(0, 0, 0, 0)
+            layer_layout.setSpacing(4)
             self.animation_layer_tint_label = QtWidgets.QToolButton()
             self.animation_layer_tint_label.setObjectName("studentTimelineBarAnimationLayerTint")
             self.animation_layer_tint_label.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
             self.animation_layer_tint_label.setPopupMode(_tool_button_popup_mode("InstantPopup"))
-            self.animation_layer_tint_label.setMinimumHeight(16)
-            self.animation_layer_tint_label.setMaximumHeight(18)
+            self.animation_layer_tint_label.setMinimumHeight(26)
+            self.animation_layer_tint_label.setMaximumHeight(30)
+            self.animation_layer_tint_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             self.animation_layer_tint_label.setToolTip(
-                "Animation Layer Tint: click to switch, rename, or recolor the current animation layer."
+                "Animation Layer: spans the Toolkit Bar. Click to switch, add, delete, rename, recolor, mute, solo, lock, or change layer weight."
             )
             self.animation_layer_tint_menu = QtWidgets.QMenu(self.animation_layer_tint_label)
             self.animation_layer_tint_menu.aboutToShow.connect(self._refresh_animation_layer_menu)
             self.animation_layer_tint_label.setMenu(self.animation_layer_tint_menu)
-            main_layout.addWidget(self.animation_layer_tint_label)
+            layer_layout.addWidget(self.animation_layer_tint_label, 8)
+
+            self.add_animation_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerAddButton",
+                "+Layer",
+                "Create a new animation layer and make it current. Selected controls are added if any are selected.",
+                "#55CBCD",
+            )
+            self.delete_animation_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerDeleteButton",
+                "Delete",
+                "Delete the current animation layer after a confirmation prompt.",
+                "#EF6F6C",
+            )
+            self.add_selected_to_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerAddSelectedButton",
+                "+Sel",
+                "Add selected controls to the current animation layer.",
+                "#7BD88F",
+            )
+            self.remove_selected_from_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerRemoveSelectedButton",
+                "-Sel",
+                "Remove selected controls from the current animation layer.",
+                "#F6C85F",
+            )
+            self.mute_animation_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerMuteButton",
+                "Mute",
+                "Toggle mute on the current animation layer.",
+                "#A0A0A0",
+                checkable=True,
+            )
+            self.solo_animation_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerSoloButton",
+                "Solo",
+                "Toggle solo on the current animation layer.",
+                "#72B7F2",
+                checkable=True,
+            )
+            self.lock_animation_layer_button = self._make_layer_control_button(
+                "toolkitBarAnimationLayerLockButton",
+                "Lock",
+                "Toggle lock on the current animation layer.",
+                "#B86BFF",
+                checkable=True,
+            )
+            self.animation_layer_weight_spin = QtWidgets.QDoubleSpinBox()
+            self.animation_layer_weight_spin.setObjectName("toolkitBarAnimationLayerWeightSpin")
+            self.animation_layer_weight_spin.setRange(0.0, 1.0)
+            self.animation_layer_weight_spin.setSingleStep(0.05)
+            self.animation_layer_weight_spin.setDecimals(2)
+            self.animation_layer_weight_spin.setToolTip("Set the current animation layer weight from 0 to 1.")
+            self.animation_layer_weight_spin.setMinimumWidth(58)
+            self.animation_layer_weight_spin.setMaximumWidth(70)
+            self.animation_layer_weight_spin.setMaximumHeight(28)
+            self.animation_layer_weight_spin.setStyleSheet(
+                """
+                QDoubleSpinBox {
+                    background-color: #202020;
+                    color: #F2F2F2;
+                    border: 1px solid #3A3A3A;
+                    border-radius: 4px;
+                    padding: 1px 4px;
+                    font-size: 10px;
+                    font-weight: 700;
+                }
+                QDoubleSpinBox:disabled {
+                    color: #777777;
+                    background-color: #242424;
+                }
+                """
+            )
+            for layer_button in (
+                self.add_animation_layer_button,
+                self.delete_animation_layer_button,
+                self.add_selected_to_layer_button,
+                self.remove_selected_from_layer_button,
+                self.mute_animation_layer_button,
+                self.solo_animation_layer_button,
+                self.lock_animation_layer_button,
+            ):
+                layer_layout.addWidget(layer_button)
+            layer_layout.addWidget(self.animation_layer_weight_spin)
+            main_layout.addLayout(layer_layout)
+
+            self.add_animation_layer_button.clicked.connect(self._create_animation_layer_from_bar)
+            self.delete_animation_layer_button.clicked.connect(self._delete_current_animation_layer_from_bar)
+            self.add_selected_to_layer_button.clicked.connect(lambda _checked=False: self._edit_selected_on_current_layer(True))
+            self.remove_selected_from_layer_button.clicked.connect(lambda _checked=False: self._edit_selected_on_current_layer(False))
+            self.mute_animation_layer_button.toggled.connect(lambda checked: self._toggle_current_animation_layer_flag("mute", checked))
+            self.solo_animation_layer_button.toggled.connect(lambda checked: self._toggle_current_animation_layer_flag("solo", checked))
+            self.lock_animation_layer_button.toggled.connect(lambda checked: self._toggle_current_animation_layer_flag("lock", checked))
+            self.animation_layer_weight_spin.valueChanged.connect(self._set_current_animation_layer_weight)
 
             layout = QtWidgets.QHBoxLayout()
             layout.setContentsMargins(0, 0, 0, 0)
@@ -2794,6 +4429,16 @@ if QtWidgets:
             layout.addWidget(self.game_mode_button)
             main_layout.addLayout(layout)
 
+        def _make_layer_control_button(self, object_name, text, tooltip, color_hex, checkable=False):
+            button = QtWidgets.QToolButton()
+            button.setObjectName(object_name)
+            button.setText(text)
+            button.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+            button.setCheckable(bool(checkable))
+            button.setToolTip(tooltip)
+            _style_animation_layer_bar_button(button, color_hex)
+            return button
+
         def _start_animation_layer_tint_timer(self):
             if not QtCore:
                 return
@@ -2827,15 +4472,40 @@ if QtWidgets:
                     color: {text_color};
                     border: 1px solid {border_color};
                     border-radius: 5px;
-                    font-size: 10px;
+                    font-size: 11px;
                     font-weight: 700;
-                    padding: 1px 8px;
+                    padding: 2px 10px;
                 }}
                 QToolButton#studentTimelineBarAnimationLayerTint::menu-indicator {{
                     width: 0px;
                 }}
                 """.format(color=color_hex, text_color=text_color, border_color=border_color)
             )
+            self._refresh_animation_layer_controls(info)
+
+        def _refresh_animation_layer_controls(self, info=None):
+            info = info or self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            state = self.controller.animation_layer_state(layer_name)
+            can_edit = bool(state.get("can_edit"))
+            self._refreshing_animation_layer_controls = True
+            try:
+                for button in (
+                    self.delete_animation_layer_button,
+                    self.add_selected_to_layer_button,
+                    self.remove_selected_from_layer_button,
+                    self.mute_animation_layer_button,
+                    self.solo_animation_layer_button,
+                    self.lock_animation_layer_button,
+                ):
+                    button.setEnabled(can_edit)
+                self.mute_animation_layer_button.setChecked(bool(state.get("mute")))
+                self.solo_animation_layer_button.setChecked(bool(state.get("solo")))
+                self.lock_animation_layer_button.setChecked(bool(state.get("lock")))
+                self.animation_layer_weight_spin.setEnabled(can_edit)
+                self.animation_layer_weight_spin.setValue(float(state.get("weight", 1.0)))
+            finally:
+                self._refreshing_animation_layer_controls = False
 
         def _refresh_animation_layer_menu(self):
             if not getattr(self, "animation_layer_tint_menu", None):
@@ -2852,13 +4522,24 @@ if QtWidgets:
                 action.setChecked(bool(choice.get("active")))
                 action.triggered.connect(lambda _checked=False, layer=choice.get("layer", ""): self._select_animation_layer_from_bar(layer))
             self.animation_layer_tint_menu.addSeparator()
+            add_action = self.animation_layer_tint_menu.addAction("Create New Layer")
+            add_action.triggered.connect(self._create_animation_layer_from_bar)
+            delete_action = self.animation_layer_tint_menu.addAction("Delete Current Layer...")
+            delete_action.triggered.connect(self._delete_current_animation_layer_from_bar)
+            self.animation_layer_tint_menu.addSeparator()
+            add_selected_action = self.animation_layer_tint_menu.addAction("Add Selected Controls To Current Layer")
+            add_selected_action.triggered.connect(lambda _checked=False: self._edit_selected_on_current_layer(True))
+            remove_selected_action = self.animation_layer_tint_menu.addAction("Remove Selected Controls From Current Layer")
+            remove_selected_action.triggered.connect(lambda _checked=False: self._edit_selected_on_current_layer(False))
+            self.animation_layer_tint_menu.addSeparator()
             rename_action = self.animation_layer_tint_menu.addAction("Rename Current Layer...")
             rename_action.triggered.connect(self._rename_current_animation_layer_from_bar)
-            color_action = self.animation_layer_tint_menu.addAction("Pick Current Layer Color...")
-            color_action.triggered.connect(self._pick_current_animation_layer_color_from_bar)
+            color_action = self.animation_layer_tint_menu.addAction("Auto Set Current Layer Color")
+            color_action.triggered.connect(self._auto_set_current_animation_layer_color_from_bar)
 
         def _select_animation_layer_from_bar(self, layer_name):
             success, message = self.controller.select_animation_layer_from_bar(layer_name)
+            self._snapshot_after_toolkit_action("animation layer select", success)
             self._refresh_animation_layer_tint()
             if self.status_callback:
                 self.status_callback(message, success)
@@ -2881,28 +4562,86 @@ if QtWidgets:
             if not accepted:
                 return
             success, message, _renamed = self.controller.rename_animation_layer_from_bar(layer_name, new_name)
+            self._snapshot_after_toolkit_action("animation layer rename", success)
             self._refresh_animation_layer_tint()
             if self.status_callback:
                 self.status_callback(message, success)
 
-        def _pick_current_animation_layer_color_from_bar(self):
+        def _auto_set_current_animation_layer_color_from_bar(self):
             info = self.controller.animation_layer_tint_info()
             layer_name = info.get("layer") or ""
             if not layer_name:
                 if self.status_callback:
                     self.status_callback("Pick an animation layer before setting color.", False)
                 return
-            initial_color = QtGui.QColor(info.get("color") or "#4A4A4A")
-            color = QtWidgets.QColorDialog.getColor(initial_color, self, "Pick Animation Layer Color")
-            if not color.isValid():
+            color_hex = _next_animation_layer_palette_color(layer_name)
+            success, message = self.controller.color_animation_layer_from_bar(layer_name, color_hex)
+            self._snapshot_after_toolkit_action("animation layer color", success)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _create_animation_layer_from_bar(self):
+            success, message, _created = self.controller.create_animation_layer_from_bar()
+            self._snapshot_after_toolkit_action("animation layer create", success)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _delete_current_animation_layer_from_bar(self):
+            info = self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            if not layer_name:
+                if self.status_callback:
+                    self.status_callback("Pick an animation layer before deleting.", False)
                 return
-            success, message = self.controller.color_animation_layer_from_bar(layer_name, color.name().upper())
+            result = QtWidgets.QMessageBox.question(
+                self,
+                "Delete Animation Layer",
+                "Delete animation layer {0}? This removes that animation layer from the scene.".format(_short_name(layer_name)),
+            )
+            if result != QtWidgets.QMessageBox.Yes:
+                return
+            success, message = self.controller.delete_animation_layer_from_bar(layer_name)
+            self._snapshot_after_toolkit_action("animation layer delete", success)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _edit_selected_on_current_layer(self, add=True):
+            info = self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            success, message = self.controller.edit_selected_objects_on_animation_layer_from_bar(layer_name, add=add)
+            self._snapshot_after_toolkit_action("animation layer membership", success)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _toggle_current_animation_layer_flag(self, flag_name, enabled):
+            if getattr(self, "_refreshing_animation_layer_controls", False):
+                return
+            info = self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            success, message = self.controller.set_animation_layer_flag_from_bar(layer_name, flag_name, enabled)
+            self._snapshot_after_toolkit_action("animation layer {0}".format(flag_name), success)
+            self._refresh_animation_layer_tint()
+            if self.status_callback:
+                self.status_callback(message, success)
+
+        def _set_current_animation_layer_weight(self, weight):
+            if getattr(self, "_refreshing_animation_layer_controls", False):
+                return
+            info = self.controller.animation_layer_tint_info()
+            layer_name = info.get("layer") or ""
+            success, message = self.controller.set_animation_layer_weight_from_bar(layer_name, weight)
+            self._snapshot_after_toolkit_action("animation layer weight", success)
             self._refresh_animation_layer_tint()
             if self.status_callback:
                 self.status_callback(message, success)
 
         def _run(self, command):
             success, message = self.controller.run_student_core_command(command)
+            self._snapshot_after_toolkit_action(command, success)
             if self.status_callback:
                 self.status_callback(message, success)
             elif MAYA_AVAILABLE and om2:
@@ -2920,6 +4659,7 @@ if QtWidgets:
 
         def _toggle_game_animation_mode(self, enabled):
             success, message = self.controller.set_game_animation_mode_enabled(enabled)
+            self._snapshot_after_toolkit_action("game animation mode", success)
             self._set_game_button_checked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
             self._sync_scene_helpers_game_button()
             if self.status_callback:
@@ -2929,6 +4669,14 @@ if QtWidgets:
                     om2.MGlobal.displayInfo("[Toolkit Bar] {0}".format(message))
                 else:
                     om2.MGlobal.displayWarning("[Toolkit Bar] {0}".format(message))
+
+        def _snapshot_after_toolkit_action(self, reason, action_success):
+            if not action_success or not getattr(self, "history_controller", None):
+                return
+            success, message, _record = self.history_controller.create_post_action_snapshot(reason)
+            if getattr(self, "history_strip", None):
+                self.history_strip._set_status(message, success)
+                self.history_strip.refresh()
 
         def _sync_scene_helpers_game_button(self):
             for window in (GLOBAL_WINDOW,):
@@ -2956,6 +4704,10 @@ if QtWidgets:
                     self._layer_tint_timer.stop()
                 except Exception:
                     pass
+            try:
+                self.history_controller.shutdown()
+            except Exception:
+                pass
             if self.owns_controller:
                 try:
                     self.controller.shutdown()
@@ -3052,16 +4804,33 @@ if QtWidgets:
                 "Open the latest autosave for the current scene, or recover the last crash if Maya closed unexpectedly."
             )
             action_row.addWidget(self.recover_autosave_button, 1)
+            main_layout.addLayout(action_row)
+
+            setup_row = QtWidgets.QHBoxLayout()
+            setup_row.setSpacing(8)
             self.render_env_button = QtWidgets.QPushButton("Set Up Render Environment")
             self.render_env_button.setToolTip(
                 "Build a first-pass render setup around the selected character or largest visible mesh. "
                 "The tool builds the cyclorama helper directly in Python, then adds front, side, and three-quarter cameras, a sky dome when Arnold is available, and camera bookmarks."
             )
-            action_row.addWidget(self.render_env_button, 1)
+            setup_row.addWidget(self.render_env_button, 1)
             self.delete_render_env_button = QtWidgets.QPushButton("Delete Render Environment")
             self.delete_render_env_button.setToolTip("Delete the Scene Helpers render environment, including the cameras, cyclorama, sky light, and bookmarks.")
-            action_row.addWidget(self.delete_render_env_button, 1)
-            main_layout.addLayout(action_row)
+            setup_row.addWidget(self.delete_render_env_button, 1)
+            self.duplicate_teacher_rig_button = QtWidgets.QPushButton("Duplicate Rig For Teacher Demo")
+            self.duplicate_teacher_rig_button.setObjectName("sceneHelpersDuplicateTeacherRigButton")
+            self.duplicate_teacher_rig_button.setToolTip(
+                "Select one rig root group, then duplicate an isolated teacher-demo copy with the same keyed animation. "
+                "The copy is moved by an offset group so the original keyframes are not changed."
+            )
+            setup_row.addWidget(self.duplicate_teacher_rig_button, 1)
+            self.delete_teacher_rig_button = QtWidgets.QPushButton("Delete Teacher Demo")
+            self.delete_teacher_rig_button.setObjectName("sceneHelpersDeleteTeacherRigButton")
+            self.delete_teacher_rig_button.setToolTip(
+                "Delete every teacher-demo rig duplicate and its helper display layer from this scene."
+            )
+            setup_row.addWidget(self.delete_teacher_rig_button, 1)
+            main_layout.addLayout(setup_row)
 
             camera_row = QtWidgets.QHBoxLayout()
             camera_row.setSpacing(8)
@@ -3096,6 +4865,15 @@ if QtWidgets:
             self.camera_dolly_offset_spin.setSingleStep(0.25)
             self.camera_dolly_offset_spin.setToolTip("Move the helper cameras closer or farther in their view direction.")
             offset_row.addWidget(self.camera_dolly_offset_spin)
+            offset_row.addWidget(QtWidgets.QLabel("Rig Copy Offset X"))
+            self.teacher_rig_offset_spin = QtWidgets.QDoubleSpinBox()
+            self.teacher_rig_offset_spin.setObjectName("sceneHelpersTeacherRigOffsetSpin")
+            self.teacher_rig_offset_spin.setRange(-1000.0, 1000.0)
+            self.teacher_rig_offset_spin.setDecimals(2)
+            self.teacher_rig_offset_spin.setSingleStep(5.0)
+            self.teacher_rig_offset_spin.setValue(DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X)
+            self.teacher_rig_offset_spin.setToolTip("Move the duplicated teacher-demo rig left or right without changing its own animation keys.")
+            offset_row.addWidget(self.teacher_rig_offset_spin)
             main_layout.addLayout(offset_row)
 
             snap_row = QtWidgets.QHBoxLayout()
@@ -3136,10 +4914,77 @@ if QtWidgets:
                 "9. Use Delete Render Environment when you want to remove that whole setup again.\n"
                 "10. Use Camera Height Offset and Camera Dolly Offset to move all helper cameras up/down or in/out together.\n"
                 "11. Use Camera Preset to jump between the Front, Side, and Three Quarter cameras.\n"
-                "12. Select controls first when you want the snap to act only on part of the scene."
+                "12. Select a rig root and use Duplicate Rig For Teacher Demo when you want a separate animated copy for a student demonstration.\n"
+                "13. Use Delete Teacher Demo to remove every teacher-demo duplicate and its helper display layer.\n"
+                "14. Select controls first when you want the snap to act only on part of the scene."
             )
             help_box.setMaximumHeight(110)
             main_layout.addWidget(help_box)
+
+            text_note_label = QtWidgets.QLabel("Scene Text Notes")
+            text_note_label.setStyleSheet("font-weight: 600;")
+            main_layout.addWidget(text_note_label)
+
+            text_note_row = QtWidgets.QHBoxLayout()
+            text_note_row.setSpacing(8)
+            self.scene_text_input = QtWidgets.QLineEdit()
+            self.scene_text_input.setObjectName("sceneHelpersTextNoteInput")
+            self.scene_text_input.setPlaceholderText("Type feedback note here")
+            self.scene_text_input.setToolTip("Text for a scene-native feedback note. Select a control first to place the note beside it.")
+            text_note_row.addWidget(self.scene_text_input, 2)
+            self.scene_text_color_combo = QtWidgets.QComboBox()
+            self.scene_text_color_combo.setObjectName("sceneHelpersTextNoteColorCombo")
+            for color_name, color_hex in SCENE_TEXT_NOTE_COLORS.items():
+                self.scene_text_color_combo.addItem(color_name, color_hex)
+            self.scene_text_color_combo.setToolTip("Pick the note color.")
+            text_note_row.addWidget(self.scene_text_color_combo, 1)
+            self.scene_text_size_spin = QtWidgets.QDoubleSpinBox()
+            self.scene_text_size_spin.setObjectName("sceneHelpersTextNoteSizeSpin")
+            self.scene_text_size_spin.setRange(SCENE_TEXT_NOTE_MIN_SCALE, SCENE_TEXT_NOTE_MAX_SCALE)
+            self.scene_text_size_spin.setDecimals(2)
+            self.scene_text_size_spin.setSingleStep(1.0)
+            self.scene_text_size_spin.setValue(SCENE_TEXT_NOTE_DEFAULT_SCALE)
+            self.scene_text_size_spin.setPrefix("Size ")
+            self.scene_text_size_spin.setToolTip("Size for new text notes. Select an existing note and change this value to resize it live, or type an exact number.")
+            text_note_row.addWidget(self.scene_text_size_spin, 1)
+            self.create_scene_text_note_button = QtWidgets.QPushButton("Create Text Note")
+            self.create_scene_text_note_button.setObjectName("sceneHelpersCreateTextNoteButton")
+            self.create_scene_text_note_button.setToolTip("Create a Maya text-curve note beside the selected body part or control.")
+            text_note_row.addWidget(self.create_scene_text_note_button, 1)
+            main_layout.addLayout(text_note_row)
+
+            text_note_list_row = QtWidgets.QHBoxLayout()
+            text_note_list_row.setSpacing(8)
+            self.scene_text_note_list = QtWidgets.QListWidget()
+            self.scene_text_note_list.setObjectName("sceneHelpersTextNoteList")
+            self.scene_text_note_list.setMaximumHeight(92)
+            self.scene_text_note_list.setToolTip("All Aminate scene text notes in this Maya scene.")
+            text_note_list_row.addWidget(self.scene_text_note_list, 2)
+            text_note_buttons = QtWidgets.QVBoxLayout()
+            text_note_buttons.setSpacing(4)
+            self.key_text_note_on_button = QtWidgets.QPushButton("Key On")
+            self.key_text_note_on_button.setToolTip("Key the selected text note visible on the current frame.")
+            self.key_text_note_off_button = QtWidgets.QPushButton("Key Off")
+            self.key_text_note_off_button.setToolTip("Key the selected text note hidden on the current frame.")
+            self.move_text_note_button = QtWidgets.QPushButton("Move To Selected")
+            self.move_text_note_button.setToolTip("Move the selected text note beside the currently selected body part or control and redraw its pointer line.")
+            self.apply_text_note_color_button = QtWidgets.QPushButton("Apply Style")
+            self.apply_text_note_color_button.setToolTip("Apply the chosen color and size to the selected text note and its pointer line.")
+            self.delete_text_note_button = QtWidgets.QPushButton("Delete Text Note")
+            self.delete_text_note_button.setToolTip("Delete the selected scene text note. Anything the UI can add should be deletable from the UI.")
+            self.refresh_text_notes_button = QtWidgets.QPushButton("Refresh List")
+            self.refresh_text_notes_button.setToolTip("Refresh the list of scene text notes.")
+            for button in (
+                self.key_text_note_on_button,
+                self.key_text_note_off_button,
+                self.move_text_note_button,
+                self.apply_text_note_color_button,
+                self.delete_text_note_button,
+                self.refresh_text_notes_button,
+            ):
+                text_note_buttons.addWidget(button)
+            text_note_list_row.addLayout(text_note_buttons, 1)
+            main_layout.addLayout(text_note_list_row)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
@@ -3151,7 +4996,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.2 BETA")
+            self.version_label = QtWidgets.QLabel("Version 0.3 BETA")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -3169,9 +5014,21 @@ if QtWidgets:
             self.recover_autosave_button.clicked.connect(self._recover_autosave)
             self.render_env_button.clicked.connect(self._render_environment)
             self.delete_render_env_button.clicked.connect(self._delete_render_environment)
+            self.duplicate_teacher_rig_button.clicked.connect(self._duplicate_teacher_rig)
+            self.delete_teacher_rig_button.clicked.connect(self._delete_teacher_rig)
             self.render_preset_button.clicked.connect(self._go_to_render_camera)
             self.camera_height_offset_spin.valueChanged.connect(self._camera_offsets_changed)
             self.camera_dolly_offset_spin.valueChanged.connect(self._camera_offsets_changed)
+            self.create_scene_text_note_button.clicked.connect(self._create_scene_text_note)
+            self.scene_text_size_spin.valueChanged.connect(self._scene_text_note_size_changed)
+            self.key_text_note_on_button.clicked.connect(lambda: self._key_scene_text_note(True))
+            self.key_text_note_off_button.clicked.connect(lambda: self._key_scene_text_note(False))
+            self.move_text_note_button.clicked.connect(self._move_scene_text_note)
+            self.apply_text_note_color_button.clicked.connect(self._apply_scene_text_note_style)
+            self.delete_text_note_button.clicked.connect(self._delete_scene_text_note)
+            self.refresh_text_notes_button.clicked.connect(self._refresh_scene_text_notes)
+            self.scene_text_note_list.itemSelectionChanged.connect(self._scene_text_note_selected)
+            self._refresh_scene_text_notes()
 
         def _sync_from_controller(self):
             self.auto_key_button.blockSignals(True)
@@ -3281,6 +5138,120 @@ if QtWidgets:
                     return
             success, message = self.controller.delete_render_environment()
             self._sync_from_controller()
+            self._set_status(message, success)
+
+        def _duplicate_teacher_rig(self):
+            success, message, _detail = self.controller.duplicate_selected_rig_for_teacher_demo(
+                offset_x=self.teacher_rig_offset_spin.value()
+            )
+            self._set_status(message, success)
+
+        def _delete_teacher_rig(self):
+            if QtWidgets:
+                delete_result = QtWidgets.QMessageBox.question(
+                    self,
+                    "Delete Teacher Demo",
+                    "Delete all teacher-demo rig duplicates from this scene?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No,
+                )
+                if delete_result != QtWidgets.QMessageBox.Yes:
+                    self._set_status("Kept teacher demo duplicates.", True)
+                    return
+            success, message = self.controller.delete_teacher_demo_duplicates()
+            self._set_status(message, success)
+
+        def _selected_scene_text_note(self):
+            item = self.scene_text_note_list.currentItem()
+            if not item:
+                return ""
+            return item.data(QtCore.Qt.UserRole) or ""
+
+        def _refresh_scene_text_notes(self):
+            current_note = self._selected_scene_text_note() if hasattr(self, "scene_text_note_list") else ""
+            self.scene_text_note_list.blockSignals(True)
+            self.scene_text_note_list.clear()
+            target_row = -1
+            for index, note_data in enumerate(self.controller.list_scene_text_notes()):
+                label = "{0}  |  {1}".format(note_data.get("name") or "Text Note", note_data.get("text") or "")
+                item = QtWidgets.QListWidgetItem(label)
+                item.setData(QtCore.Qt.UserRole, note_data.get("node") or "")
+                item.setToolTip("Text: {0}\nAnchor: {1}\nSize: {2:g}\nVisible: {3}".format(
+                    note_data.get("text") or "",
+                    note_data.get("anchor") or "None",
+                    float(note_data.get("size") or SCENE_TEXT_NOTE_DEFAULT_SCALE),
+                    "yes" if note_data.get("visible") else "no",
+                ))
+                self.scene_text_note_list.addItem(item)
+                if current_note and note_data.get("node") == current_note:
+                    target_row = index
+            if target_row >= 0:
+                self.scene_text_note_list.setCurrentRow(target_row)
+            self.scene_text_note_list.blockSignals(False)
+
+        def _scene_text_note_selected(self):
+            note_node = self._selected_scene_text_note()
+            if not note_node:
+                return
+            for note_data in self.controller.list_scene_text_notes():
+                if note_data.get("node") != note_node:
+                    continue
+                self.scene_text_input.setText(note_data.get("text") or "")
+                color_hex = note_data.get("color") or SCENE_TEXT_NOTE_DEFAULT_COLOR
+                index = self.scene_text_color_combo.findData(color_hex)
+                if index >= 0:
+                    self.scene_text_color_combo.setCurrentIndex(index)
+                self.scene_text_size_spin.blockSignals(True)
+                self.scene_text_size_spin.setValue(float(note_data.get("size") or SCENE_TEXT_NOTE_DEFAULT_SCALE))
+                self.scene_text_size_spin.blockSignals(False)
+                break
+
+        def _create_scene_text_note(self):
+            success, message, detail = self.controller.create_scene_text_note(
+                self.scene_text_input.text(),
+                color_hex=self.scene_text_color_combo.currentData() or SCENE_TEXT_NOTE_DEFAULT_COLOR,
+                size=self.scene_text_size_spin.value(),
+            )
+            self._refresh_scene_text_notes()
+            if detail.get("node"):
+                for row in range(self.scene_text_note_list.count()):
+                    item = self.scene_text_note_list.item(row)
+                    if item and item.data(QtCore.Qt.UserRole) == detail.get("node"):
+                        self.scene_text_note_list.setCurrentRow(row)
+                        break
+            self._set_status(message, success)
+
+        def _key_scene_text_note(self, visible):
+            success, message = self.controller.key_scene_text_note_visibility(self._selected_scene_text_note(), visible=visible)
+            self._refresh_scene_text_notes()
+            self._set_status(message, success)
+
+        def _apply_scene_text_note_style(self):
+            note_node = self._selected_scene_text_note()
+            success, message = self.controller.set_scene_text_note_color(
+                note_node,
+                self.scene_text_color_combo.currentData() or SCENE_TEXT_NOTE_DEFAULT_COLOR,
+            )
+            if success:
+                success, message = self.controller.set_scene_text_note_size(note_node, self.scene_text_size_spin.value())
+            self._refresh_scene_text_notes()
+            self._set_status(message, success)
+
+        def _scene_text_note_size_changed(self, value):
+            note_node = self._selected_scene_text_note()
+            if not note_node:
+                return
+            success, message = self.controller.set_scene_text_note_size(note_node, value)
+            self._set_status(message, success)
+
+        def _move_scene_text_note(self):
+            success, message = self.controller.move_scene_text_note_to_selection(self._selected_scene_text_note())
+            self._refresh_scene_text_notes()
+            self._set_status(message, success)
+
+        def _delete_scene_text_note(self):
+            success, message = self.controller.delete_scene_text_note(self._selected_scene_text_note())
+            self._refresh_scene_text_notes()
             self._set_status(message, success)
 
         def _go_to_render_camera(self):
@@ -3400,10 +5371,17 @@ def launch_student_timeline_button_bar(dock=True, controller=None, status_callba
                 dockToMainWindow=("bottom", False),
                 restore=True,
             )
+            try:
+                cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, label="")
+            except Exception:
+                try:
+                    cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, label=" ")
+                except Exception:
+                    pass
         except Exception:
             pass
     try:
-        GLOBAL_TIMELINE_BAR_WINDOW.setMaximumHeight(64)
+        GLOBAL_TIMELINE_BAR_WINDOW.setMaximumHeight(82)
     except Exception:
         pass
     return GLOBAL_TIMELINE_BAR_WINDOW

@@ -1465,7 +1465,7 @@ class ControlPickerPanel(QtWidgets.QWidget):
         self.tree.setDropIndicatorShown(False)
         self.tree.setAlternatingRowColors(True)
         self.tree.setExpandsOnDoubleClick(True)
-        self.tree.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
+        self.tree.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)

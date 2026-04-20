@@ -53,6 +53,9 @@ SHAPE_TOOL_NAMES = ("Line", "Arrow", "Rectangle", "Ellipse")
 CAMERA_NOTES_NAME = "amirAnimatorsPencilNotes_CAM"
 CAMERA_NOTES_SHAPE_NAME = CAMERA_NOTES_NAME + "Shape"
 CAMERA_NOTES_ATTR = "animatorsPencilCameraNotes"
+DRAW_CONTEXT_NAME = "aminateAnimatorsPencilDrawContext"
+MARQUEE_CONTEXT_NAME = "aminateAnimatorsPencilMarqueeContext"
+GLOBAL_DRAG_CONTEXT_CONTROLLER = None
 
 
 def _qt_flag(scope_name, member_name, fallback=None):
@@ -206,6 +209,67 @@ def _set_camera_for_model_panels(camera_transform):
     return False
 
 
+def _active_model_panel():
+    if not MAYA_AVAILABLE:
+        return ""
+    try:
+        panel = cmds.getPanel(withFocus=True)
+        if panel and cmds.getPanel(typeOf=panel) == "modelPanel":
+            return panel
+    except Exception:
+        pass
+    panels = cmds.getPanel(type="modelPanel") or []
+    return panels[0] if panels else ""
+
+
+def _active_model_panel_size():
+    if not MAYA_AVAILABLE:
+        return 1280.0, 720.0
+    panel = _active_model_panel()
+    try:
+        control = cmds.modelPanel(panel, query=True, control=True) if panel else ""
+        if control:
+            width = float(cmds.control(control, query=True, width=True) or 1280.0)
+            height = float(cmds.control(control, query=True, height=True) or 720.0)
+            return max(width, 1.0), max(height, 1.0)
+    except Exception:
+        pass
+    return 1280.0, 720.0
+
+
+def _screen_to_layer_point(layer_node, screen_point):
+    width, height = _active_model_panel_size()
+    x = float(screen_point[0] if screen_point else width * 0.5)
+    y = float(screen_point[1] if screen_point else height * 0.5)
+    distance = 10.0
+    camera = ""
+    if layer_node and cmds.objExists(layer_node):
+        camera = _get_string_attr(layer_node, "animatorsPencilCamera", "")
+        try:
+            distance = abs(float(cmds.getAttr(layer_node + ".translateZ") or 10.0))
+        except Exception:
+            distance = 10.0
+    camera = camera or _current_camera()
+    camera_shape = _camera_shape(camera)
+    focal = 35.0
+    vertical_aperture = 0.945
+    if camera_shape:
+        try:
+            focal = float(cmds.getAttr(camera_shape + ".focalLength") or focal)
+        except Exception:
+            pass
+        try:
+            vertical_aperture = float(cmds.getAttr(camera_shape + ".verticalFilmAperture") or vertical_aperture)
+        except Exception:
+            pass
+    vertical_fov = 2.0 * math.atan((vertical_aperture * 25.4) / (2.0 * max(focal, 0.001)))
+    half_height = math.tan(vertical_fov * 0.5) * max(distance, 0.1)
+    half_width = half_height * (width / max(height, 1.0))
+    local_x = ((x / width) - 0.5) * 2.0 * half_width
+    local_y = (0.5 - (y / height)) * 2.0 * half_height
+    return (local_x, local_y, 0.0)
+
+
 def _run_mel(command):
     if not MAYA_AVAILABLE or not mel:
         return None
@@ -267,6 +331,16 @@ def _curve_node(name, points, parent, color, opacity, size, degree=1):
     curve = _long_name(curve)
     _set_display_color(curve, color, opacity=opacity, line_width=size)
     return curve
+
+
+def _delete_drag_context(name):
+    if not MAYA_AVAILABLE:
+        return
+    try:
+        if cmds.draggerContext(name, exists=True):
+            cmds.deleteUI(name)
+    except Exception:
+        pass
 
 
 def _make_tool_icon(tool_name, color=None):
@@ -343,6 +417,11 @@ class AnimatorsPencilController(object):
     def __init__(self):
         self.clipboard = []
         self.status_callback = None
+        self._drag_options = {}
+        self._drag_anchor = None
+        self._drag_points = []
+        self._marquee_options = {}
+        self._marquee_anchor = None
 
     def set_status_callback(self, callback):
         self.status_callback = callback
@@ -712,7 +791,51 @@ class AnimatorsPencilController(object):
             return points
         return [(-0.9, 0.0, 0.0), (-0.55, 0.18, 0.0), (-0.1, -0.1, 0.0), (0.35, 0.24, 0.0), (0.9, 0.0, 0.0)]
 
-    def create_mark(self, tool="Pencil", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note", camera_note=False, camera_snap=True):
+    def _tool_points_from_drag(self, tool, start_point, end_point):
+        sx, sy = float(start_point[0]), float(start_point[1])
+        ex, ey = float(end_point[0]), float(end_point[1])
+        if abs(ex - sx) < 0.05 and abs(ey - sy) < 0.05:
+            ex = sx + 0.35
+            ey = sy - 0.25
+        min_x, max_x = min(sx, ex), max(sx, ex)
+        min_y, max_y = min(sy, ey), max(sy, ey)
+        cx = (sx + ex) * 0.5
+        cy = (sy + ey) * 0.5
+        tool = tool or "Pencil"
+        if tool == "Line":
+            return [(sx, sy, 0.0), (ex, ey, 0.0)]
+        if tool == "Arrow":
+            dx, dy = ex - sx, ey - sy
+            length = max(math.sqrt((dx * dx) + (dy * dy)), 0.001)
+            ux, uy = dx / length, dy / length
+            px, py = -uy, ux
+            head = min(length * 0.28, 0.45)
+            left = (ex - (ux * head) + (px * head * 0.55), ey - (uy * head) + (py * head * 0.55), 0.0)
+            right = (ex - (ux * head) - (px * head * 0.55), ey - (uy * head) - (py * head * 0.55), 0.0)
+            return [(sx, sy, 0.0), (ex, ey, 0.0), left, (ex, ey, 0.0), right]
+        if tool == "Rectangle":
+            return [(min_x, min_y, 0.0), (max_x, min_y, 0.0), (max_x, max_y, 0.0), (min_x, max_y, 0.0), (min_x, min_y, 0.0)]
+        if tool == "Ellipse":
+            points = []
+            rx = max((max_x - min_x) * 0.5, 0.05)
+            ry = max((max_y - min_y) * 0.5, 0.05)
+            for i in range(49):
+                angle = (math.pi * 2.0) * (float(i) / 48.0)
+                points.append((cx + (math.cos(angle) * rx), cy + (math.sin(angle) * ry), 0.0))
+            return points
+        if tool == "Brush":
+            return [(sx, sy, 0.0), ((sx + cx) * 0.5, cy + 0.15, 0.0), (cx, cy - 0.12, 0.0), ((ex + cx) * 0.5, cy + 0.18, 0.0), (ex, ey, 0.0)]
+        return [(sx, sy, 0.0), ((sx + cx) * 0.5, cy + 0.1, 0.0), (cx, cy - 0.08, 0.0), ((ex + cx) * 0.5, cy + 0.12, 0.0), (ex, ey, 0.0)]
+
+    def _bounds_from_points(self, points):
+        xs = [float(point[0]) for point in points] or [0.0]
+        ys = [float(point[1]) for point in points] or [0.0]
+        return [min(xs), min(ys), max(xs), max(ys)]
+
+    def _point_distance(self, point_a, point_b):
+        return math.sqrt(((float(point_a[0]) - float(point_b[0])) ** 2.0) + ((float(point_a[1]) - float(point_b[1])) ** 2.0))
+
+    def create_mark(self, tool="Pencil", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note", camera_note=False, camera_snap=True, points=None):
         if not MAYA_AVAILABLE:
             return ""
         layer_node = layer_node or self.active_layer()
@@ -738,8 +861,14 @@ class AnimatorsPencilController(object):
                 mark = group
                 _set_display_color(mark, color, opacity=opacity, line_width=size)
             else:
-                mark = _curve_node("amirPencil{0}_MARK".format(tool), self._tool_points(tool), layer_node, color, opacity, size)
+                mark_points = points or self._tool_points(tool)
+                mark = _curve_node("amirPencil{0}_MARK".format(tool), mark_points, layer_node, color, opacity, size)
             self._mark_node(mark, layer_node, tool, color, opacity, size)
+            if points:
+                data = _get_json_attr(mark, "animatorsPencilMarkData", {}) or {}
+                data["dragBounds"] = self._bounds_from_points(points)
+                data["dragDrawn"] = True
+                _set_json_attr(mark, "animatorsPencilMarkData", data)
             if notes_camera:
                 _set_string_attr(mark, "animatorsPencilCameraNotesCamera", notes_camera)
             cmds.select(mark, replace=True)
@@ -747,6 +876,171 @@ class AnimatorsPencilController(object):
             return mark
         finally:
             _close_undo_chunk()
+
+    def create_mark_from_drag(self, tool="Rectangle", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note", camera_note=False, camera_snap=True, start_point=(-0.5, 0.35, 0.0), end_point=(0.5, -0.35, 0.0)):
+        points = self._tool_points_from_drag(tool, start_point, end_point)
+        mark = self.create_mark(tool, layer_node, color, size, opacity, text, camera_note, camera_snap, points=points)
+        if mark and cmds.objExists(mark):
+            data = _get_json_attr(mark, "animatorsPencilMarkData", {}) or {}
+            data["dragStart"] = [float(start_point[0]), float(start_point[1])]
+            data["dragEnd"] = [float(end_point[0]), float(end_point[1])]
+            data["dragBounds"] = self._bounds_from_points(points)
+            _set_json_attr(mark, "animatorsPencilMarkData", data)
+        return mark
+
+    def create_freehand_mark(self, tool="Pencil", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note", camera_note=False, camera_snap=True, points=None):
+        clean_points = [(float(point[0]), float(point[1]), 0.0) for point in (points or [])]
+        if len(clean_points) < 2:
+            return self.create_mark_from_drag(tool, layer_node, color, size, opacity, text, camera_note, camera_snap)
+        mark = self.create_mark(tool, layer_node, color, size, opacity, text, camera_note, camera_snap, points=clean_points)
+        if mark and cmds.objExists(mark):
+            data = _get_json_attr(mark, "animatorsPencilMarkData", {}) or {}
+            data["freehandDrawn"] = True
+            data["freehandPointCount"] = len(clean_points)
+            data["dragStart"] = [clean_points[0][0], clean_points[0][1]]
+            data["dragEnd"] = [clean_points[-1][0], clean_points[-1][1]]
+            data["dragBounds"] = self._bounds_from_points(clean_points)
+            _set_json_attr(mark, "animatorsPencilMarkData", data)
+        return mark
+
+    def select_marks_in_box(self, layer_node=None, start_point=(-1.0, -1.0, 0.0), end_point=(1.0, 1.0, 0.0), add=False):
+        if not MAYA_AVAILABLE:
+            return []
+        layer_node = layer_node or self.active_layer()
+        min_x, max_x = min(float(start_point[0]), float(end_point[0])), max(float(start_point[0]), float(end_point[0]))
+        min_y, max_y = min(float(start_point[1]), float(end_point[1])), max(float(start_point[1]), float(end_point[1]))
+        picked = []
+        for mark in self.marks(layer_node):
+            data = _get_json_attr(mark, "animatorsPencilMarkData", {}) or {}
+            bounds = data.get("dragBounds")
+            if not bounds:
+                try:
+                    bounds = list(cmds.xform(mark, query=True, boundingBox=True, objectSpace=True) or [])
+                    if len(bounds) >= 6:
+                        bounds = [bounds[0], bounds[1], bounds[3], bounds[4]]
+                except Exception:
+                    bounds = None
+            if not bounds or len(bounds) < 4:
+                continue
+            bx1, by1, bx2, by2 = float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])
+            if bx2 < min_x or bx1 > max_x or by2 < min_y or by1 > max_y:
+                continue
+            picked.append(mark)
+        if picked:
+            if add:
+                cmds.select(picked, add=True)
+            else:
+                cmds.select(picked, replace=True)
+        else:
+            cmds.select(clear=True)
+        self._status("Marquee selected {0} pencil mark(s).".format(len(picked)))
+        return picked
+
+    def activate_drag_draw_context(self, tool="Rectangle", layer_node=None, color=(1.0, 0.05, 0.05), size=2.0, opacity=1.0, text="Note", camera_note=False, camera_snap=True):
+        if not MAYA_AVAILABLE:
+            return False
+        global GLOBAL_DRAG_CONTEXT_CONTROLLER
+        GLOBAL_DRAG_CONTEXT_CONTROLLER = self
+        self._drag_options = {
+            "tool": tool,
+            "layer_node": layer_node or self.active_layer(),
+            "color": color,
+            "size": size,
+            "opacity": opacity,
+            "text": text,
+            "camera_note": camera_note,
+            "camera_snap": camera_snap,
+        }
+        self._drag_anchor = None
+        self._drag_points = []
+        _delete_drag_context(DRAW_CONTEXT_NAME)
+        cmds.draggerContext(
+            DRAW_CONTEXT_NAME,
+            pressCommand=_animators_pencil_draw_press,
+            dragCommand=_animators_pencil_draw_drag,
+            releaseCommand=_animators_pencil_draw_release,
+            cursor="crossHair",
+            undoMode="step",
+        )
+        cmds.setToolTo(DRAW_CONTEXT_NAME)
+        self._status("Drag in viewport to draw {0}.".format(tool))
+        return True
+
+    def activate_marquee_select_context(self, layer_node=None, add=False):
+        if not MAYA_AVAILABLE:
+            return False
+        global GLOBAL_DRAG_CONTEXT_CONTROLLER
+        GLOBAL_DRAG_CONTEXT_CONTROLLER = self
+        self._marquee_options = {"layer_node": layer_node or self.active_layer(), "add": bool(add)}
+        self._marquee_anchor = None
+        _delete_drag_context(MARQUEE_CONTEXT_NAME)
+        cmds.draggerContext(
+            MARQUEE_CONTEXT_NAME,
+            pressCommand=_animators_pencil_marquee_press,
+            releaseCommand=_animators_pencil_marquee_release,
+            cursor="crossHair",
+            undoMode="step",
+        )
+        cmds.setToolTo(MARQUEE_CONTEXT_NAME)
+        self._status("Drag a box over pencil marks to select them.")
+        return True
+
+    def _draw_context_press(self):
+        try:
+            self._drag_anchor = cmds.draggerContext(DRAW_CONTEXT_NAME, query=True, anchorPoint=True)
+        except Exception:
+            self._drag_anchor = None
+        options = dict(self._drag_options)
+        layer = options.get("layer_node") or self.active_layer()
+        self._drag_points = [_screen_to_layer_point(layer, self._drag_anchor or (640, 360, 0))]
+
+    def _draw_context_drag(self):
+        options = dict(self._drag_options)
+        if options.get("tool") not in ("Pencil", "Brush"):
+            return
+        layer = options.get("layer_node") or self.active_layer()
+        try:
+            drag_point = cmds.draggerContext(DRAW_CONTEXT_NAME, query=True, dragPoint=True)
+        except Exception:
+            drag_point = None
+        point = _screen_to_layer_point(layer, drag_point or self._drag_anchor or (640, 360, 0))
+        if not self._drag_points or self._point_distance(point, self._drag_points[-1]) >= 0.025:
+            self._drag_points.append(point)
+
+    def _draw_context_release(self):
+        try:
+            drag_point = cmds.draggerContext(DRAW_CONTEXT_NAME, query=True, dragPoint=True)
+        except Exception:
+            drag_point = None
+        options = dict(self._drag_options)
+        layer = options.get("layer_node") or self.active_layer()
+        start_point = _screen_to_layer_point(layer, self._drag_anchor or drag_point or (640, 360, 0))
+        end_point = _screen_to_layer_point(layer, drag_point or self._drag_anchor or (720, 420, 0))
+        if options.get("tool") in ("Pencil", "Brush"):
+            if drag_point:
+                release_point = _screen_to_layer_point(layer, drag_point)
+                if not self._drag_points or self._point_distance(release_point, self._drag_points[-1]) >= 0.001:
+                    self._drag_points.append(release_point)
+            self.create_freehand_mark(points=self._drag_points, **options)
+        else:
+            self.create_mark_from_drag(start_point=start_point, end_point=end_point, **options)
+
+    def _marquee_context_press(self):
+        try:
+            self._marquee_anchor = cmds.draggerContext(MARQUEE_CONTEXT_NAME, query=True, anchorPoint=True)
+        except Exception:
+            self._marquee_anchor = None
+
+    def _marquee_context_release(self):
+        try:
+            drag_point = cmds.draggerContext(MARQUEE_CONTEXT_NAME, query=True, dragPoint=True)
+        except Exception:
+            drag_point = None
+        options = dict(self._marquee_options)
+        layer = options.get("layer_node") or self.active_layer()
+        start_point = _screen_to_layer_point(layer, self._marquee_anchor or drag_point or (0, 0, 0))
+        end_point = _screen_to_layer_point(layer, drag_point or self._marquee_anchor or (1280, 720, 0))
+        self.select_marks_in_box(layer, start_point, end_point, add=options.get("add", False))
 
     def delete_selected_marks(self):
         marks = self.selected_marks()
@@ -899,6 +1193,31 @@ class AnimatorsPencilController(object):
             cmds.redo()
 
 
+def _animators_pencil_draw_press():
+    if GLOBAL_DRAG_CONTEXT_CONTROLLER:
+        GLOBAL_DRAG_CONTEXT_CONTROLLER._draw_context_press()
+
+
+def _animators_pencil_draw_drag():
+    if GLOBAL_DRAG_CONTEXT_CONTROLLER:
+        GLOBAL_DRAG_CONTEXT_CONTROLLER._draw_context_drag()
+
+
+def _animators_pencil_draw_release():
+    if GLOBAL_DRAG_CONTEXT_CONTROLLER:
+        GLOBAL_DRAG_CONTEXT_CONTROLLER._draw_context_release()
+
+
+def _animators_pencil_marquee_press():
+    if GLOBAL_DRAG_CONTEXT_CONTROLLER:
+        GLOBAL_DRAG_CONTEXT_CONTROLLER._marquee_context_press()
+
+
+def _animators_pencil_marquee_release():
+    if GLOBAL_DRAG_CONTEXT_CONTROLLER:
+        GLOBAL_DRAG_CONTEXT_CONTROLLER._marquee_context_release()
+
+
 class AnimatorsPencilPanel(QtWidgets.QWidget):
     def __init__(self, controller=None, parent=None):
         super(AnimatorsPencilPanel, self).__init__(parent)
@@ -913,8 +1232,8 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
 
         intro = QtWidgets.QLabel(
-            "Draws real Maya curves/text in front of chosen camera, so marks stay visible even without this tool installed. "
-            "Use Maya viewport 2D Pan/Zoom, tablet input, Move/Rotate/Scale tools, plus this panel for layers, keys, ghosts, retime."
+            "Simple flow: pick a layer, pick a tool, then click Drag Draw In Viewport. "
+            "Use Marquee Select Marks to drag a box over pencil marks, then move, copy, erase, retime, or key them."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -1004,9 +1323,17 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.opacity_spin.setSingleStep(0.05)
         self.opacity_spin.setValue(1.0)
         self.text_field = QtWidgets.QLineEdit("Note")
-        self.draw_button = QtWidgets.QPushButton("Create Mark")
+        self.draw_button = QtWidgets.QPushButton("Stamp Mark")
         self.draw_button.setObjectName("animatorsPencilCreateMarkButton")
         self.draw_button.setIcon(_make_tool_icon("Pencil"))
+        self.drag_draw_button = QtWidgets.QPushButton("Drag Draw In Viewport")
+        self.drag_draw_button.setObjectName("animatorsPencilDragDrawButton")
+        self.drag_draw_button.setIcon(_make_tool_icon("Rectangle", QtGui.QColor("#7BD88F")))
+        self.drag_draw_button.setToolTip("Pick a tool, click this, then drag in the Maya viewport. Pencil and Brush follow your stroke. Shapes use drag size.")
+        self.marquee_select_button = QtWidgets.QPushButton("Marquee Select Marks")
+        self.marquee_select_button.setObjectName("animatorsPencilMarqueeSelectButton")
+        self.marquee_select_button.setIcon(_make_tool_icon("Rectangle", QtGui.QColor("#72B7F2")))
+        self.marquee_select_button.setToolTip("Click this, then drag a box in the viewport to select pencil marks.")
         self.camera_notes_button = QtWidgets.QToolButton()
         self.camera_notes_button.setObjectName("animatorsPencilCameraNotesMenuButton")
         self.camera_notes_button.setText("Camera Notes")
@@ -1043,6 +1370,8 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         tool_layout.addWidget(self.camera_notes_button, 4, 0, 1, 2)
         tool_layout.addWidget(self.camera_note_box, 4, 2)
         tool_layout.addWidget(self.camera_snap_box, 4, 3)
+        tool_layout.addWidget(self.drag_draw_button, 5, 0, 1, 2)
+        tool_layout.addWidget(self.marquee_select_button, 5, 2, 1, 2)
         layout.addWidget(toolbox)
 
         edit_buttons = QtWidgets.QHBoxLayout()
@@ -1106,6 +1435,8 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.layer_down_button.clicked.connect(lambda: self._move_layer(1))
         self.move_camera_button.clicked.connect(self._move_layer_to_camera)
         self.draw_button.clicked.connect(self._create_mark)
+        self.drag_draw_button.clicked.connect(self._activate_drag_draw)
+        self.marquee_select_button.clicked.connect(self._activate_marquee_select)
         self.tool_combo.currentTextChanged.connect(self._tool_changed)
         self.undo_button.clicked.connect(self.controller.undo)
         self.redo_button.clicked.connect(self.controller.redo)
@@ -1149,7 +1480,12 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         icon = _make_tool_icon(tool_name)
         self.draw_button.setIcon(icon)
         self.tool_popup_button.setIcon(icon)
-        self.draw_button.setToolTip("Create a {0} mark on the active pencil layer.".format(tool_name))
+        self.drag_draw_button.setIcon(icon)
+        self.draw_button.setToolTip("Stamp a default {0} mark on the active pencil layer.".format(tool_name))
+        if tool_name in ("Pencil", "Brush"):
+            self.drag_draw_button.setToolTip("Drag in the viewport to draw a freehand {0} stroke.".format(tool_name))
+        else:
+            self.drag_draw_button.setToolTip("Drag in the viewport to draw a {0} mark at the size you want.".format(tool_name))
 
     def _create_camera_notes_camera(self):
         camera = self.controller.camera_notes_camera(create=True)
@@ -1254,6 +1590,21 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         )
         self._after_action(mark)
 
+    def _activate_drag_draw(self):
+        self.controller.activate_drag_draw_context(
+            tool=self.tool_combo.currentText(),
+            layer_node=self.current_layer,
+            color=self._current_color(),
+            size=self.size_spin.value(),
+            opacity=self.opacity_spin.value(),
+            text=self.text_field.text(),
+            camera_note=self.camera_note_box.isChecked(),
+            camera_snap=self.camera_snap_box.isChecked(),
+        )
+
+    def _activate_marquee_select(self):
+        self.controller.activate_marquee_select_context(layer_node=self.current_layer, add=False)
+
     def _show_layer_menu(self, position):
         menu = QtWidgets.QMenu(self)
         menu.addAction("Set Active Layer", self._layer_selection_changed)
@@ -1316,6 +1667,33 @@ def run_smoke_scene():
     cmds.currentTime(12)
     cmds.xform(smoke_camera, worldSpace=True, translation=(4.0, 5.0, 13.0), rotation=(-8.0, 25.0, 0.0))
     rect = controller.create_mark("Rectangle", layer, DEFAULT_COLORS["Yellow"], 3.0, 1.0, camera_note=True, camera_snap=True)
+    dragged_rect = controller.create_mark_from_drag(
+        "Rectangle",
+        layer,
+        DEFAULT_COLORS["Green"],
+        3.0,
+        1.0,
+        start_point=(-1.2, 0.8, 0.0),
+        end_point=(-0.2, -0.15, 0.0),
+    )
+    dragged_ellipse = controller.create_mark_from_drag(
+        "Ellipse",
+        layer,
+        DEFAULT_COLORS["Blue"],
+        3.0,
+        0.8,
+        start_point=(0.25, 0.65, 0.0),
+        end_point=(1.1, -0.25, 0.0),
+    )
+    freehand = controller.create_freehand_mark(
+        "Pencil",
+        layer,
+        DEFAULT_COLORS["Red"],
+        2.0,
+        1.0,
+        points=[(-1.1, -0.55, 0.0), (-0.75, -0.25, 0.0), (-0.35, -0.5, 0.0), (0.15, -0.2, 0.0), (0.55, -0.45, 0.0)],
+    )
+    marquee_selected = controller.select_marks_in_box(layer, (-1.35, -0.3, 0.0), (-0.05, 0.95, 0.0))
     text = controller.create_mark("Text", layer, DEFAULT_COLORS["White"], 2.0, 1.0, text="Animators Pencil")
     controller.add_key()
     dupes = controller.duplicate_previous_key(layer)
@@ -1327,6 +1705,12 @@ def run_smoke_scene():
         "layer": layer,
         "line": line,
         "rect": rect,
+        "dragged_rect": dragged_rect,
+        "dragged_ellipse": dragged_ellipse,
+        "freehand": freehand,
+        "freehand_point_count": _get_json_attr(freehand, "animatorsPencilMarkData", {}).get("freehandPointCount") if freehand and cmds.objExists(freehand) else 0,
+        "marquee_select_count": len(marquee_selected),
+        "drag_shape_bounds": _get_json_attr(dragged_rect, "animatorsPencilMarkData", {}).get("dragBounds") if dragged_rect and cmds.objExists(dragged_rect) else [],
         "text": text,
         "dupe_count": len(dupes),
         "ghost_exists": cmds.objExists(ghosts),

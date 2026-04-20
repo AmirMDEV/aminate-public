@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+## Version 0.3 BETA - 2026-04-20
+
+- Fixed Scene Helpers Teacher Demo rig duplication so duplicated constraints and skinClusters are copied with the rig, skinned mesh transforms avoid double-offset inheritance, and duplicated controls drive the duplicated skeleton and mesh with matching animation.
+- Fixed Scene Helpers text note placement so new notes and moved notes spawn directly on the selected control pivot, text curves stay locally attached to the note, and the live pointer spline starts at the note instead of a distant world-space text root.
+- Hardened Aminate launch and startup so shelf, drag-and-drop installer, and Maya startup always purge stale Aminate modules, put the installed `Aminate` runtime first, and open one latest docked window only.
+- Changed Scene Helpers text notes so default size is `15`, the size spin box resizes the selected note live, exact numeric size entry is supported, and pointer lines use constrained curve endpoints that keep following animated anchor controls.
+- Added Scene Helpers text note sizing with a larger default note size, stored per-note size metadata, and an `Apply Style` control that updates both color and size for selected notes.
+- Fixed Scene Helpers text notes so all generated text-curve shapes are parented under the note, forced visible for viewport use, and organized under one shared `aminateSceneTextNotes_GRP` outliner group.
+- Fixed Scene Helpers teacher demo duplication so duplicate rigs preserve control override colors, hidden skeleton/display-layer visibility, and mesh material assignments more faithfully while removing copied nodes from original display layers to avoid stray bone/helper clutter.
+- Added Scene Helpers `Delete Teacher Demo` cleanup so all Aminate teacher-demo duplicate groups and helper display layers can be removed from the UI.
+- Hardened Aminate relaunch cleanup so opening the docked tool repeatedly leaves one latest visible Aminate window instead of stale duplicate widgets.
+- Added Scene Helpers text notes for student feedback: create scene-native text curve notes, list existing notes, key visibility on/off, recolor notes, move them beside selected controls, draw a pointer line to the selected body part, and delete notes from the UI.
+- Renamed the user-facing `Student Core` tab, panel title, and help copy to `Toolkit Bar` so the UI uses the same name as the docked timeline bar.
+- Added a Scene Helpers `Duplicate Rig For Teacher Demo` button that duplicates the selected rig root into an isolated renamed copy, preserves keyed control and joint animation, moves the copy with a clean offset group, and puts it in its own display layer for student demonstration edits.
+- Added a real Auto History on/off toggle in the Toolkit Bar and History Timeline tab. Auto History now defaults off for performance, stops the background watcher completely when disabled, and still allows manual Save Step and Save Milestone snapshots.
+- Fixed History Timeline camera navigation hiccups so viewport/default camera moves are ignored by auto snapshots, undo names are normalized, common tumble/dolly/track/view actions are skipped before expensive scene scans, and keyed camera animation is still captured through animation curves.
+- Hardened History Timeline for large snapshot counts so UI refreshes cap visible rows, toolbar markers stay bounded, storage totals use manifest data instead of statting every snapshot file, queued UI refreshes are coalesced, stale timer objects are deleted, and risky one-shot snapshot helpers reuse a controller.
+- Added stronger Aminate performance guards so History Timeline keeps only one auto-snapshot timer, uses a slower idle polling interval, and Surface Contact only installs live callbacks when enabled contact records exist.
+- Added Aminate scriptJob cleanup for repeated live reloads so duplicate History Timeline scene-change jobs, Auto Snap idle jobs, and Surface Contact idle jobs do not stack up and slow Maya down.
+- Fixed History Timeline restore cleanup so it refreshes Maya Outliner panels without switching them into dependency-node mode, preventing rig utility nodes and animation curves from cluttering the Outliner.
+- Fixed History Timeline scene switching so opening or saving a different Maya file refreshes the History UI and shows only that file's own sidecar snapshots.
+- Changed the History Timeline `History active` status pill to use square rectangular corners in the Toolkit Bar.
+- Changed the History Timeline `H+` activation button to use square rectangular corners in the Toolkit Bar.
+- Improved History Timeline editing so toolbar squares and snapshot rows stay synced, selected snapshots can be renamed, recolored through a color picker, and marked or unmarked as milestones after creation.
+- Added a compact History Timeline status pill to the Toolkit Bar so unsaved scenes clearly show `Save scene required`, and snapshot save/restore now force Maya file prompts off before full-scene snapshot file operations to reduce save/load dialog flashes.
+- Tightened History Timeline auto snapshot triggers so object creation, keyframe creation/deletion, constraint creation, constraint keying, Auto Key output, and any `animCurve*` attribute are captured while timeline scrubbing stays ignored, with clearer save-the-scene-first messaging.
+- Fixed History Timeline storage so snapshots always resolve to the history folder beside the real Maya scene file, even when a snapshot scene is opened directly, and fallback snapshot saving no longer overwrites the original scene file.
+- Changed History Timeline auto snapshots so labels are brief action summaries, notes describe affected objects and changed nodes, marker/table tooltips show the full label and note, and snapshot table columns can be resized.
+- Fixed History Timeline restore settling so selecting an animated object after jumping back to a snapshot does not create a new branch or auto snapshot while Maya finishes refreshing keyframe data.
+- Fixed Aminate dock focus so pressing `S` in the tool panel no longer switches picker/tab UI instead of setting a Maya keyframe.
+- Changed History Timeline auto snapshotting so rapid key deletes, transform drags, and auto-key edits are batched into one snapshot after a quiet window, and no snapshot is made when the scene summary did not materially change.
+- Restyled the combined Aminate window with a shared History Timeline-inspired dark theme for tab pages, tab headers, intro cards, forms, tables, status, and scrollbars.
+- Fixed History Timeline auto snapshots so snapshot file/meta writes are globally ignored for a short baseline reset window, preventing one scrub or snapshot action from chaining into multiple snapshots.
+- Changed the Toolkit Bar animation-layer color action so it auto-assigns the next palette color in the background instead of opening a color picker dialog.
+- Fixed History Timeline auto snapshot detection so timeline scrubbing updates the baseline without creating new snapshots.
+- Fixed History Timeline branch restores so future snapshots stay visible, branches only fork when editing an older snapshot inside the same branch, and automatic snapshots avoid interrupting Maya input with save/status prompts.
+- Fixed History Timeline sync so manual Save Step creates one snapshot, the Toolkit Bar history squares refresh with the full tab, and Delete All clears every square.
+- Added History Timeline transform and material custom auto-save triggers, branch renaming, branched-from display, and total history folder size display.
+- Added custom History Timeline auto-save rules, with the default full snapshot mode still on and optional tick boxes for keyframes, constraints, nodes, animation layers, parenting, and references.
+- Added visible History Timeline branching so working from an older snapshot creates a new colored branch, and the UI can filter or switch between branches.
+- Fixed History Timeline restore so jumping to a snapshot no longer creates a new snapshot or reshuffles the visible history, and added Delete All plus a per-scene snapshot cap.
+- Changed the Toolkit Bar History Timeline strip so it sits above the animation-layer bar, stays tiny, and starts default after-action snapshot capture.
+- Added `History Timeline` with full-scene sidecar snapshots, a hidden scene metadata node, restore-safe milestone rows, changed-node metadata, and a compact Toolkit Bar history strip.
+- Changed the Toolkit Bar to use a compact side drag-grip icon instead of a visible named title strip.
+- Added a one-click Toolkit Bar `Zip` folder button that saves the current scene, packages references plus external files, creates a zip, and opens the package folder.
+- Changed the Toolkit Bar animation-layer menu to use Maya's real `BaseAnimation` layer with a friendly `Base Animation` label instead of a fake duplicate base row.
+- Made Reference Manager packaging safer by copying the saved scene into the package instead of renaming, saving, and reopening the live Maya scene during zip creation.
+- Made Reference Manager packaging copy-only by default so the open Maya scene and saved scene file are not changed unless the user explicitly ticks `Save current scene first`.
+- Expanded the Toolkit Bar animation-layer strip so it spans the bar and can create, delete, switch, rename, color, mute, solo, lock, weight, add selected controls, and remove selected controls from animation layers.
+- Improved Reference Manager dependency labels so missing file rows show clearer types such as `Material Texture`, `Image Plane`, `Audio`, `Alembic Cache`, and `GPU Cache`.
+- Updated Reference Manager packaging so packaged scenes keep the original `.ma` or `.mb` file type, avoiding Maya's unknown-data file-format-change error.
+- Added Reference Manager unknown-data scan and cleanup buttons for unknown nodes and unknown plugin records.
+- Replaced Aminate shelf icon and Game Animation Mode icon with a blue emergency-sign-style stick figure without a door or exit arrow.
+- Added drag-to-draw shape marks and a dedicated Marquee Select Marks mode to Animators Pencil for a simpler viewport-first drawing flow.
+- Added freehand drag sampling so Animators Pencil Pencil and Brush strokes follow the viewport drag path.
+- Hardened Scene Helpers render-environment cleanup so stale numbered helper roots do not break camera preset data after repeated setup runs.
 - Added Toolkit Bar animation-layer controls so the colored layer bar can switch layers, rename the current layer, and pick the current layer color.
 - Renamed the docked Student Core timeline bar to `Toolkit Bar` and added a far-right blue Game Animation Mode toggle with a custom game icon and active highlight.
 - Renamed the user-facing tool to `Aminate`, including the main window, shelf button, installer message, and student package label.

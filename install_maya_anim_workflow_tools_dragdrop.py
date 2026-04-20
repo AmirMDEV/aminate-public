@@ -19,6 +19,7 @@ RUNTIME_FILES = [
     "maya_dynamic_parenting_tool.py",
     "maya_control_picker.py",
     "maya_face_retarget.py",
+    "maya_history_timeline.py",
     "maya_reference_manager.py",
     "maya_onion_skin.py",
     "maya_surface_contact.py",
@@ -39,11 +40,51 @@ def _managed_user_setup_block(destination_root):
         [
             "try:",
             "    import sys",
+            "    import importlib",
+            "    import maya.cmds as _amir_maya_cmds",
             "    import maya.utils as _amir_maya_utils",
             "    _amir_workflow_root = r\"{0}\"".format(destination_root),
-            "    if _amir_workflow_root not in sys.path:",
-            "        sys.path.insert(0, _amir_workflow_root)",
+            "    def _amir_workflow_force_latest_runtime():",
+            "        try:",
+            "            while _amir_workflow_root in sys.path:",
+            "                sys.path.remove(_amir_workflow_root)",
+            "            sys.path.insert(0, _amir_workflow_root)",
+            "            for _amir_module_name in list(sys.modules):",
+            "                if _amir_module_name == 'maya_anim_workflow_tools' or _amir_module_name.startswith('maya_'):",
+            "                    sys.modules.pop(_amir_module_name, None)",
+            "            importlib.invalidate_caches()",
+            "        except Exception:",
+            "            pass",
+            "    _amir_workflow_force_latest_runtime()",
+            "    def _amir_workflow_schedule(function, delay_ms=1000):",
+            "        try:",
+            "            from PySide6 import QtCore as _amir_qt_core",
+            "        except Exception:",
+            "            try:",
+            "                from PySide2 import QtCore as _amir_qt_core",
+            "            except Exception:",
+            "                _amir_qt_core = None",
+            "        if _amir_qt_core:",
+            "            _amir_qt_core.QTimer.singleShot(int(delay_ms), function)",
+            "        else:",
+            "            _amir_maya_utils.executeDeferred(function)",
+            "    def _amir_workflow_main_window_ready():",
+            "        try:",
+            "            import maya.OpenMayaUI as _amir_omui",
+            "            if _amir_omui.MQtUtil.mainWindow() is None:",
+            "                return False",
+            "        except Exception:",
+            "            return False",
+            "        try:",
+            "            return bool(_amir_maya_cmds.window('MayaWindow', exists=True))",
+            "        except Exception:",
+            "            return False",
             "    def _amir_workflow_bootstrap_startup():",
+            "        if getattr(sys, '_aminate_startup_bootstrapped_root', '') == _amir_workflow_root:",
+            "            return",
+            "        sys._aminate_startup_bootstrapped = True",
+            "        sys._aminate_startup_bootstrapped_root = _amir_workflow_root",
+            "        _amir_workflow_force_latest_runtime()",
             "        try:",
             "            import maya_crash_recovery as _amir_maya_crash_recovery",
             "            _amir_maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=True)",
@@ -54,7 +95,13 @@ def _managed_user_setup_block(destination_root):
             "            _amir_maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab='quick_start')",
             "        except Exception:",
             "            pass",
-            "    _amir_maya_utils.executeDeferred(_amir_workflow_bootstrap_startup)",
+            "    def _amir_workflow_wait_for_startup(attempt=0):",
+            "        if int(attempt) >= 8 and _amir_workflow_main_window_ready():",
+            "            _amir_workflow_bootstrap_startup()",
+            "            return",
+            "        if int(attempt) < 120:",
+            "            _amir_workflow_schedule(lambda: _amir_workflow_wait_for_startup(int(attempt) + 1), 1000)",
+            "    _amir_maya_utils.executeDeferred(lambda: _amir_workflow_wait_for_startup(0))",
             "except Exception:",
             "    pass",
         ]
@@ -147,13 +194,15 @@ def install_maya_anim_workflow_tools_from_dragdrop():
     destination_root = _install_root(cmds)
     _copy_runtime_files(source_root, destination_root, runtime_files)
 
-    if destination_root not in sys.path:
-        sys.path.insert(0, destination_root)
+    while destination_root in sys.path:
+        sys.path.remove(destination_root)
+    sys.path.insert(0, destination_root)
 
     import importlib
     for module_name in list(sys.modules):
-        if module_name.startswith("maya_"):
+        if module_name == "maya_anim_workflow_tools" or module_name.startswith("maya_"):
             sys.modules.pop(module_name, None)
+    importlib.invalidate_caches()
     import maya_anim_workflow_tools
 
     importlib.reload(maya_anim_workflow_tools)
