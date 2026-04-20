@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Changed Game Animation Mode buttons so the on state turns fully blue and gets a soft blue glow in both the Toolkit Bar and Scene Helpers, including synced state updates.
 - Added a proprietary source-available license for Aminate that allows unmodified private, educational, internal, commercial, and redistributed use with attribution, while prohibiting modification, derivative works, rebranding, forks, and claims of ownership.
 
 ## Version 0.3 BETA - 2026-04-20

@@ -2243,14 +2243,39 @@ def _style_toolkit_game_mode_button(button):
         }
         QToolButton:checked {
             background-color: #176BFF;
+            color: #FFFFFF;
             border-color: #8EC5FF;
             border-bottom: 2px solid #BFE3FF;
         }
         QToolButton:pressed {
             background-color: #0F55D8;
+            color: #FFFFFF;
         }
         """
     )
+    if not bool(button.property("_aminateGameModeGlowBound")):
+        button.toggled.connect(lambda checked, target=button: _set_game_mode_button_glow(target, checked))
+        button.setProperty("_aminateGameModeGlowBound", True)
+    _set_game_mode_button_glow(button, button.isChecked())
+
+
+def _set_game_mode_button_glow(button, enabled):
+    if not button or not QtWidgets or not QtGui:
+        return
+    if not enabled:
+        try:
+            button.setGraphicsEffect(None)
+        except Exception:
+            pass
+        return
+    try:
+        glow = QtWidgets.QGraphicsDropShadowEffect(button)
+        glow.setBlurRadius(24)
+        glow.setOffset(0, 0)
+        glow.setColor(QtGui.QColor("#48B8FF"))
+        button.setGraphicsEffect(glow)
+    except Exception:
+        pass
 
 
 def _open_workflow_tab(tab_alias):
@@ -4656,6 +4681,7 @@ if QtWidgets:
             self.game_mode_button.blockSignals(True)
             self.game_mode_button.setChecked(bool(enabled))
             self.game_mode_button.blockSignals(False)
+            _set_game_mode_button_glow(self.game_mode_button, bool(enabled))
 
         def _toggle_game_animation_mode(self, enabled):
             success, message = self.controller.set_game_animation_mode_enabled(enabled)
@@ -4683,8 +4709,10 @@ if QtWidgets:
                 if window is not None and hasattr(window, "game_mode_button"):
                     try:
                         window.game_mode_button.blockSignals(True)
-                        window.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+                        enabled = bool(getattr(self.controller, "game_animation_mode_enabled", False))
+                        window.game_mode_button.setChecked(enabled)
                         window.game_mode_button.blockSignals(False)
+                        _set_game_mode_button_glow(window.game_mode_button, enabled)
                     except Exception:
                         pass
 
@@ -5038,8 +5066,10 @@ if QtWidgets:
             self.auto_snap_button.setChecked(bool(self.controller.auto_snap_enabled))
             self.auto_snap_button.blockSignals(False)
             self.game_mode_button.blockSignals(True)
-            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+            enabled = bool(getattr(self.controller, "game_animation_mode_enabled", False))
+            self.game_mode_button.setChecked(enabled)
             self.game_mode_button.blockSignals(False)
+            _set_game_mode_button_glow(self.game_mode_button, enabled)
             self.animation_layer_tint_button.blockSignals(True)
             self.animation_layer_tint_button.setChecked(bool(getattr(self.controller, "animation_layer_tint_enabled", True)))
             self.animation_layer_tint_button.blockSignals(False)
