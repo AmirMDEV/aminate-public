@@ -2,8 +2,56 @@
 
 ## Unreleased
 
+## Version 0.3.1 - 2026-04-24
+
+- Added a `Character Freeze` tab for skinned character meshes such as RapidRig output, creating a checked frozen copy with translate and rotate reset to `0,0,0` and scale reset to `1,1,1` while preserving skin influences, vertex weights, materials, UVs, hard or soft edges, and normals before optional replacement.
+- Fixed Character Freeze analysis for RapidRig-style meshes such as `low` when Maya has no hidden original mesh shape, downgrading that case from a red blocker to a yellow visible-mesh fallback path.
+- Added an `Animation Assistant` tab with a pose-balance tool that lets you pick a floor plane, center of gravity control, and contact points, then shows balanced or unbalanced viewport badges plus support line or polygon drawing in the scene.
+- Tightened the pose-balance viewport badge so it overlays the live viewport instead of reserving panel space, and switched balance refresh to a faster coalesced transform-watch path.
+- Fixed pose-balance badge duplication by purging stale viewport badge widgets and comparing stable Qt object identities instead of transient Python wrapper identities.
+- Added explicit left and right tab navigation buttons on the Aminate tab bar so users can move across tabs without relying on a mouse wheel.
+- Added `Aminate Mobu`, a MotionBuilder sibling tool with a live tool window, Scene Cleaner buttons, best-namespace skeleton auto-mapping, characterization through fingers and extra spine links, and popup warnings for unlocked definitions plus wrong control-rig keying mode.
+- Added MotionBuilder live smoke coverage for Aminate Mobu that loads the Mia tutorial scene, creates disposable cameras and markers, proves Scene Cleaner behavior, proves Mia characterization and control-rig creation, and records warning-path evidence.
+- Added a MotionBuilder student-package builder and launcher for Aminate Mobu so the runtime can be zipped and run from MotionBuilder Python tools outside the repo.
+- Added `aminate_mobu_history.py`, a MotionBuilder full-scene History Timeline companion with sidecar snapshot files, restore-to-original-scene flow, branching after historical restores, milestones, cap cleanup, and Auto History based on MotionBuilder scene digests.
+- Added `aminate_mobu_history_live_smoke.py` and a writable Mia history test lane that prove save, restore, branch creation, and Auto History in live MotionBuilder without mouse or keyboard input.
+- Extended the Aminate Mobu student package so the MotionBuilder History Timeline runtime ships in the zip and is reachable from the main Aminate Mobu tool window.
+- Changed Aminate Mobu to open through a Maya-styled PySide shell when PySide is available in MotionBuilder, reusing the same dark Aminate chrome, intro-card treatment, footer branding, and Donate button language as the Maya tool.
+- Tightened MotionBuilder History Timeline styling to better match the Maya source UI by giving the strip fixed-size parity, moving title and intro chrome into shared stylesheet selectors, and switching status feedback onto declarative Aminate state styles.
+- Changed Scene Cleaner so default-named markers with transform animation are preserved as prop markers, renamed with a user-chosen base such as `Gun_1`, and only non-animated junk default markers are deleted.
+- Changed Aminate Mobu main Qt launch so repeated imports or launches reuse one `aminateMobuWindow` and close duplicate copies instead of stacking extra panels.
+- Added a theme toggle in Aminate Mobu that switches the whole MotionBuilder Qt chrome between native styling and a darker modernized native look, while keeping one panel and verifying the main window with live screenshots.
+- Added a `Set all curves to stepped curves` Spider-Verse styling option so held-key animation can force scene curves to stepped tangents and jump cleanly from pose to pose.
+- Changed Floating Graph Editor back to `Ctrl+Semicolon` and moved graph hotkey handling onto the same raw app-wide tap path as the Floating Channel Box, so tapping the hotkey opens and closes the graph editor reliably from the viewport.
+- Improved Floating Channel Box numeric dragging so spinbox edits are queued and flushed at a capped rate instead of writing Maya attributes, undo chunks, and status messages on every tiny value change.
+- Changed keyframe warning toasts into a queued viewport notification system, so the Auto-Key warning appears first and the non-30/60 fps game-animation reminder follows after it once per session instead of merging into one popup.
+- Fixed Floating Graph Editor hotkey toggle so pressing the graph shortcut again while the graph is open now closes the docked or floating graph editor cleanly instead of leaving stale Qt graph windows behind.
+- Changed Floating Graph Editor to use one dockable Maya workspace control, so the same graph window can float or dock without spawning duplicate copies.
+- Changed Floating Graph Editor default hotkey from `Ctrl+Semicolon` to `Ctrl+Backslash`, since live Maya still reserves the semicolon and quote cluster for bookmark and gamma shortcuts; old default installs now auto-migrate to the new free nearby key.
+- Fixed Scene Helpers text note Auto Wrap so each wrapped line keeps its own text-curve layout and stacked line spacing, instead of collapsing characters and overprinting multiple lines on top of each other.
+- Changed Floating Graph Editor outliner startup so it opens in DAG-only mode by default, hiding dependency-node clutter unless the user changes the native outliner filter.
+- Changed Floating Graph Editor default hotkey from `Ctrl+Alt+G` to `Apostrophe`, keeping it close to the `#` Floating Channel Box key on UK keyboards and migrating old default installs automatically.
 - Changed Game Animation Mode buttons so the on state turns fully blue and gets a soft blue glow in both the Toolkit Bar and Scene Helpers, including synced state updates.
 - Added a proprietary source-available license for Aminate that allows unmodified private, educational, internal, commercial, and redistributed use with attribution, while prohibiting modification, derivative works, rebranding, forks, and claims of ownership.
+- Fixed Floating Channel Box behavior so it no longer stays above every Windows app, no longer draws the blue outline, can be dragged more reliably, and keeps editing the cached Maya selection even after popup focus changes.
+- Added a bottom-center Auto-Key warning toast that appears for four seconds when keyframes are created while Maya Auto Key is off, then slides/fades behind the bottom UI.
+- Stored Scene Helpers Teacher Demo plain-English edit logs inside the Maya scene as normal text curves plus string metadata, so students can read the notes even without Aminate installed.
+- Fixed the Floating Graph Editor shell so the embedded Outliner and native Graph Editor fill the whole floating panel, use Maya pane split percentages correctly, and resize with the window instead of staying cramped at the top.
+- Added a compact `Cycle Inf` button to the Floating Graph Editor header that sets selected or visible curves to pre/post cycle infinity and turns on infinity display in the Graph Editor view.
+- Widened the Floating Graph Editor default window and made the Outliner/Graph split resize proportionally so both sides stay usable instead of cramped.
+- Added a native Outliner to the left side of the Floating Graph Editor, using a resizable split panel so graph curves and scene hierarchy can stay visible together.
+- Flattened Floating Graph Editor buttons so the panel reads as a clean overlay rather than Maya's default raised button style.
+- Added Scene Helpers text note Auto Wrap controls with width and height box fields so long feedback notes wrap into multiple text-curve lines and scale down to fit the requested space.
+- Added a Toolkit Bar `Tween` button that opens a styled Tween Machine slider near Maya's time slider and keys selected controls as a percentage between the previous and next keys.
+- Moved the embedded Toolkit Bar out of Scene Helpers and into the Toolkit Bar tab, using the same full icon set as the docked timeline bar with synced Game Animation Mode and Animation Layer state.
+- Replaced the Game Animation Mode glyph with an image-generated blue game-animation figure icon and white Game Animation Mode button styling in the Toolkit Bar and Scene Helpers.
+- Fixed Floating Channel Box and Floating Graph Editor access so popups open near the cursor, clamp back onto the active screen, the channel box can be dragged by its header, `#` hotkey matching works on shifted keyboard layouts, and the graph editor resets to a stable size when opened.
+- Added Scene Helpers Teacher Demo Edit Log so duplicated teacher-preview rigs show student-readable bullet points for changed transforms and custom attributes, with undone edits disappearing when values return to the duplicate baseline.
+- Added `Animation Styling` tab for Spider-Verse-style held keys with configurable hold length, automatic duplicate-key creation, manual hold application, and red timeline overlap warnings.
+- Added a dedicated Scene Helpers Game Animation Mode area with per-action checkboxes for 30 fps, realtime playback, Time Slider update view All, autosave, viewport activation, texture reload, and weighted tangent conversion.
+- Changed Game Animation Mode so it converts existing animation curves and future tangent defaults to weighted tangents when the Weighted Tangents option is enabled.
+- Added Floating Graph Editor to Scene Helpers: toggle a semi-transparent native Maya Graph Editor clone with a customizable hotkey and opacity.
+- Changed Floating Channel Box default hotkey to `#` and added customizable opacity.
 
 ## Version 0.3 BETA - 2026-04-20
 

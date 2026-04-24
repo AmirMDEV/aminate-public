@@ -9,28 +9,33 @@ import traceback
 
 PACKAGE_FOLDER_NAME = "Aminate"
 PAYLOAD_DIR_NAME = "maya_anim_workflow_tools_package"
-MANIFEST_FILE_NAME = "manifest.json"
-RUNTIME_FILES = [
+DEFAULT_MANIFEST_FILE_NAME = "manifest.json"
+DEFAULT_RUNTIME_FILES = [
     "maya_anim_workflow_tools.py",
+    "maya_anim_workflow_tools_package_manifest.py",
+    "maya_animation_assistant.py",
+    "maya_animation_styling.py",
     "maya_animators_pencil.py",
     "maya_contact_hold.py",
+    "maya_control_picker.py",
     "maya_crash_recovery.py",
     "maya_dynamic_parent_pivot.py",
     "maya_dynamic_parenting_tool.py",
-    "maya_control_picker.py",
     "maya_face_retarget.py",
+    "maya_floating_channel_box.py",
     "maya_history_timeline.py",
-    "maya_reference_manager.py",
     "maya_onion_skin.py",
-    "maya_surface_contact.py",
+    "maya_reference_manager.py",
     "maya_rig_scale_export.py",
     "maya_rotation_doctor.py",
-    "maya_timing_tools.py",
     "maya_shelf_utils.py",
     "maya_skinning_cleanup.py",
+    "maya_surface_contact.py",
     "maya_timeline_notes.py",
+    "maya_timing_tools.py",
     "maya_universal_ikfk_switcher.py",
     "maya_video_reference_tool.py",
+    "game_animation_mode_icon.png",
     "maya_anim_workflow_tools_icon.png",
 ]
 
@@ -157,12 +162,26 @@ def _source_root():
 
 
 def _load_manifest(source_root):
-    manifest_path = os.path.join(source_root, MANIFEST_FILE_NAME)
+    manifest_path = os.path.join(source_root, DEFAULT_MANIFEST_FILE_NAME)
     if not os.path.exists(manifest_path):
+        try:
+            from maya_anim_workflow_tools_package_manifest import (
+                MANIFEST_FILE_NAME as package_manifest_file_name,
+                RELEASE_VERSION_LABEL,
+                RUNTIME_FILES,
+            )
+            return {
+                "package_name": PACKAGE_FOLDER_NAME,
+                "version": RELEASE_VERSION_LABEL,
+                "runtime_files": list(RUNTIME_FILES),
+                "manifest_file_name": package_manifest_file_name,
+            }
+        except Exception:
+            pass
         return {
             "package_name": PACKAGE_FOLDER_NAME,
             "version": "dev",
-            "runtime_files": list(RUNTIME_FILES),
+            "runtime_files": list(DEFAULT_RUNTIME_FILES),
         }
     with open(manifest_path, "r") as handle:
         return json.load(handle)
@@ -181,7 +200,7 @@ def _copy_runtime_files(source_root, destination_root, runtime_files):
         if not os.path.exists(source_path):
             raise RuntimeError("Missing runtime file in installer payload: {0}".format(file_name))
         shutil.copy2(source_path, os.path.join(destination_root, file_name))
-    manifest_path = os.path.join(source_root, MANIFEST_FILE_NAME)
+    manifest_path = os.path.join(source_root, DEFAULT_MANIFEST_FILE_NAME)
     if os.path.exists(manifest_path):
         shutil.copy2(manifest_path, os.path.join(destination_root, MANIFEST_FILE_NAME))
 

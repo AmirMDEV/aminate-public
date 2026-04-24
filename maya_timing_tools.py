@@ -5,9 +5,12 @@ import json
 import math
 import os
 import re
+import textwrap
+import time
 
 import maya_contact_hold as hold_utils
 import maya_crash_recovery as crash_recovery
+import maya_floating_channel_box
 import maya_history_timeline
 
 try:
@@ -40,12 +43,19 @@ try:
 except Exception:
     om2 = None
 
+try:
+    import maya.api.OpenMayaAnim as oma2
+except Exception:
+    oma2 = None
+
 WINDOW_OBJECT_NAME = "mayaTimingToolsWindow"
 STUDENT_TIMELINE_BAR_OBJECT_NAME = "studentCoreTimelineButtonBarWindow"
 STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME = STUDENT_TIMELINE_BAR_OBJECT_NAME + "WorkspaceControl"
 AUTO_SNAP_OPTION = "AmirMayaAnimWorkflowAutoSnapToFrames"
 ANIMATION_LAYER_TINT_OPTION = "AmirMayaAnimWorkflowAnimationLayerTint"
 GAME_ANIMATION_MODE_OPTION = "AmirMayaAnimWorkflowGameAnimationMode"
+GAME_ANIMATION_MODE_ACTION_OPTION_PREFIX = "AmirMayaAnimWorkflowGameAnimationModeAction"
+FLOATING_CHANNEL_BOX_HOTKEY_OPTION = maya_floating_channel_box.HOTKEY_OPTION
 ANIMATION_LAYER_CUSTOM_COLOR_ATTR = "aminateLayerColor"
 DEFAULT_AUTO_SNAP = True
 DEFAULT_ANIMATION_LAYER_TINT = True
@@ -53,6 +63,28 @@ DEFAULT_GAME_ANIMATION_MODE = False
 DEFAULT_TIME_UNIT = "ntsc"
 DEFAULT_PLAYBACK_SPEED = 1.0
 DEFAULT_MAX_BACKUPS = 5
+GAME_ANIMATION_MODE_ICON_FILE = "game_animation_mode_icon.png"
+ANIM_CURVE_TYPES = (
+    "animCurveTA",
+    "animCurveTL",
+    "animCurveTT",
+    "animCurveTU",
+    "animCurveUA",
+    "animCurveUL",
+    "animCurveUT",
+    "animCurveUU",
+)
+GAME_ANIMATION_MODE_ACTIONS = collections.OrderedDict(
+    (
+        ("time_unit", ("30 fps", "Set Maya time unit to 30 fps ntsc.")),
+        ("playback_speed", ("Realtime", "Set playback speed to realtime.")),
+        ("update_view_all", ("Update All Views", "Set Time Slider Update View to All.")),
+        ("autosave", ("Autosave", "Enable autosave with five backups.")),
+        ("activate_viewports", ("Activate Viewports", "Mark all model panels as active views.")),
+        ("load_textures", ("Load Textures", "Refresh and repath texture nodes.")),
+        ("weighted_tangents", ("Weighted Tangents", "Convert all existing animation curves and future tangent defaults to weighted tangents.")),
+    )
+)
 DEFAULT_RENDER_ENV_LIGHT_EXPOSURE = 1.5
 DEFAULT_RENDER_ENV_LIGHT_INTENSITY = 0.2
 DEFAULT_RENDER_ENV_SCALE_MULTIPLIER = 3.5
@@ -60,11 +92,35 @@ DEFAULT_SCENE_HELPERS_CAMERA_BASE_HEIGHT = 5.0
 DEFAULT_SCENE_HELPERS_CAMERA_HEIGHT_OFFSET = 0.0
 DEFAULT_SCENE_HELPERS_CAMERA_DOLLY_OFFSET = 0.0
 DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X = 50.0
+AUTO_KEY_WARNING_TOAST_MESSAGE = "You're animating without Auto-Key, Amir suggests you turn on Auto-key."
+GAME_ANIMATION_FPS_WARNING_TOAST_MESSAGE = "If you're creating a game animation, remember to set it to 30 frames per second."
+AUTO_KEY_WARNING_TOAST_DURATION_MS = 4000
+GAME_ANIMATION_FPS_WARNING_TOAST_DURATION_MS = 5000
+AUTO_KEY_WARNING_TOAST_THROTTLE_SECONDS = 8.0
 TEACHER_RIG_DUPLICATE_SUFFIX = "_AMINATE_TEACHER"
 TEACHER_RIG_DUPLICATE_GROUP_SUFFIX = "_OFFSET_GRP"
 TEACHER_RIG_DUPLICATE_LAYER_NAME = "aminateTeacherDuplicate_LYR"
 TEACHER_RIG_DUPLICATE_MARKER_ATTR = "aminateTeacherDemoDuplicate"
 TEACHER_RIG_DUPLICATE_SOURCE_ATTR = "teacherDemoSource"
+TEACHER_RIG_DUPLICATE_EDIT_BASELINE_ATTR = "teacherDemoEditBaselineJson"
+TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR = "teacherDemoEditLogText"
+TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME = "aminateTeacherDemoEditLog_GRP"
+TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR = "aminateTeacherDemoEditLog"
+TEACHER_RIG_DUPLICATE_EDIT_LOG_DISPLAY_SCALE = 1.6
+TEACHER_RIG_DUPLICATE_EDIT_LOG_WRAP_CHARS = 92
+TEACHER_RIG_DUPLICATE_EDIT_VECTOR_ATTRS = collections.OrderedDict(
+    (
+        ("translate", ("moved", ("translateX", "translateY", "translateZ"))),
+        ("rotate", ("rotated", ("rotateX", "rotateY", "rotateZ"))),
+        ("scale", ("scaled", ("scaleX", "scaleY", "scaleZ"))),
+    )
+)
+TEACHER_RIG_DUPLICATE_EDIT_STANDARD_ATTRS = set(
+    attr_name
+    for _group_name, (_verb, attr_names) in TEACHER_RIG_DUPLICATE_EDIT_VECTOR_ATTRS.items()
+    for attr_name in attr_names
+)
+TEACHER_RIG_DUPLICATE_EDIT_VALUE_EPSILON = 1.0e-4
 SCENE_TEXT_NOTE_ROOT_PREFIX = "aminateSceneTextNote"
 SCENE_TEXT_NOTE_GROUP_NAME = "aminateSceneTextNotes_GRP"
 SCENE_TEXT_NOTE_ATTR = "aminateSceneTextNote"
@@ -73,10 +129,20 @@ SCENE_TEXT_NOTE_ANCHOR_ATTR = "anchorNode"
 SCENE_TEXT_NOTE_COLOR_ATTR = "noteColor"
 SCENE_TEXT_NOTE_LINE_ATTR = "lineNode"
 SCENE_TEXT_NOTE_SIZE_ATTR = "noteSize"
+SCENE_TEXT_NOTE_WRAP_ATTR = "wrapEnabled"
+SCENE_TEXT_NOTE_BOX_WIDTH_ATTR = "wrapBoxWidth"
+SCENE_TEXT_NOTE_BOX_HEIGHT_ATTR = "wrapBoxHeight"
 SCENE_TEXT_NOTE_DEFAULT_COLOR = "#F6C85F"
 SCENE_TEXT_NOTE_DEFAULT_SCALE = 15.0
 SCENE_TEXT_NOTE_MIN_SCALE = 0.1
 SCENE_TEXT_NOTE_MAX_SCALE = 500.0
+SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED = True
+SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH = 220.0
+SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT = 90.0
+SCENE_TEXT_NOTE_MIN_BOX_SIZE = 1.0
+SCENE_TEXT_NOTE_MAX_BOX_SIZE = 10000.0
+SCENE_TEXT_NOTE_LINE_GROUP_SUFFIX = "_LINE_GRP"
+SCENE_TEXT_NOTE_MIN_LINE_SPACING = 0.35
 SCENE_TEXT_NOTE_OFFSET = (0.0, 0.0, 0.0)
 SCENE_TEXT_NOTE_COLORS = collections.OrderedDict(
     (
@@ -90,6 +156,15 @@ SCENE_TEXT_NOTE_COLORS = collections.OrderedDict(
     )
 )
 SCENE_HELPERS_ROOT_NAME = "amirSceneHelpers_GRP"
+_AUTO_KEY_WARNING_CALLBACK_ID = None
+_AUTO_KEY_WARNING_TOAST = None
+_WARNING_TOAST_QUEUE = []
+_WARNING_TOAST_ACTIVE = None
+_WARNING_TOAST_LAST_SHOWN = {
+    "auto_key": 0.0,
+    "fps_game": 0.0,
+}
+_WARNING_TOAST_SESSION_SHOWN = set()
 SCENE_HELPERS_RENDER_ROOT_NAME = "amirSceneRenderEnv_GRP"
 SCENE_HELPERS_CAMERA_ROOT_NAME = "amirSceneRenderCameras_GRP"
 SCENE_HELPERS_LIGHT_ROOT_NAME = "amirSceneRenderLights_GRP"
@@ -528,7 +603,364 @@ def _delete_teacher_demo_duplicates():
         except Exception:
             pass
     deleted_layers = _delete_teacher_demo_duplicate_layers()
+    _delete_teacher_demo_edit_log_scene_nodes()
     return deleted, deleted_layers
+
+
+def _teacher_demo_student_name(node_name):
+    label = _node_base_name(node_name)
+    if TEACHER_RIG_DUPLICATE_SUFFIX in label:
+        label = label.split(TEACHER_RIG_DUPLICATE_SUFFIX, 1)[0]
+    return label or _node_short_name(node_name)
+
+
+def _teacher_demo_value_from_attr(node_name, attr_name):
+    attr_path = "{0}.{1}".format(node_name, attr_name)
+    if not cmds.objExists(attr_path):
+        return None
+    try:
+        value = cmds.getAttr(attr_path)
+    except Exception:
+        return None
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    if isinstance(value, (list, tuple)):
+        return [float(item) if isinstance(item, (int, float)) else item for item in value]
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value
+
+
+def _teacher_demo_vector_value(node_name, attr_names):
+    values = []
+    for attr_name in attr_names:
+        value = _teacher_demo_value_from_attr(node_name, attr_name)
+        if value is None:
+            return None
+        values.append(float(value))
+    return values
+
+
+def _teacher_demo_allowed_scalar_attr(node_name, attr_name):
+    if attr_name in TEACHER_RIG_DUPLICATE_EDIT_STANDARD_ATTRS:
+        return False
+    if "." in attr_name:
+        return False
+    attr_path = "{0}.{1}".format(node_name, attr_name)
+    if not cmds.objExists(attr_path):
+        return False
+    try:
+        attr_type = cmds.getAttr(attr_path, type=True)
+    except Exception:
+        return False
+    return attr_type in (
+        "bool",
+        "byte",
+        "double",
+        "doubleAngle",
+        "doubleLinear",
+        "enum",
+        "float",
+        "long",
+        "short",
+        "string",
+    )
+
+
+def _teacher_demo_collect_edit_state(root_nodes):
+    state = {}
+    for root_node in root_nodes or []:
+        if not root_node or not cmds.objExists(root_node):
+            continue
+        for node_name in _dag_hierarchy_in_order(root_node):
+            try:
+                node_type = cmds.nodeType(node_name)
+            except Exception:
+                continue
+            if node_type not in ("transform", "joint"):
+                continue
+            try:
+                node_uuid = (cmds.ls(node_name, uuid=True) or [""])[0]
+            except Exception:
+                node_uuid = ""
+            if not node_uuid:
+                continue
+            label = _teacher_demo_student_name(node_name)
+            for group_name, (verb, attr_names) in TEACHER_RIG_DUPLICATE_EDIT_VECTOR_ATTRS.items():
+                value = _teacher_demo_vector_value(node_name, attr_names)
+                if value is None:
+                    continue
+                state["{0}|{1}".format(node_uuid, group_name)] = {
+                    "uuid": node_uuid,
+                    "node": node_name,
+                    "label": label,
+                    "attr": group_name,
+                    "verb": verb,
+                    "kind": "vector",
+                    "value": value,
+                }
+            attrs = set(cmds.listAttr(node_name, keyable=True) or [])
+            attrs.update(cmds.listAttr(node_name, channelBox=True) or [])
+            for attr_name in sorted(attrs):
+                if not _teacher_demo_allowed_scalar_attr(node_name, attr_name):
+                    continue
+                value = _teacher_demo_value_from_attr(node_name, attr_name)
+                if value is None:
+                    continue
+                state["{0}|{1}".format(node_uuid, attr_name)] = {
+                    "uuid": node_uuid,
+                    "node": node_name,
+                    "label": label,
+                    "attr": attr_name,
+                    "verb": "changed",
+                    "kind": "scalar",
+                    "value": value,
+                }
+    return state
+
+
+def _teacher_demo_set_baseline(root_node):
+    if not root_node or not cmds.objExists(root_node):
+        return False
+    state = _teacher_demo_collect_edit_state([root_node])
+    _ensure_string_attr(root_node, TEACHER_RIG_DUPLICATE_EDIT_BASELINE_ATTR, "")
+    _ensure_string_attr(root_node, TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR, "")
+    try:
+        cmds.setAttr(root_node + "." + TEACHER_RIG_DUPLICATE_EDIT_BASELINE_ATTR, json.dumps(state, sort_keys=True), type="string")
+        return True
+    except Exception:
+        return False
+
+
+def _teacher_demo_baseline_for_root(root_node):
+    if not root_node or not cmds.objExists(root_node):
+        return {}
+    attr_path = root_node + "." + TEACHER_RIG_DUPLICATE_EDIT_BASELINE_ATTR
+    if not cmds.objExists(attr_path):
+        _teacher_demo_set_baseline(root_node)
+    try:
+        text = cmds.getAttr(attr_path) if cmds.objExists(attr_path) else ""
+        return json.loads(text or "{}")
+    except Exception:
+        return {}
+
+
+def _teacher_demo_values_equal(left_value, right_value):
+    if isinstance(left_value, (list, tuple)) or isinstance(right_value, (list, tuple)):
+        if not isinstance(left_value, (list, tuple)) or not isinstance(right_value, (list, tuple)):
+            return False
+        if len(left_value) != len(right_value):
+            return False
+        return all(_teacher_demo_values_equal(left_item, right_item) for left_item, right_item in zip(left_value, right_value))
+    if isinstance(left_value, (int, float)) or isinstance(right_value, (int, float)):
+        try:
+            return abs(float(left_value) - float(right_value)) <= TEACHER_RIG_DUPLICATE_EDIT_VALUE_EPSILON
+        except Exception:
+            return False
+    return left_value == right_value
+
+
+def _teacher_demo_format_value(value):
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_teacher_demo_format_value(item) for item in value)
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if isinstance(value, (int, float)):
+        numeric_value = float(value)
+        if abs(numeric_value - round(numeric_value)) <= TEACHER_RIG_DUPLICATE_EDIT_VALUE_EPSILON:
+            return str(int(round(numeric_value)))
+        return "{0:.3f}".format(numeric_value).rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _teacher_demo_edit_sentence(baseline_item, current_item):
+    label = current_item.get("label") or baseline_item.get("label") or "Teacher demo control"
+    old_value = _teacher_demo_format_value(baseline_item.get("value"))
+    new_value = _teacher_demo_format_value(current_item.get("value"))
+    if current_item.get("kind") == "vector":
+        return "{0} {1} from {2} to {3}".format(label, current_item.get("verb") or "changed", old_value, new_value)
+    attr_label = current_item.get("attr") or baseline_item.get("attr") or "value"
+    return "{0} changed {1} from {2} to {3}".format(label, attr_label, old_value, new_value)
+
+
+def _teacher_demo_edit_log_lines(order, records):
+    return ["- {0}".format(records[key]["sentence"]) for key in order if key in records]
+
+
+def _teacher_demo_edit_log_root():
+    if not MAYA_AVAILABLE or not cmds:
+        return ""
+    if cmds.objExists(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME):
+        log_root = _long_scene_name(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME)
+    else:
+        parent_root = _ensure_scene_helpers_root()
+        log_root = cmds.createNode("transform", name=TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME, parent=parent_root)
+    _ensure_bool_attr(log_root, TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR, True)
+    _ensure_string_attr(log_root, TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR, "")
+    try:
+        cmds.setAttr(log_root + ".visibility", True)
+    except Exception:
+        pass
+    return _long_scene_name(log_root)
+
+
+def _teacher_demo_edit_log_text_holders(log_root):
+    if not log_root or not cmds.objExists(log_root):
+        return []
+    holders = []
+    for child in cmds.listRelatives(log_root, children=True, type="transform", fullPath=True) or []:
+        if _node_short_name(child).endswith("_TEXT_GRP"):
+            holders.append(child)
+    return holders
+
+
+def _teacher_demo_edit_log_display_lines(text):
+    output = ["Teacher Demo Edit Log"]
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        prefix = "- " if line.startswith("- ") else ""
+        body = line[2:].strip() if prefix else line
+        wrapped = textwrap.wrap(
+            body,
+            width=TEACHER_RIG_DUPLICATE_EDIT_LOG_WRAP_CHARS,
+            break_long_words=True,
+            break_on_hyphens=False,
+        ) or [body]
+        for index, wrapped_line in enumerate(wrapped):
+            if prefix:
+                output.append("- {0}".format(wrapped_line) if index == 0 else "  {0}".format(wrapped_line))
+            else:
+                output.append(wrapped_line)
+    return output
+
+
+def _teacher_demo_edit_log_position(root_nodes):
+    for root_name in root_nodes or []:
+        if not root_name or not cmds.objExists(root_name):
+            continue
+        try:
+            box = cmds.exactWorldBoundingBox(root_name)
+            return (float(box[3]) + 4.0, float(box[4]) + 4.0, float(box[2]))
+        except Exception:
+            pass
+    return (0.0, 10.0, 0.0)
+
+
+def _delete_teacher_demo_edit_log_scene_nodes():
+    if not MAYA_AVAILABLE or not cmds:
+        return 0
+    deleted = 0
+    candidates = []
+    if cmds.objExists(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME):
+        candidates.append(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME)
+    for node_name in cmds.ls(type="transform", long=True) or []:
+        if not cmds.objExists(node_name + "." + TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR):
+            continue
+        try:
+            if bool(cmds.getAttr(node_name + "." + TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR)):
+                candidates.append(node_name)
+        except Exception:
+            pass
+    for node_name in _dedupe_preserve_order(candidates):
+        if not cmds.objExists(node_name):
+            continue
+        try:
+            cmds.delete(node_name)
+            deleted += 1
+        except Exception:
+            pass
+    return deleted
+
+
+def _sync_teacher_demo_edit_log_scene_storage(root_nodes, text):
+    if not MAYA_AVAILABLE or not cmds:
+        return ""
+    root_nodes = [root_name for root_name in (root_nodes or []) if root_name and cmds.objExists(root_name)]
+    clean_text = text or ""
+    if not root_nodes and not clean_text:
+        undo_state = True
+        try:
+            undo_state = bool(cmds.undoInfo(query=True, state=True))
+            cmds.undoInfo(stateWithoutFlush=False)
+        except Exception:
+            undo_state = True
+        try:
+            _delete_teacher_demo_edit_log_scene_nodes()
+        finally:
+            try:
+                cmds.undoInfo(stateWithoutFlush=undo_state)
+            except Exception:
+                pass
+        return ""
+    desired_position = _teacher_demo_edit_log_position(root_nodes)
+    undo_state = True
+    try:
+        undo_state = bool(cmds.undoInfo(query=True, state=True))
+        cmds.undoInfo(stateWithoutFlush=False)
+    except Exception:
+        undo_state = True
+    try:
+        log_root = _teacher_demo_edit_log_root()
+        for root_name in root_nodes:
+            _ensure_string_attr(root_name, TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR, "")
+            try:
+                cmds.setAttr(root_name + "." + TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR, clean_text, type="string")
+            except Exception:
+                pass
+        _ensure_string_attr(log_root, TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR, "")
+        attr_path = log_root + "." + TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR
+        try:
+            current_text = cmds.getAttr(attr_path) if cmds.objExists(attr_path) else ""
+        except Exception:
+            current_text = ""
+        current_holders = _teacher_demo_edit_log_text_holders(log_root)
+        if current_text == clean_text and ((clean_text and current_holders) or (not clean_text and not current_holders)):
+            try:
+                cmds.xform(log_root, worldSpace=True, translation=desired_position)
+            except Exception:
+                pass
+            return log_root
+        cmds.setAttr(attr_path, clean_text, type="string")
+        for holder in _teacher_demo_edit_log_text_holders(log_root):
+            if cmds.objExists(holder):
+                try:
+                    cmds.delete(holder)
+                except Exception:
+                    pass
+        if clean_text:
+            text_holder = cmds.createNode(
+                "transform",
+                name=_unique_scene_node_name(_node_base_name(log_root) + "_TEXT_GRP"),
+                parent=log_root,
+            )
+            for line_index, line_text in enumerate(_teacher_demo_edit_log_display_lines(clean_text)):
+                _create_text_curves_for_scene_note_line(log_root, text_holder, line_text, line_index)
+            try:
+                cmds.setAttr(
+                    text_holder + ".scale",
+                    TEACHER_RIG_DUPLICATE_EDIT_LOG_DISPLAY_SCALE,
+                    TEACHER_RIG_DUPLICATE_EDIT_LOG_DISPLAY_SCALE,
+                    TEACHER_RIG_DUPLICATE_EDIT_LOG_DISPLAY_SCALE,
+                    type="double3",
+                )
+            except Exception:
+                pass
+            _set_display_color(log_root, "#55CBCD")
+        try:
+            cmds.xform(log_root, worldSpace=True, translation=desired_position)
+            cmds.setAttr(log_root + ".visibility", True)
+        except Exception:
+            pass
+    finally:
+        try:
+            cmds.undoInfo(stateWithoutFlush=undo_state)
+        except Exception:
+            pass
+    return log_root
 
 
 def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X):
@@ -566,6 +998,7 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
         _copy_visual_state_for_pairs(current_pairs)
         copied_shading = _copy_shading_assignments_for_pairs(current_pairs)
         layer_name = _create_teacher_duplicate_display_layer(offset_group)
+        _teacher_demo_set_baseline(offset_group)
         try:
             cmds.select(offset_group, replace=True)
         except Exception:
@@ -760,6 +1193,41 @@ def _clamp_scene_text_note_size(size):
     return max(SCENE_TEXT_NOTE_MIN_SCALE, min(SCENE_TEXT_NOTE_MAX_SCALE, size))
 
 
+def _clamp_scene_text_note_box_size(value, fallback):
+    try:
+        value = float(value)
+    except Exception:
+        value = fallback
+    return max(SCENE_TEXT_NOTE_MIN_BOX_SIZE, min(SCENE_TEXT_NOTE_MAX_BOX_SIZE, value))
+
+
+def _scene_text_note_wrap_char_count(box_width, size):
+    box_width = _clamp_scene_text_note_box_size(box_width, SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH)
+    size = _clamp_scene_text_note_size(size)
+    average_character_width = max(size * 0.48, 0.1)
+    return max(8, min(120, int(round(box_width / average_character_width))))
+
+
+def _wrapped_scene_text_note_lines(text, wrap_enabled, box_width, size):
+    text = (text or "Student note").strip() or "Student note"
+    if not wrap_enabled:
+        return [line or " " for line in text.splitlines()] or ["Student note"]
+    max_chars = _scene_text_note_wrap_char_count(box_width, size)
+    wrapped_lines = []
+    for paragraph in text.splitlines() or [text]:
+        paragraph = paragraph.strip()
+        if not paragraph:
+            wrapped_lines.append(" ")
+            continue
+        wrapped_lines.extend(textwrap.wrap(
+            paragraph,
+            width=max_chars,
+            break_long_words=True,
+            break_on_hyphens=False,
+        ) or [paragraph])
+    return wrapped_lines or ["Student note"]
+
+
 def _scene_text_note_text_holders(note_node):
     note_node = _long_scene_name(note_node)
     holders = []
@@ -769,15 +1237,136 @@ def _scene_text_note_text_holders(note_node):
     return holders
 
 
+def _scene_text_note_line_groups(text_holder):
+    return cmds.listRelatives(text_holder, children=True, type="transform", fullPath=True) or []
+
+
+def _create_text_curves_for_scene_note_line(note_node, text_holder, line_text, line_index):
+    line_group = cmds.createNode(
+        "transform",
+        name=_unique_scene_node_name(_node_base_name(note_node) + SCENE_TEXT_NOTE_LINE_GROUP_SUFFIX),
+        parent=text_holder,
+    )
+    try:
+        text_nodes = cmds.textCurves(
+            name=_unique_scene_node_name(_node_base_name(note_node) + "_TEXT"),
+            text=line_text,
+            font="Arial",
+            constructionHistory=False,
+        )
+    except Exception:
+        text_nodes = [cmds.curve(
+            name=_unique_scene_node_name(_node_base_name(note_node) + "_TEXT"),
+            degree=1,
+            point=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+        )]
+    text_roots = _top_level_nodes_from_nodes(text_nodes)
+    for text_root in text_roots:
+        try:
+            cmds.parent(text_root, line_group, absolute=True)
+        except Exception:
+            pass
+    try:
+        cmds.setAttr(line_group + ".translate", 0.0, 0.0, 0.0, type="double3")
+    except Exception:
+        pass
+    return line_group
+
+
+def _layout_scene_text_note_line_groups(text_holder):
+    line_groups = _scene_text_note_line_groups(text_holder)
+    if not line_groups:
+        return
+    try:
+        cmds.refresh(currentView=False, force=True)
+    except Exception:
+        pass
+    raw_entries = []
+    valid_heights = []
+    for line_group in line_groups:
+        try:
+            bounds = cmds.exactWorldBoundingBox(line_group)
+            measured_height = max(float(bounds[4]) - float(bounds[1]), 0.0)
+        except Exception:
+            measured_height = 0.0
+        if measured_height >= 1.0:
+            valid_heights.append(measured_height)
+            raw_entries.append((line_group, measured_height))
+        else:
+            raw_entries.append((line_group, None))
+    fallback_height = max(SCENE_TEXT_NOTE_MIN_LINE_SPACING, (sum(valid_heights) / float(len(valid_heights))) if valid_heights else 8.0)
+    line_entries = [(line_group, line_height if line_height is not None else fallback_height) for line_group, line_height in raw_entries]
+    tallest_height = max([fallback_height] + [entry[1] for entry in line_entries])
+    spacing = max(SCENE_TEXT_NOTE_MIN_LINE_SPACING, tallest_height * 0.18)
+    total_height = sum(entry[1] for entry in line_entries) + max(0, len(line_entries) - 1) * spacing
+    current_top = total_height * 0.5
+    for line_group, line_height in line_entries:
+        line_center_y = current_top - (line_height * 0.5)
+        try:
+            cmds.setAttr(line_group + ".translate", 0.0, line_center_y, 0.0, type="double3")
+        except Exception:
+            pass
+        current_top -= line_height + spacing
+
+
+def _fit_scene_text_note_holder_to_box(text_holder, base_size, box_width, box_height, enabled=True):
+    base_size = _clamp_scene_text_note_size(base_size)
+    try:
+        cmds.setAttr(text_holder + ".scale", base_size, base_size, base_size, type="double3")
+    except Exception:
+        pass
+    if not enabled:
+        return base_size
+    box_width = _clamp_scene_text_note_box_size(box_width, SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH)
+    box_height = _clamp_scene_text_note_box_size(box_height, SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT)
+    try:
+        bounds = cmds.exactWorldBoundingBox(text_holder)
+        current_width = max(float(bounds[3]) - float(bounds[0]), 0.001)
+        current_height = max(float(bounds[4]) - float(bounds[1]), 0.001)
+        fit_ratio = min(1.0, box_width / current_width, box_height / current_height)
+        fitted_size = max(SCENE_TEXT_NOTE_MIN_SCALE, base_size * fit_ratio)
+        cmds.setAttr(text_holder + ".scale", fitted_size, fitted_size, fitted_size, type="double3")
+        return fitted_size
+    except Exception:
+        return base_size
+
+
+def _rebuild_scene_text_note_text(note_node):
+    note_node = _long_scene_name(note_node)
+    data = _scene_text_note_data(note_node)
+    for holder in _scene_text_note_text_holders(note_node):
+        if cmds.objExists(holder):
+            try:
+                cmds.delete(holder)
+            except Exception:
+                pass
+    text_holder = cmds.createNode("transform", name=_unique_scene_node_name(_node_base_name(note_node) + "_TEXT_GRP"), parent=note_node)
+    lines = _wrapped_scene_text_note_lines(
+        data.get("text") or "Student note",
+        bool(data.get("wrap_enabled", SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED)),
+        data.get("box_width", SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH),
+        data.get("size", SCENE_TEXT_NOTE_DEFAULT_SCALE),
+    )
+    for line_index, line_text in enumerate(lines):
+        _create_text_curves_for_scene_note_line(note_node, text_holder, line_text, line_index)
+    _layout_scene_text_note_line_groups(text_holder)
+    _fit_scene_text_note_holder_to_box(
+        text_holder,
+        data.get("size", SCENE_TEXT_NOTE_DEFAULT_SCALE),
+        data.get("box_width", SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH),
+        data.get("box_height", SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT),
+        enabled=bool(data.get("wrap_enabled", SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED)),
+    )
+    _set_display_color(note_node, data.get("color") or SCENE_TEXT_NOTE_DEFAULT_COLOR)
+    _force_scene_text_note_visible(note_node)
+    return text_holder
+
+
 def _apply_scene_text_note_size(note_node, size):
     note_node = _long_scene_name(note_node)
     size = _clamp_scene_text_note_size(size)
     _ensure_double_attr(note_node, SCENE_TEXT_NOTE_SIZE_ATTR, size)
-    for holder in _scene_text_note_text_holders(note_node):
-        try:
-            cmds.setAttr(holder + ".scale", size, size, size, type="double3")
-        except Exception:
-            pass
+    _rebuild_scene_text_note_text(note_node)
     return size
 
 
@@ -845,15 +1434,23 @@ def _scene_text_note_data(note_node):
     color_value = SCENE_TEXT_NOTE_DEFAULT_COLOR
     line_value = ""
     size_value = SCENE_TEXT_NOTE_DEFAULT_SCALE
+    wrap_enabled = SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED
+    box_width = SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH
+    box_height = SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT
     for attr_name, fallback in (
         (SCENE_TEXT_NOTE_TEXT_ATTR, ""),
         (SCENE_TEXT_NOTE_ANCHOR_ATTR, ""),
         (SCENE_TEXT_NOTE_COLOR_ATTR, SCENE_TEXT_NOTE_DEFAULT_COLOR),
         (SCENE_TEXT_NOTE_LINE_ATTR, ""),
         (SCENE_TEXT_NOTE_SIZE_ATTR, SCENE_TEXT_NOTE_DEFAULT_SCALE),
+        (SCENE_TEXT_NOTE_WRAP_ATTR, SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED),
+        (SCENE_TEXT_NOTE_BOX_WIDTH_ATTR, SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH),
+        (SCENE_TEXT_NOTE_BOX_HEIGHT_ATTR, SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT),
     ):
         try:
-            value = cmds.getAttr(note_node + "." + attr_name) or fallback
+            value = cmds.getAttr(note_node + "." + attr_name)
+            if value is None:
+                value = fallback
         except Exception:
             value = fallback
         if attr_name == SCENE_TEXT_NOTE_TEXT_ATTR:
@@ -866,6 +1463,12 @@ def _scene_text_note_data(note_node):
             line_value = value
         elif attr_name == SCENE_TEXT_NOTE_SIZE_ATTR:
             size_value = _clamp_scene_text_note_size(value)
+        elif attr_name == SCENE_TEXT_NOTE_WRAP_ATTR:
+            wrap_enabled = bool(value)
+        elif attr_name == SCENE_TEXT_NOTE_BOX_WIDTH_ATTR:
+            box_width = _clamp_scene_text_note_box_size(value, SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH)
+        elif attr_name == SCENE_TEXT_NOTE_BOX_HEIGHT_ATTR:
+            box_height = _clamp_scene_text_note_box_size(value, SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT)
     if not cmds.objExists(note_node + "." + SCENE_TEXT_NOTE_SIZE_ATTR):
         holders = _scene_text_note_text_holders(note_node)
         if holders and cmds.objExists(holders[0] + ".scaleX"):
@@ -886,6 +1489,9 @@ def _scene_text_note_data(note_node):
         "color": color_value,
         "line": line_value,
         "size": size_value,
+        "wrap_enabled": wrap_enabled,
+        "box_width": box_width,
+        "box_height": box_height,
         "visible": visible,
     }
 
@@ -933,10 +1539,20 @@ def _rebuild_scene_text_note_line(note_node):
     return line_group
 
 
-def _create_scene_text_note(text, color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR, anchor_node=None, size=SCENE_TEXT_NOTE_DEFAULT_SCALE):
+def _create_scene_text_note(
+    text,
+    color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR,
+    anchor_node=None,
+    size=SCENE_TEXT_NOTE_DEFAULT_SCALE,
+    wrap_enabled=SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED,
+    box_width=SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH,
+    box_height=SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT,
+):
     text = (text or "Student note").strip() or "Student note"
     color_hex = color_hex or SCENE_TEXT_NOTE_DEFAULT_COLOR
     size = _clamp_scene_text_note_size(size)
+    box_width = _clamp_scene_text_note_box_size(box_width, SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH)
+    box_height = _clamp_scene_text_note_box_size(box_height, SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT)
     anchor_node = _long_scene_name(anchor_node) if anchor_node else _selected_scene_text_anchor()
     anchor_position = _world_transform_position(anchor_node) if anchor_node else (0.0, 0.0, 0.0)
     note_position = _vector_add(anchor_position, SCENE_TEXT_NOTE_OFFSET)
@@ -946,32 +1562,16 @@ def _create_scene_text_note(text, color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR, ancho
     note_group = cmds.parent(note_group, note_root)[0]
     note_group = _long_scene_name(note_group)
     cmds.xform(note_group, worldSpace=True, translation=note_position)
-    text_holder = cmds.createNode("transform", name=_unique_scene_node_name(_node_base_name(note_group) + "_TEXT_GRP"), parent=note_group)
-    try:
-        text_nodes = cmds.textCurves(
-            name=_unique_scene_node_name(_node_base_name(note_group) + "_TEXT"),
-            text=text,
-            font="Arial",
-            constructionHistory=False,
-        )
-    except Exception:
-        text_nodes = [cmds.curve(name=_unique_scene_node_name(_node_base_name(note_group) + "_TEXT"), degree=1, point=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)])]
-    text_roots = _top_level_nodes_from_nodes(text_nodes)
-    for text_root in text_roots:
-        try:
-            cmds.parent(text_root, text_holder, relative=True)
-        except Exception:
-            pass
-    try:
-        cmds.setAttr(text_holder + ".scale", size, size, size, type="double3")
-    except Exception:
-        pass
     _ensure_bool_attr(note_group, SCENE_TEXT_NOTE_ATTR, True)
     _ensure_string_attr(note_group, SCENE_TEXT_NOTE_TEXT_ATTR, text)
     _ensure_string_attr(note_group, SCENE_TEXT_NOTE_ANCHOR_ATTR, anchor_node or "")
     _ensure_string_attr(note_group, SCENE_TEXT_NOTE_COLOR_ATTR, color_hex)
     _ensure_string_attr(note_group, SCENE_TEXT_NOTE_LINE_ATTR, "")
     _ensure_double_attr(note_group, SCENE_TEXT_NOTE_SIZE_ATTR, size)
+    _ensure_bool_attr(note_group, SCENE_TEXT_NOTE_WRAP_ATTR, bool(wrap_enabled))
+    _ensure_double_attr(note_group, SCENE_TEXT_NOTE_BOX_WIDTH_ATTR, box_width)
+    _ensure_double_attr(note_group, SCENE_TEXT_NOTE_BOX_HEIGHT_ATTR, box_height)
+    _rebuild_scene_text_note_text(note_group)
     _force_scene_text_note_visible(note_group)
     _set_display_color(note_group, color_hex)
     line_node = _rebuild_scene_text_note_line(note_group)
@@ -986,6 +1586,9 @@ def _create_scene_text_note(text, color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR, ancho
         "color": color_hex,
         "line": line_node,
         "size": size,
+        "wrap_enabled": bool(wrap_enabled),
+        "box_width": box_width,
+        "box_height": box_height,
     }
 
 _CYCLORAMA_POINTS = [
@@ -1095,6 +1698,14 @@ STUDENT_CORE_TOOLS = (
         "tooltip": "Insert an inbetween key on the current frame for selected animated controls.",
     },
     {
+        "command": "tween_machine",
+        "label": "Tween",
+        "group": "Keys",
+        "color": "#4CC9F0",
+        "glyph": "tween",
+        "tooltip": "Open Tween Machine: create a current-frame key as a percentage between the previous and next keys.",
+    },
+    {
         "command": "remove_current",
         "label": "Cut",
         "group": "Keys",
@@ -1168,11 +1779,51 @@ GLOBAL_CONTROLLER = None
 GLOBAL_WINDOW = None
 GLOBAL_TIMELINE_BAR_CONTROLLER = None
 GLOBAL_TIMELINE_BAR_WINDOW = None
+GLOBAL_TIMELINE_BAR_WIDGETS = []
 
 _qt_flag = hold_utils._qt_flag
 _style_donate_button = hold_utils._style_donate_button
 _open_external_url = hold_utils._open_external_url
 _maya_main_window = hold_utils._maya_main_window
+
+
+def _register_timeline_bar_widget(widget):
+    if widget is not None and widget not in GLOBAL_TIMELINE_BAR_WIDGETS:
+        GLOBAL_TIMELINE_BAR_WIDGETS.append(widget)
+
+
+def _unregister_timeline_bar_widget(widget):
+    try:
+        while widget in GLOBAL_TIMELINE_BAR_WIDGETS:
+            GLOBAL_TIMELINE_BAR_WIDGETS.remove(widget)
+    except Exception:
+        pass
+
+
+def _sync_timeline_bar_game_buttons(controller):
+    enabled = bool(getattr(controller, "game_animation_mode_enabled", False))
+    for widget in list(GLOBAL_TIMELINE_BAR_WIDGETS):
+        try:
+            if widget is None:
+                GLOBAL_TIMELINE_BAR_WIDGETS.remove(widget)
+                continue
+            setter = getattr(widget, "_set_game_button_checked", None)
+            if setter:
+                setter(enabled)
+        except Exception:
+            try:
+                GLOBAL_TIMELINE_BAR_WIDGETS.remove(widget)
+            except Exception:
+                pass
+    for window in (GLOBAL_WINDOW,):
+        if window is not None and hasattr(window, "game_mode_button"):
+            try:
+                window.game_mode_button.blockSignals(True)
+                window.game_mode_button.setChecked(enabled)
+                window.game_mode_button.blockSignals(False)
+                _set_game_mode_button_glow(window.game_mode_button, enabled)
+            except Exception:
+                pass
 
 
 def _tool_button_popup_mode(member_name):
@@ -1578,6 +2229,17 @@ def _save_option_var_bool(option_name, value):
         pass
 
 
+def _game_animation_mode_action_option_name(action_key):
+    return "{0}_{1}".format(GAME_ANIMATION_MODE_ACTION_OPTION_PREFIX, action_key)
+
+
+def _game_animation_mode_action_settings():
+    return collections.OrderedDict(
+        (key, _option_var_bool(_game_animation_mode_action_option_name(key), True))
+        for key in GAME_ANIMATION_MODE_ACTIONS
+    )
+
+
 def _option_var_float(option_name, default):
     if not cmds or not cmds.optionVar(exists=option_name):
         return float(default)
@@ -1612,6 +2274,374 @@ def _current_auto_key_state():
         return bool(cmds.autoKeyframe(query=True, state=True))
     except Exception:
         return False
+
+
+def _current_time_unit_is_game_fps():
+    return _current_time_unit() in ("ntsc", "30fps", "ntscf", "60fps")
+
+
+def _maya_main_qt_window():
+    if not (QtWidgets and hold_utils.omui and hold_utils.shiboken):
+        return None
+    try:
+        pointer = hold_utils.omui.MQtUtil.mainWindow()
+    except Exception:
+        pointer = None
+    if not pointer:
+        return None
+    try:
+        return hold_utils.shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+    except Exception:
+        return None
+
+
+def _warning_toast_allowed(kind, now=None):
+    if kind not in _WARNING_TOAST_LAST_SHOWN:
+        return False
+    now = time.time() if now is None else float(now)
+    if now - float(_WARNING_TOAST_LAST_SHOWN.get(kind) or 0.0) < AUTO_KEY_WARNING_TOAST_THROTTLE_SECONDS:
+        return False
+    _WARNING_TOAST_LAST_SHOWN[kind] = now
+    return True
+
+
+def _auto_key_warning_allowed(now=None):
+    if _current_auto_key_state():
+        return False
+    return _warning_toast_allowed("auto_key", now=now)
+
+
+def _queue_warning_toast(message, kind, duration_ms):
+    global _WARNING_TOAST_QUEUE
+    if not message or not kind:
+        return
+    _WARNING_TOAST_QUEUE.append(
+        {
+            "message": message,
+            "kind": kind,
+            "duration_ms": int(max(1, duration_ms)),
+        }
+    )
+
+
+def _dequeue_warning_toast():
+    global _WARNING_TOAST_QUEUE
+    if not _WARNING_TOAST_QUEUE:
+        return None
+    item = _WARNING_TOAST_QUEUE[0]
+    _WARNING_TOAST_QUEUE = _WARNING_TOAST_QUEUE[1:]
+    return item
+
+
+def _warning_toast_anchor_widget():
+    if not (QtWidgets and hold_utils.omui and hold_utils.shiboken and cmds):
+        return _maya_main_qt_window()
+    panel_name = ""
+    try:
+        panel_name = cmds.getPanel(withFocus=True) or ""
+    except Exception:
+        panel_name = ""
+    panel_names = []
+    if panel_name:
+        panel_names.append(panel_name)
+    try:
+        panel_names.extend(cmds.getPanel(type="modelPanel") or [])
+    except Exception:
+        pass
+    for panel_name in _dedupe_preserve_order(panel_names):
+        if not panel_name:
+            continue
+        try:
+            if cmds.getPanel(typeOf=panel_name) != "modelPanel":
+                continue
+        except Exception:
+            continue
+        pointer = None
+        for finder in (hold_utils.omui.MQtUtil.findControl, hold_utils.omui.MQtUtil.findLayout):
+            try:
+                pointer = finder(panel_name)
+            except Exception:
+                pointer = None
+            if pointer:
+                break
+        if not pointer:
+            continue
+        try:
+            widget = hold_utils.shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+        except Exception:
+            widget = None
+        if widget is not None:
+            return widget
+    return _maya_main_qt_window()
+
+
+def _auto_key_warning_callback(_curve_objects=None, _client_data=None):
+    now = time.time()
+    if MAYA_AVAILABLE and cmds and not _current_auto_key_state() and _warning_toast_allowed("auto_key", now=now):
+        _queue_warning_toast(AUTO_KEY_WARNING_TOAST_MESSAGE, "auto_key", AUTO_KEY_WARNING_TOAST_DURATION_MS)
+    if (
+        MAYA_AVAILABLE
+        and cmds
+        and not _current_time_unit_is_game_fps()
+        and "fps_game" not in _WARNING_TOAST_SESSION_SHOWN
+        and _warning_toast_allowed("fps_game", now=now)
+    ):
+        _queue_warning_toast(
+            GAME_ANIMATION_FPS_WARNING_TOAST_MESSAGE,
+            "fps_game",
+            GAME_ANIMATION_FPS_WARNING_TOAST_DURATION_MS,
+        )
+        _WARNING_TOAST_SESSION_SHOWN.add("fps_game")
+    if not _WARNING_TOAST_QUEUE and _WARNING_TOAST_ACTIVE is None:
+        return
+    if not (QtCore and QtWidgets):
+        item = _dequeue_warning_toast()
+        if item:
+            try:
+                om2.MGlobal.displayWarning(item.get("message") or AUTO_KEY_WARNING_TOAST_MESSAGE)
+            except Exception:
+                pass
+        return
+    try:
+        QtCore.QTimer.singleShot(0, _show_next_warning_toast)
+    except Exception:
+        item = _dequeue_warning_toast()
+        if item:
+            try:
+                om2.MGlobal.displayWarning(item.get("message") or AUTO_KEY_WARNING_TOAST_MESSAGE)
+            except Exception:
+                pass
+
+
+def _install_auto_key_warning_callback():
+    global _AUTO_KEY_WARNING_CALLBACK_ID, _WARNING_TOAST_QUEUE, _WARNING_TOAST_ACTIVE
+    if not MAYA_AVAILABLE or not oma2 or _AUTO_KEY_WARNING_CALLBACK_ID is not None:
+        return _AUTO_KEY_WARNING_CALLBACK_ID
+    _WARNING_TOAST_QUEUE = []
+    _WARNING_TOAST_ACTIVE = None
+    _WARNING_TOAST_SESSION_SHOWN.clear()
+    for key_name in _WARNING_TOAST_LAST_SHOWN:
+        _WARNING_TOAST_LAST_SHOWN[key_name] = 0.0
+    try:
+        _AUTO_KEY_WARNING_CALLBACK_ID = oma2.MAnimMessage.addAnimKeyframeEditedCallback(_auto_key_warning_callback)
+    except Exception:
+        _AUTO_KEY_WARNING_CALLBACK_ID = None
+    return _AUTO_KEY_WARNING_CALLBACK_ID
+
+
+def _remove_auto_key_warning_callback():
+    global _AUTO_KEY_WARNING_CALLBACK_ID, _WARNING_TOAST_QUEUE, _WARNING_TOAST_ACTIVE
+    if _AUTO_KEY_WARNING_CALLBACK_ID is None:
+        return
+    try:
+        if om2:
+            om2.MMessage.removeCallback(_AUTO_KEY_WARNING_CALLBACK_ID)
+    except Exception:
+        pass
+    _AUTO_KEY_WARNING_CALLBACK_ID = None
+    _WARNING_TOAST_QUEUE = []
+    _WARNING_TOAST_ACTIVE = None
+    _WARNING_TOAST_SESSION_SHOWN.clear()
+    for key_name in _WARNING_TOAST_LAST_SHOWN:
+        _WARNING_TOAST_LAST_SHOWN[key_name] = 0.0
+
+
+if QtWidgets:
+    class _AutoKeyWarningToast(QtWidgets.QFrame):
+        def __init__(self, parent=None):
+            super(_AutoKeyWarningToast, self).__init__(parent)
+            self.setObjectName("aminateAutoKeyWarningToast")
+            self._hide_timer = QtCore.QTimer(self)
+            self._hide_timer.setSingleShot(True)
+            self._hide_timer.timeout.connect(self._animate_out)
+            self._current_item = None
+            self._animations = []
+            flags = QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
+            self.setWindowFlags(flags)
+            self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+            self.setWindowOpacity(0.96)
+            layout = QtWidgets.QHBoxLayout(self)
+            layout.setContentsMargins(18, 12, 18, 12)
+            self.label = QtWidgets.QLabel(AUTO_KEY_WARNING_TOAST_MESSAGE)
+            self.label.setWordWrap(True)
+            self.label.setAlignment(QtCore.Qt.AlignCenter)
+            layout.addWidget(self.label)
+            self.setStyleSheet(
+                """
+                QFrame#aminateAutoKeyWarningToast {
+                    background-color: rgba(18, 22, 28, 235);
+                    color: #F8FAFC;
+                    border: 1px solid #4CC9F0;
+                    border-radius: 10px;
+                }
+                QLabel {
+                    color: #F8FAFC;
+                    font-weight: 700;
+                    font-size: 13px;
+                }
+                """
+            )
+
+        def _anchor_global_rect(self):
+            anchor = _warning_toast_anchor_widget()
+            if anchor is not None:
+                try:
+                    top_left = anchor.mapToGlobal(QtCore.QPoint(0, 0))
+                    return QtCore.QRect(top_left.x(), top_left.y(), max(anchor.width(), 1), max(anchor.height(), 1))
+                except Exception:
+                    pass
+            screen = None
+            try:
+                cursor_pos = QtGui.QCursor.pos()
+                screen = QtWidgets.QApplication.screenAt(cursor_pos)
+            except Exception:
+                screen = None
+            if screen is None:
+                try:
+                    screen = QtWidgets.QApplication.primaryScreen()
+                except Exception:
+                    screen = None
+            if screen:
+                return screen.availableGeometry()
+            return QtCore.QRect(0, 0, 1280, 720)
+
+        def show_toast(self, message, duration_ms=AUTO_KEY_WARNING_TOAST_DURATION_MS, kind=""):
+            self._current_item = {
+                "message": message or AUTO_KEY_WARNING_TOAST_MESSAGE,
+                "duration_ms": int(max(1, duration_ms)),
+                "kind": kind or "",
+            }
+            self.label.setText(self._current_item["message"])
+            self.setWindowOpacity(0.96)
+            self.adjustSize()
+            width = max(420, min(620, self.sizeHint().width()))
+            height = max(54, self.sizeHint().height())
+            self.resize(width, height)
+            rect = self._anchor_global_rect()
+            x_pos = rect.left() + (rect.width() - width) // 2
+            y_pos = rect.bottom() - height - 18
+            self.move(x_pos, y_pos)
+            self.show()
+            try:
+                self.raise_()
+            except Exception:
+                pass
+            self._hide_timer.start(self._current_item["duration_ms"])
+
+        def _animate_out(self):
+            global _WARNING_TOAST_ACTIVE
+            rect = self._anchor_global_rect()
+            start_pos = self.pos()
+            end_pos = QtCore.QPoint(start_pos.x(), rect.bottom() + 10)
+            move_anim = QtCore.QPropertyAnimation(self, b"pos", self)
+            move_anim.setDuration(420)
+            move_anim.setStartValue(start_pos)
+            move_anim.setEndValue(end_pos)
+            move_anim.setEasingCurve(QtCore.QEasingCurve.InCubic)
+            fade_anim = QtCore.QPropertyAnimation(self, b"windowOpacity", self)
+            fade_anim.setDuration(320)
+            fade_anim.setStartValue(float(self.windowOpacity()))
+            fade_anim.setEndValue(0.0)
+            group = QtCore.QParallelAnimationGroup(self)
+            group.addAnimation(move_anim)
+            group.addAnimation(fade_anim)
+            item = dict(self._current_item or {})
+            _WARNING_TOAST_ACTIVE = item or None
+            group.finished.connect(self.hide)
+            group.finished.connect(self._toast_finished)
+            self._animations = [group, move_anim, fade_anim]
+            group.start(QtCore.QAbstractAnimation.DeleteWhenStopped)
+
+        def _toast_finished(self):
+            global _WARNING_TOAST_ACTIVE
+            _WARNING_TOAST_ACTIVE = None
+            self._current_item = None
+            try:
+                QtCore.QTimer.singleShot(0, _show_next_warning_toast)
+            except Exception:
+                pass
+
+
+def _show_next_warning_toast():
+    global _WARNING_TOAST_ACTIVE
+    if _WARNING_TOAST_ACTIVE is not None:
+        return False
+    item = _dequeue_warning_toast()
+    if not item:
+        return False
+    return _show_auto_key_warning_toast(
+        message=item.get("message"),
+        duration_ms=item.get("duration_ms", AUTO_KEY_WARNING_TOAST_DURATION_MS),
+        kind=item.get("kind", ""),
+    )
+
+
+def _show_auto_key_warning_toast(message=None, duration_ms=AUTO_KEY_WARNING_TOAST_DURATION_MS, kind=""):
+    global _AUTO_KEY_WARNING_TOAST, _WARNING_TOAST_ACTIVE
+    if not (QtCore and QtWidgets):
+        return False
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return False
+    parent = _maya_main_qt_window()
+    if _AUTO_KEY_WARNING_TOAST is None:
+        _AUTO_KEY_WARNING_TOAST = _AutoKeyWarningToast(parent)
+    _WARNING_TOAST_ACTIVE = {
+        "message": message or AUTO_KEY_WARNING_TOAST_MESSAGE,
+        "duration_ms": int(max(1, duration_ms)),
+        "kind": kind or "",
+    }
+    _AUTO_KEY_WARNING_TOAST.show_toast(
+        _WARNING_TOAST_ACTIVE["message"],
+        duration_ms=_WARNING_TOAST_ACTIVE["duration_ms"],
+        kind=_WARNING_TOAST_ACTIVE["kind"],
+    )
+    return True
+
+
+def _scene_anim_curves():
+    if not cmds:
+        return []
+    curves = []
+    for curve_type in ANIM_CURVE_TYPES:
+        try:
+            curves.extend(cmds.ls(type=curve_type) or [])
+        except Exception:
+            continue
+    return _dedupe_preserve_order(curves)
+
+
+def _convert_anim_curves_to_weighted_tangents(curves=None):
+    if not cmds:
+        return 0
+    curve_names = _dedupe_preserve_order(curves or _scene_anim_curves())
+    try:
+        cmds.keyTangent(global_=True, edit=True, weightedTangents=True)
+    except Exception:
+        try:
+            cmds.keyTangent(g=True, edit=True, weightedTangents=True)
+        except Exception:
+            pass
+    converted = 0
+    try:
+        cmds.undoInfo(openChunk=True, chunkName="AminateGameModeWeightedTangents")
+    except Exception:
+        pass
+    try:
+        for curve_name in curve_names:
+            if not curve_name or not cmds.objExists(curve_name):
+                continue
+            try:
+                cmds.keyTangent(curve_name, edit=True, weightedTangents=True)
+                converted += 1
+            except Exception:
+                continue
+    finally:
+        try:
+            cmds.undoInfo(closeChunk=True)
+        except Exception:
+            pass
+    return converted
 
 
 def _scene_texture_node_specs():
@@ -1935,6 +2965,12 @@ def _make_key_icon():
 def _make_student_core_icon(color_hex, glyph):
     if not QtGui:
         return QtGui.QIcon() if QtGui else None
+    if glyph == "game":
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), GAME_ANIMATION_MODE_ICON_FILE)
+        if os.path.exists(icon_path):
+            custom_pixmap = QtGui.QPixmap(icon_path)
+            if not custom_pixmap.isNull():
+                return QtGui.QIcon(custom_pixmap)
     pixmap = QtGui.QPixmap(30, 30)
     pixmap.fill(QtCore.Qt.transparent)
     painter = QtGui.QPainter(pixmap)
@@ -1957,6 +2993,18 @@ def _make_student_core_icon(color_hex, glyph):
         elif glyph == "diamond":
             points = [QtCore.QPoint(15, 7), QtCore.QPoint(23, 15), QtCore.QPoint(15, 23), QtCore.QPoint(7, 15)]
             painter.drawPolygon(QtGui.QPolygon(points))
+        elif glyph == "tween":
+            painter.setPen(QtGui.QPen(QtGui.QColor("#2C2C2C"), 2))
+            painter.setBrush(light)
+            painter.drawEllipse(7, 12, 5, 5)
+            painter.drawEllipse(18, 12, 5, 5)
+            painter.setBrush(QtGui.QColor("#2C2C2C"))
+            painter.drawEllipse(13, 12, 5, 5)
+            painter.drawLine(12, 15, 13, 15)
+            painter.drawLine(18, 15, 18, 15)
+            painter.setPen(QtGui.QPen(light, 2))
+            painter.drawLine(10, 22, 20, 22)
+            painter.drawLine(15, 19, 15, 24)
         elif glyph == "cut":
             painter.drawLine(10, 9, 20, 21)
             painter.drawLine(20, 9, 10, 21)
@@ -2229,26 +3277,26 @@ def _style_toolkit_game_mode_button(button):
     button.setStyleSheet(
         """
         QToolButton {
-            background-color: #172033;
-            color: #EAF6FF;
-            border: 1px solid #2C6CFF;
+            background-color: #FFFFFF;
+            color: #1B1F24;
+            border: 1px solid #C9D6E6;
             border-bottom: 2px solid #2C6CFF;
             border-radius: 5px;
             padding: 2px;
             font-weight: 700;
         }
         QToolButton:hover {
-            background-color: #203456;
+            background-color: #FFFFFF;
             border-color: #5BA5FF;
         }
         QToolButton:checked {
             background-color: #176BFF;
             color: #FFFFFF;
-            border-color: #8EC5FF;
-            border-bottom: 2px solid #BFE3FF;
+            border-color: #8DD7FF;
+            border-bottom: 2px solid #EAF7FF;
         }
         QToolButton:pressed {
-            background-color: #0F55D8;
+            background-color: #0B55D9;
             color: #FFFFFF;
         }
         """
@@ -3028,6 +4076,7 @@ class MayaTimingToolsController(object):
         self.auto_snap_enabled = _option_var_bool(AUTO_SNAP_OPTION, DEFAULT_AUTO_SNAP)
         self.animation_layer_tint_enabled = _option_var_bool(ANIMATION_LAYER_TINT_OPTION, DEFAULT_ANIMATION_LAYER_TINT)
         self.game_animation_mode_enabled = _option_var_bool(GAME_ANIMATION_MODE_OPTION, DEFAULT_GAME_ANIMATION_MODE)
+        self.game_animation_mode_actions = _game_animation_mode_action_settings()
         self.auto_key_enabled = _current_auto_key_state()
         self._last_time_unit = _current_time_unit()
         self._idle_script_job_id = None
@@ -3036,10 +4085,21 @@ class MayaTimingToolsController(object):
         self.last_render_camera_preset = "perspective"
         self.scene_helpers_camera_height_offset = 0.0
         self.scene_helpers_camera_dolly_offset = 0.0
+        self.floating_channel_box_hotkey = maya_floating_channel_box.get_hotkey()
+        self.floating_channel_box_opacity = maya_floating_channel_box.get_channel_opacity()
+        self.floating_graph_editor_hotkey = maya_floating_channel_box.get_graph_editor_hotkey()
+        self.floating_graph_editor_opacity = maya_floating_channel_box.get_graph_editor_opacity()
+        self.teacher_demo_edit_order = []
+        self.teacher_demo_edit_records = {}
         try:
             crash_recovery.bootstrap_crash_recovery(startup_prompt=False)
         except Exception:
             pass
+        self._floating_channel_box_manager = maya_floating_channel_box.install_global_hotkey(
+            self.floating_channel_box_hotkey,
+            self.floating_graph_editor_hotkey,
+        )
+        _install_auto_key_warning_callback()
         self._install_idle_watch()
 
     def set_animation_layer_tint_enabled(self, enabled):
@@ -3213,6 +4273,53 @@ class MayaTimingToolsController(object):
 
     def shutdown(self):
         self._remove_idle_watch()
+        _remove_auto_key_warning_callback()
+        try:
+            maya_floating_channel_box.shutdown_global_hotkey()
+        except Exception:
+            pass
+
+    def set_floating_channel_box_hotkey(self, hotkey_text):
+        self.floating_channel_box_hotkey = maya_floating_channel_box.set_hotkey(hotkey_text)
+        self._floating_channel_box_manager = maya_floating_channel_box.install_global_hotkey(
+            self.floating_channel_box_hotkey,
+            self.floating_graph_editor_hotkey,
+        )
+        message = "Floating Channel Box hotkey set to {0}.".format(self.floating_channel_box_hotkey)
+        self._emit_status(message, True)
+        return True, message
+
+    def set_floating_channel_box_opacity(self, opacity):
+        self.floating_channel_box_opacity = maya_floating_channel_box.set_channel_opacity(opacity)
+        message = "Floating Channel Box opacity set to {0:.2f}.".format(self.floating_channel_box_opacity)
+        self._emit_status(message, True)
+        return True, message
+
+    def set_floating_graph_editor_hotkey(self, hotkey_text):
+        self.floating_graph_editor_hotkey = maya_floating_channel_box.set_graph_editor_hotkey(hotkey_text)
+        self._floating_channel_box_manager = maya_floating_channel_box.install_global_hotkey(
+            self.floating_channel_box_hotkey,
+            self.floating_graph_editor_hotkey,
+        )
+        message = "Floating Graph Editor hotkey set to {0}.".format(self.floating_graph_editor_hotkey)
+        self._emit_status(message, True)
+        return True, message
+
+    def set_floating_graph_editor_opacity(self, opacity):
+        self.floating_graph_editor_opacity = maya_floating_channel_box.set_graph_editor_opacity(opacity)
+        message = "Floating Graph Editor opacity set to {0:.2f}.".format(self.floating_graph_editor_opacity)
+        self._emit_status(message, True)
+        return True, message
+
+    def show_floating_channel_box(self):
+        success, message = maya_floating_channel_box.show_floating_channel_box()
+        self._emit_status(message, success)
+        return success, message
+
+    def show_floating_graph_editor(self):
+        success, message = maya_floating_channel_box.show_floating_graph_editor()
+        self._emit_status(message, success)
+        return success, message
 
     def _emit_status(self, message, success=True):
         if self.status_callback:
@@ -3282,6 +4389,18 @@ class MayaTimingToolsController(object):
         self.game_animation_mode_enabled = False
         _save_option_var_bool(GAME_ANIMATION_MODE_OPTION, False)
         message = "Game Animation Mode visual toggle is off. Scene settings were not changed back."
+        self._emit_status(message, True)
+        return True, message
+
+    def set_game_animation_mode_action_enabled(self, action_key, enabled):
+        action_key = (action_key or "").strip()
+        if action_key not in GAME_ANIMATION_MODE_ACTIONS:
+            return False, "Unknown Game Animation Mode option: {0}".format(action_key)
+        enabled = bool(enabled)
+        self.game_animation_mode_actions[action_key] = enabled
+        _save_option_var_bool(_game_animation_mode_action_option_name(action_key), enabled)
+        label = GAME_ANIMATION_MODE_ACTIONS[action_key][0]
+        message = "Game Animation Mode option {0} is {1}.".format(label, "on" if enabled else "off")
         self._emit_status(message, True)
         return True, message
 
@@ -3417,6 +4536,68 @@ class MayaTimingToolsController(object):
         if not inserted:
             return False, "No inbetweens were added. Pick controls with animation and move to an unkeyed frame."
         return True, "Inserted {0} inbetween key(s) on {1}.".format(inserted, scope_label)
+
+    def apply_tween_machine(self, percent):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        nodes = _selected_transform_nodes()
+        if not nodes:
+            return False, "Select animated controls before using Tween Machine."
+        try:
+            percent = max(0.0, min(100.0, float(percent)))
+        except Exception:
+            percent = 50.0
+        blend = percent / 100.0
+        current_time = float(cmds.currentTime(query=True))
+        keyed_attrs = 0
+        missing_pairs = 0
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="StudentCoreTweenMachine")
+        except Exception:
+            pass
+        try:
+            for node_name in nodes:
+                keyable_attrs = cmds.listAttr(node_name, keyable=True) or []
+                for attr_name in keyable_attrs:
+                    plug = "{0}.{1}".format(node_name, attr_name)
+                    try:
+                        if cmds.getAttr(plug, lock=True) or not cmds.getAttr(plug, settable=True):
+                            continue
+                    except Exception:
+                        continue
+                    try:
+                        times = [float(value) for value in (cmds.keyframe(node_name, attribute=attr_name, query=True, timeChange=True) or [])]
+                    except Exception:
+                        times = []
+                    left_times = [value for value in times if value < current_time - 1.0e-4]
+                    right_times = [value for value in times if value > current_time + 1.0e-4]
+                    if not left_times or not right_times:
+                        missing_pairs += 1
+                        continue
+                    left_time = max(left_times)
+                    right_time = min(right_times)
+                    try:
+                        left_value = float(cmds.getAttr(plug, time=left_time))
+                        right_value = float(cmds.getAttr(plug, time=right_time))
+                    except Exception:
+                        continue
+                    tween_value = left_value + ((right_value - left_value) * blend)
+                    try:
+                        cmds.setAttr(plug, tween_value)
+                        cmds.setKeyframe(node_name, attribute=attr_name, time=current_time, value=tween_value)
+                        keyed_attrs += 1
+                    except Exception:
+                        continue
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        if not keyed_attrs:
+            if missing_pairs:
+                return False, "Tween Machine needs a previous and next key around the current frame."
+            return False, "No settable keyed channels were found for Tween Machine."
+        return True, "Tween Machine keyed {0} channel(s) at {1:.0f}% between previous and next keys.".format(keyed_attrs, percent)
 
     def remove_current_keys(self):
         if not MAYA_AVAILABLE:
@@ -3625,6 +4806,8 @@ class MayaTimingToolsController(object):
             return self.nudge_keys(1)
         if command == "insert_inbetween":
             return self.insert_inbetween_key()
+        if command == "tween_machine":
+            return True, "Open Tween Machine from the Toolkit Bar slider."
         if command == "remove_current":
             return self.remove_current_keys()
         if command == "reset_pose":
@@ -3642,43 +4825,66 @@ class MayaTimingToolsController(object):
     def apply_game_animation_mode(self):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
-        try:
-            cmds.currentUnit(time=DEFAULT_TIME_UNIT)
-        except Exception as exc:
-            return False, "Could not set the scene to 30 fps: {0}".format(exc)
+        actions = dict(getattr(self, "game_animation_mode_actions", {}) or _game_animation_mode_action_settings())
+        completed = []
 
-        try:
-            cmds.playbackOptions(edit=True, playbackSpeed=DEFAULT_PLAYBACK_SPEED)
-        except Exception as exc:
-            return False, "Could not set playback to real-time: {0}".format(exc)
+        if actions.get("time_unit", True):
+            try:
+                cmds.currentUnit(time=DEFAULT_TIME_UNIT)
+                completed.append("30 fps")
+            except Exception as exc:
+                return False, "Could not set the scene to 30 fps: {0}".format(exc)
 
-        try:
-            cmds.playbackOptions(edit=True, view="all")
-        except Exception as exc:
-            return False, "Could not set Time Slider update view to All: {0}".format(exc)
+        if actions.get("playback_speed", True):
+            try:
+                cmds.playbackOptions(edit=True, playbackSpeed=DEFAULT_PLAYBACK_SPEED)
+                completed.append("real-time playback")
+            except Exception as exc:
+                return False, "Could not set playback to real-time: {0}".format(exc)
 
-        try:
-            cmds.autoSave(enable=True, limitBackups=True, maxBackups=DEFAULT_MAX_BACKUPS)
-        except Exception as exc:
-            return False, "Could not enable autosave backups: {0}".format(exc)
+        if actions.get("update_view_all", True):
+            try:
+                cmds.playbackOptions(edit=True, view="all")
+                completed.append("Time Slider update view All")
+            except Exception as exc:
+                return False, "Could not set Time Slider update view to All: {0}".format(exc)
+
+        if actions.get("autosave", True):
+            try:
+                cmds.autoSave(enable=True, limitBackups=True, maxBackups=DEFAULT_MAX_BACKUPS)
+                completed.append("autosave backups")
+            except Exception as exc:
+                return False, "Could not enable autosave backups: {0}".format(exc)
+
+        weighted_curve_count = 0
+        if actions.get("weighted_tangents", True):
+            weighted_curve_count = _convert_anim_curves_to_weighted_tangents()
+            completed.append("{0} weighted tangent curve(s)".format(weighted_curve_count))
 
         active_panels = 0
-        _ensure_cgab_blast_panel_opt_change_callback()
-        for panel_name in _all_model_panels():
-            try:
-                cmds.modelEditor(panel_name, edit=True, activeView=True)
-                active_panels += 1
-            except Exception:
-                pass
+        if actions.get("activate_viewports", True):
+            _ensure_cgab_blast_panel_opt_change_callback()
+            for panel_name in _all_model_panels():
+                try:
+                    cmds.modelEditor(panel_name, edit=True, activeView=True)
+                    active_panels += 1
+                except Exception:
+                    pass
+            completed.append("{0} active viewport(s)".format(active_panels))
 
-        texture_success, texture_message, texture_details = self.load_scene_textures(emit_status=False)
+        texture_message = ""
+        if actions.get("load_textures", True):
+            _texture_success, texture_message, _texture_details = self.load_scene_textures(emit_status=False)
+            if texture_message:
+                completed.append(texture_message)
 
         self._last_time_unit = _current_time_unit()
         self.game_animation_mode_enabled = True
         _save_option_var_bool(GAME_ANIMATION_MODE_OPTION, True)
-        message = "Game Animation Mode is on. Scene set to 30 fps, real-time playback, autosave, and {0} active viewport(s).".format(active_panels)
-        if texture_message:
-            message = "{0} {1}".format(message, texture_message)
+        if completed:
+            message = "Game Animation Mode is on. {0}.".format("; ".join(completed))
+        else:
+            message = "Game Animation Mode is on. No setup options are enabled."
         self._emit_status(message, True)
         return True, message
 
@@ -3808,6 +5014,8 @@ class MayaTimingToolsController(object):
             self._emit_status(message, False)
             return False, message, {}
         success, message, detail = _duplicate_rig_root_for_teacher_demo(roots[0], offset_x=offset_x)
+        if success:
+            self.reset_teacher_demo_edit_log()
         self._emit_status(message, success)
         return success, message, detail
 
@@ -3824,6 +5032,8 @@ class MayaTimingToolsController(object):
                 message = "No teacher demo duplicates found."
                 self._emit_status(message, True)
                 return True, message
+            self.teacher_demo_edit_order = []
+            self.teacher_demo_edit_records = {}
             message = "Deleted {0} teacher demo duplicate(s) and {1} teacher demo layer(s).".format(deleted, deleted_layers)
             self._emit_status(message, True)
             return True, message
@@ -3837,12 +5047,70 @@ class MayaTimingToolsController(object):
             except Exception:
                 pass
 
+    def reset_teacher_demo_edit_log(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya.", {}
+        roots = _teacher_demo_duplicate_roots()
+        for root_name in roots:
+            _teacher_demo_set_baseline(root_name)
+        _sync_teacher_demo_edit_log_scene_storage(roots, "")
+        self.teacher_demo_edit_order = []
+        self.teacher_demo_edit_records = {}
+        message = "Teacher demo edit log reset from the current duplicate rig pose."
+        return True, message, {"lines": [], "text": "", "count": 0}
+
+    def refresh_teacher_demo_edit_log(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya.", {}
+        roots = _teacher_demo_duplicate_roots()
+        if not roots:
+            self.teacher_demo_edit_order = []
+            self.teacher_demo_edit_records = {}
+            _sync_teacher_demo_edit_log_scene_storage([], "")
+            return True, "No teacher demo duplicate found.", {"lines": [], "text": "", "count": 0}
+        baseline = {}
+        for root_name in roots:
+            baseline.update(_teacher_demo_baseline_for_root(root_name))
+        current = _teacher_demo_collect_edit_state(roots)
+        active_keys = set()
+        for key, baseline_item in baseline.items():
+            current_item = current.get(key)
+            if not current_item:
+                continue
+            if _teacher_demo_values_equal(baseline_item.get("value"), current_item.get("value")):
+                continue
+            active_keys.add(key)
+            if key not in self.teacher_demo_edit_order:
+                self.teacher_demo_edit_order.append(key)
+            self.teacher_demo_edit_records[key] = {
+                "sentence": _teacher_demo_edit_sentence(baseline_item, current_item),
+                "baseline": baseline_item,
+                "current": current_item,
+            }
+        for key in list(self.teacher_demo_edit_records):
+            if key not in active_keys:
+                self.teacher_demo_edit_records.pop(key, None)
+        self.teacher_demo_edit_order = [key for key in self.teacher_demo_edit_order if key in self.teacher_demo_edit_records]
+        lines = _teacher_demo_edit_log_lines(self.teacher_demo_edit_order, self.teacher_demo_edit_records)
+        text = "\n".join(lines)
+        _sync_teacher_demo_edit_log_scene_storage(roots, text)
+        message = "Teacher demo edit log has {0} item(s).".format(len(lines))
+        return True, message, {"lines": lines, "text": text, "count": len(lines)}
+
     def list_scene_text_notes(self):
         if not MAYA_AVAILABLE:
             return []
         return _scene_text_note_list()
 
-    def create_scene_text_note(self, text, color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR, size=SCENE_TEXT_NOTE_DEFAULT_SCALE):
+    def create_scene_text_note(
+        self,
+        text,
+        color_hex=SCENE_TEXT_NOTE_DEFAULT_COLOR,
+        size=SCENE_TEXT_NOTE_DEFAULT_SCALE,
+        wrap_enabled=SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED,
+        box_width=SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH,
+        box_height=SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT,
+    ):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya.", {}
         try:
@@ -3850,7 +5118,14 @@ class MayaTimingToolsController(object):
         except Exception:
             pass
         try:
-            note = _create_scene_text_note(text, color_hex=color_hex, size=size)
+            note = _create_scene_text_note(
+                text,
+                color_hex=color_hex,
+                size=size,
+                wrap_enabled=wrap_enabled,
+                box_width=box_width,
+                box_height=box_height,
+            )
             message = "Created scene text note: {0}.".format(_node_short_name(note.get("node")))
             self._emit_status(message, True)
             return True, message, note
@@ -3858,6 +5133,69 @@ class MayaTimingToolsController(object):
             message = "Could not create scene text note: {0}".format(exc)
             self._emit_status(message, False)
             return False, message, {}
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def set_scene_text_note_text(self, note_node, text):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        text = (text or "Student note").strip() or "Student note"
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersSetTextNoteText")
+        except Exception:
+            pass
+        try:
+            _ensure_string_attr(note_node, SCENE_TEXT_NOTE_TEXT_ATTR, text)
+            _rebuild_scene_text_note_text(note_node)
+            message = "Updated text note wording: {0}.".format(_node_short_name(note_node))
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not update text note wording: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
+    def set_scene_text_note_layout(
+        self,
+        note_node,
+        wrap_enabled=SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED,
+        box_width=SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH,
+        box_height=SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT,
+    ):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        if not note_node or not cmds.objExists(note_node):
+            return False, "Pick a scene text note first."
+        note_node = _long_scene_name(note_node)
+        box_width = _clamp_scene_text_note_box_size(box_width, SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH)
+        box_height = _clamp_scene_text_note_box_size(box_height, SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT)
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersSetTextNoteLayout")
+        except Exception:
+            pass
+        try:
+            _ensure_bool_attr(note_node, SCENE_TEXT_NOTE_WRAP_ATTR, bool(wrap_enabled))
+            _ensure_double_attr(note_node, SCENE_TEXT_NOTE_BOX_WIDTH_ATTR, box_width)
+            _ensure_double_attr(note_node, SCENE_TEXT_NOTE_BOX_HEIGHT_ATTR, box_height)
+            _rebuild_scene_text_note_text(note_node)
+            message = "Updated text note wrap box: {0:g} x {1:g}.".format(box_width, box_height)
+            self._emit_status(message, True)
+            return True, message
+        except Exception as exc:
+            message = "Could not update text note wrap box: {0}".format(exc)
+            self._emit_status(message, False)
+            return False, message
         finally:
             try:
                 cmds.undoInfo(closeChunk=True)
@@ -4077,6 +5415,7 @@ if QtWidgets:
             super(StudentTimelineButtonPopup, self).__init__(parent)
             self.controller = controller
             self.status_callback = status_callback
+            self._tween_machine_popup = None
             self.setObjectName(STUDENT_CORE_TEMP_POPUP_OBJECT)
             self.setWindowTitle("Toolkit Buttons")
             flags = _qt_flag("WindowType", "Tool", QtCore.Qt.Tool)
@@ -4136,9 +5475,243 @@ if QtWidgets:
             layout.addWidget(close_button)
 
         def _run(self, command):
+            if (command or "").strip().lower() == "tween_machine":
+                _show_tween_machine_popup(self.controller, self.status_callback, parent=self, anchor=self)
+                return
             success, message = self.controller.run_student_core_command(command)
             if self.status_callback:
                 self.status_callback(message, success)
+
+
+    def _maya_time_slider_widget():
+        if not (MAYA_AVAILABLE and mel and QtWidgets and hold_utils.omui and hold_utils.shiboken):
+            return None
+        try:
+            control_name = mel.eval("$aminateTmpTimeSlider=$gPlayBackSlider;")
+        except Exception:
+            control_name = ""
+        if not control_name:
+            return None
+        pointer = None
+        for finder in (hold_utils.omui.MQtUtil.findControl, hold_utils.omui.MQtUtil.findLayout):
+            try:
+                pointer = finder(control_name)
+            except Exception:
+                pointer = None
+            if pointer:
+                break
+        if not pointer:
+            return None
+        try:
+            return hold_utils.shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+        except Exception:
+            return None
+
+
+    def _position_popup_near_time_slider(popup, fallback_anchor=None):
+        if not popup or not QtCore:
+            return
+        slider_widget = _maya_time_slider_widget()
+        target_widget = slider_widget or fallback_anchor
+        try:
+            popup.adjustSize()
+        except Exception:
+            pass
+        if target_widget is not None:
+            try:
+                top_left = target_widget.mapToGlobal(QtCore.QPoint(0, 0))
+                width = max(target_widget.width(), 1)
+                popup_width = max(popup.width(), popup.sizeHint().width())
+                popup_height = max(popup.height(), popup.sizeHint().height())
+                x_pos = top_left.x() + max(0, (width - popup_width) // 2)
+                y_pos = top_left.y() - popup_height - 8
+            except Exception:
+                x_pos = QtGui.QCursor.pos().x()
+                y_pos = QtGui.QCursor.pos().y()
+        else:
+            x_pos = QtGui.QCursor.pos().x()
+            y_pos = QtGui.QCursor.pos().y()
+        screen = None
+        try:
+            screen = QtWidgets.QApplication.screenAt(QtCore.QPoint(x_pos, y_pos))
+        except Exception:
+            screen = None
+        if screen is None:
+            try:
+                screen = QtWidgets.QApplication.primaryScreen()
+            except Exception:
+                screen = None
+        if screen is not None:
+            try:
+                available = screen.availableGeometry()
+                popup_width = max(popup.width(), popup.sizeHint().width())
+                popup_height = max(popup.height(), popup.sizeHint().height())
+                x_pos = min(max(available.left(), x_pos), max(available.left(), available.right() - popup_width))
+                y_pos = min(max(available.top(), y_pos), max(available.top(), available.bottom() - popup_height))
+            except Exception:
+                pass
+        popup.move(x_pos, y_pos)
+
+
+    class TweenMachinePopup(QtWidgets.QDialog):
+        def __init__(self, controller, status_callback=None, post_apply_callback=None, parent=None):
+            super(TweenMachinePopup, self).__init__(parent or _maya_main_window())
+            self.controller = controller
+            self.status_callback = status_callback
+            self.post_apply_callback = post_apply_callback
+            self.setObjectName("toolkitBarTweenMachinePopup")
+            self.setWindowTitle("Tween Machine")
+            flags = _qt_flag("WindowType", "Tool", QtCore.Qt.Tool)
+            try:
+                self.setWindowFlags(flags)
+            except Exception:
+                pass
+            self._apply_timer = QtCore.QTimer(self)
+            self._apply_timer.setSingleShot(True)
+            self._apply_timer.setInterval(120)
+            self._apply_timer.timeout.connect(lambda: self._apply_current_value(create_history=False))
+            self._build_ui()
+
+        def _build_ui(self):
+            self.setStyleSheet(
+                """
+                QDialog#toolkitBarTweenMachinePopup {
+                    background-color: #2B2B2B;
+                    border: 1px solid #3A3A3A;
+                    border-radius: 8px;
+                }
+                QLabel#tweenMachineTitle {
+                    color: #F2F2F2;
+                    font-size: 12px;
+                    font-weight: 800;
+                }
+                QLabel#tweenMachinePercentLabel {
+                    color: #BDEBFF;
+                    font-size: 20px;
+                    font-weight: 900;
+                }
+                QLabel#tweenMachineHelp,
+                QLabel#tweenMachineStatus {
+                    color: #B8B8B8;
+                    font-size: 10px;
+                }
+                QSlider::groove:horizontal {
+                    height: 8px;
+                    background-color: #151515;
+                    border: 1px solid #3A3A3A;
+                    border-radius: 4px;
+                }
+                QSlider::sub-page:horizontal {
+                    background-color: #4CC9F0;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background-color: #F2F2F2;
+                    border: 2px solid #4CC9F0;
+                    width: 18px;
+                    margin: -6px 0;
+                    border-radius: 9px;
+                }
+                QPushButton {
+                    background-color: #202020;
+                    color: #F2F2F2;
+                    border: 1px solid #3A3A3A;
+                    border-bottom: 2px solid #4CC9F0;
+                    border-radius: 5px;
+                    padding: 4px 8px;
+                    font-weight: 700;
+                }
+                QPushButton:hover {
+                    background-color: #303030;
+                    border-color: #4CC9F0;
+                }
+                """
+            )
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.setContentsMargins(12, 10, 12, 10)
+            layout.setSpacing(8)
+            header = QtWidgets.QHBoxLayout()
+            title = QtWidgets.QLabel("Tween Machine")
+            title.setObjectName("tweenMachineTitle")
+            header.addWidget(title)
+            header.addStretch(1)
+            self.percent_label = QtWidgets.QLabel("50%")
+            self.percent_label.setObjectName("tweenMachinePercentLabel")
+            header.addWidget(self.percent_label)
+            layout.addLayout(header)
+
+            self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            self.slider.setObjectName("toolkitBarTweenMachineSlider")
+            self.slider.setRange(0, 100)
+            self.slider.setValue(50)
+            self.slider.setTickPosition(QtWidgets.QSlider.TicksBelow)
+            self.slider.setTickInterval(25)
+            self.slider.setToolTip("0% matches the previous key, 100% matches the next key, 50% is halfway.")
+            layout.addWidget(self.slider)
+
+            labels = QtWidgets.QHBoxLayout()
+            left_label = QtWidgets.QLabel("Previous key")
+            left_label.setObjectName("tweenMachineHelp")
+            right_label = QtWidgets.QLabel("Next key")
+            right_label.setObjectName("tweenMachineHelp")
+            labels.addWidget(left_label)
+            labels.addStretch(1)
+            labels.addWidget(right_label)
+            layout.addLayout(labels)
+
+            presets = QtWidgets.QHBoxLayout()
+            for value, text in ((0, "Prev"), (25, "25"), (50, "50"), (75, "75"), (100, "Next")):
+                button = QtWidgets.QPushButton(text)
+                button.clicked.connect(lambda _checked=False, slider_value=value: self._set_slider_value(slider_value))
+                presets.addWidget(button)
+            layout.addLayout(presets)
+
+            self.status_label = QtWidgets.QLabel("Select animated controls. Move timeline between two keys. Slide to key tween.")
+            self.status_label.setObjectName("tweenMachineStatus")
+            self.status_label.setWordWrap(True)
+            layout.addWidget(self.status_label)
+
+            self.slider.valueChanged.connect(self._slider_changed)
+            self.slider.sliderReleased.connect(lambda: self._apply_current_value(create_history=True))
+
+        def _set_slider_value(self, value):
+            self.slider.setValue(int(value))
+            self._apply_current_value(create_history=True)
+
+        def _slider_changed(self, value):
+            self.percent_label.setText("{0}%".format(int(value)))
+            self._apply_timer.start()
+
+        def _apply_current_value(self, create_history=True):
+            if self._apply_timer.isActive():
+                self._apply_timer.stop()
+            success, message = self.controller.apply_tween_machine(self.slider.value())
+            self.status_label.setText(message)
+            if self.status_callback:
+                self.status_callback(message, success)
+            if create_history and self.post_apply_callback:
+                self.post_apply_callback(success)
+
+
+    def _show_tween_machine_popup(controller, status_callback=None, parent=None, post_apply_callback=None, anchor=None):
+        popup = TweenMachinePopup(
+            controller,
+            status_callback=status_callback,
+            post_apply_callback=post_apply_callback,
+            parent=parent,
+        )
+        if parent is not None:
+            try:
+                parent._tween_machine_popup = popup
+            except Exception:
+                pass
+        _position_popup_near_time_slider(popup, fallback_anchor=anchor or parent)
+        popup.show()
+        try:
+            popup.raise_()
+        except Exception:
+            pass
+        return popup
 
 
     class StudentCoreToolbarPanel(QtWidgets.QFrame):
@@ -4147,6 +5720,7 @@ if QtWidgets:
             self.controller = controller
             self.status_callback = status_callback
             self._temp_popup = None
+            self._tween_machine_popup = None
             self.setObjectName("studentCoreToolbarPanel")
             self._build_ui()
 
@@ -4214,6 +5788,9 @@ if QtWidgets:
             layout.addWidget(track)
 
         def _run(self, command):
+            if (command or "").strip().lower() == "tween_machine":
+                _show_tween_machine_popup(self.controller, self.status_callback, parent=self, anchor=self)
+                return
             success, message = self.controller.run_student_core_command(command)
             if self.status_callback:
                 self.status_callback(message, success)
@@ -4225,29 +5802,53 @@ if QtWidgets:
 
 
     class StudentTimelineButtonBarWindow(_WindowBase):
-        def __init__(self, controller, status_callback=None, parent=None, owns_controller=False):
+        def __init__(
+            self,
+            controller,
+            status_callback=None,
+            parent=None,
+            owns_controller=False,
+            embedded=False,
+            start_history_watcher=True,
+            max_history_markers=18,
+        ):
             super(StudentTimelineButtonBarWindow, self).__init__(parent or _maya_main_window())
             self.controller = controller
             self.status_callback = status_callback
             self.owns_controller = bool(owns_controller)
+            self.embedded = bool(embedded)
+            self.start_history_watcher = bool(start_history_watcher)
+            self.max_history_markers = max(1, int(max_history_markers or 18))
             self.history_controller = maya_history_timeline.MayaHistoryTimelineController(status_callback=status_callback)
-            self.setObjectName(STUDENT_TIMELINE_BAR_OBJECT_NAME)
-            self.setWindowTitle("")
-            self.setMinimumSize(900, 78)
-            self.setMaximumHeight(92)
+            self.setObjectName("studentCoreTimelineButtonBarEmbeddedPanel" if self.embedded else STUDENT_TIMELINE_BAR_OBJECT_NAME)
+            self.setWindowTitle("" if not self.embedded else "Toolkit Bar")
+            self._tween_machine_popup = None
+            if self.embedded:
+                try:
+                    self.setWindowFlags(_qt_flag("WindowType", "Widget", 0))
+                except Exception:
+                    pass
+                self.setMinimumSize(0, 78)
+                self.setMaximumHeight(110)
+            else:
+                self.setMinimumSize(900, 78)
+                self.setMaximumHeight(92)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             self._layer_tint_timer = None
             self._refreshing_animation_layer_controls = False
             self._build_ui()
-            self.history_controller.start_default_action_snapshots(parent=self, interval_ms=2000)
+            _register_timeline_bar_widget(self)
+            if self.start_history_watcher:
+                self.history_controller.start_default_action_snapshots(parent=self, interval_ms=2000)
             self._refresh_animation_layer_tint()
             self._start_animation_layer_tint_timer()
 
         def _build_ui(self):
             self.setStyleSheet(
                 """
-                QDialog#studentCoreTimelineButtonBarWindow {
+                QDialog#studentCoreTimelineButtonBarWindow,
+                QDialog#studentCoreTimelineButtonBarEmbeddedPanel {
                     background-color: #2B2B2B;
                     border: 1px solid #3A3A3A;
                 }
@@ -4294,7 +5895,7 @@ if QtWidgets:
                 controller=self.history_controller,
                 status_callback=self.status_callback,
                 parent=self,
-                max_markers=18,
+                max_markers=self.max_history_markers,
             )
             self.history_strip.setToolTip(
                 "History Timeline: small ZBrush-style snapshot strip. Saves after Maya actions by default. Click H+ to save now, or click a block to restore."
@@ -4423,6 +6024,10 @@ if QtWidgets:
                 button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
                 button.setToolTip("{0}: {1}".format(tool["label"], tool["tooltip"]))
                 _style_student_timeline_bar_button(button, tool["color"])
+                if self.embedded:
+                    button.setIconSize(QtCore.QSize(16, 16))
+                    button.setMinimumSize(24, 24)
+                    button.setMaximumSize(28, 26)
                 button.clicked.connect(lambda _checked=False, command=tool["command"]: self._run(command))
                 layout.addWidget(button)
             separator = QtWidgets.QFrame()
@@ -4437,6 +6042,10 @@ if QtWidgets:
                 button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
                 button.setToolTip("{0}: {1}".format(tool["label"], tool["tooltip"]))
                 _style_student_timeline_bar_button(button, tool["color"])
+                if self.embedded:
+                    button.setIconSize(QtCore.QSize(16, 16))
+                    button.setMinimumSize(24, 24)
+                    button.setMaximumSize(28, 26)
                 button.clicked.connect(lambda _checked=False, tab=tool["tab"]: self._open_workflow_tab(tab))
                 layout.addWidget(button)
             layout.addStretch(1)
@@ -4450,6 +6059,10 @@ if QtWidgets:
                 "Game Animation Mode: set scene to 30 fps, realtime playback, autosave with five backups, texture reload, and all viewports active."
             )
             _style_toolkit_game_mode_button(self.game_mode_button)
+            if self.embedded:
+                self.game_mode_button.setIconSize(QtCore.QSize(18, 18))
+                self.game_mode_button.setMinimumSize(28, 24)
+                self.game_mode_button.setMaximumSize(32, 26)
             self.game_mode_button.toggled.connect(self._toggle_game_animation_mode)
             layout.addWidget(self.game_mode_button)
             main_layout.addLayout(layout)
@@ -4665,6 +6278,15 @@ if QtWidgets:
                 self.status_callback(message, success)
 
         def _run(self, command):
+            if (command or "").strip().lower() == "tween_machine":
+                _show_tween_machine_popup(
+                    self.controller,
+                    self.status_callback,
+                    parent=self,
+                    post_apply_callback=lambda success: self._snapshot_after_toolkit_action("tween machine", success),
+                    anchor=self,
+                )
+                return
             success, message = self.controller.run_student_core_command(command)
             self._snapshot_after_toolkit_action(command, success)
             if self.status_callback:
@@ -4687,7 +6309,7 @@ if QtWidgets:
             success, message = self.controller.set_game_animation_mode_enabled(enabled)
             self._snapshot_after_toolkit_action("game animation mode", success)
             self._set_game_button_checked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
-            self._sync_scene_helpers_game_button()
+            self._sync_game_mode_buttons()
             if self.status_callback:
                 self.status_callback(message, success)
             elif MAYA_AVAILABLE and om2:
@@ -4704,17 +6326,8 @@ if QtWidgets:
                 self.history_strip._set_status(message, success)
                 self.history_strip.refresh()
 
-        def _sync_scene_helpers_game_button(self):
-            for window in (GLOBAL_WINDOW,):
-                if window is not None and hasattr(window, "game_mode_button"):
-                    try:
-                        window.game_mode_button.blockSignals(True)
-                        enabled = bool(getattr(self.controller, "game_animation_mode_enabled", False))
-                        window.game_mode_button.setChecked(enabled)
-                        window.game_mode_button.blockSignals(False)
-                        _set_game_mode_button_glow(window.game_mode_button, enabled)
-                    except Exception:
-                        pass
+        def _sync_game_mode_buttons(self):
+            _sync_timeline_bar_game_buttons(self.controller)
 
         def _open_workflow_tab(self, tab_alias):
             success, message = _open_workflow_tab(tab_alias)
@@ -4727,6 +6340,7 @@ if QtWidgets:
                     om2.MGlobal.displayWarning("[Toolkit Bar] {0}".format(message))
 
         def closeEvent(self, event):
+            _unregister_timeline_bar_widget(self)
             if self._layer_tint_timer is not None:
                 try:
                     self._layer_tint_timer.stop()
@@ -4764,9 +6378,6 @@ if QtWidgets:
             main_layout = QtWidgets.QVBoxLayout(self)
             main_layout.setContentsMargins(12, 12, 12, 12)
             main_layout.setSpacing(10)
-
-            self.student_core_panel = StudentCoreToolbarPanel(self.controller, self._set_status, parent=self)
-            main_layout.addWidget(self.student_core_panel)
 
             intro = QtWidgets.QLabel(
             "Use Auto Key when you want Maya to key changes as you animate. "
@@ -4808,19 +6419,6 @@ if QtWidgets:
             )
             action_row.addWidget(self.auto_snap_button, 1)
 
-            self.game_mode_button = QtWidgets.QToolButton()
-            self.game_mode_button.setObjectName("sceneHelpersGameAnimationModeButton")
-            self.game_mode_button.setCheckable(True)
-            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
-            self.game_mode_button.setText("Game Animation Mode")
-            self.game_mode_button.setIcon(_make_student_core_icon("#176BFF", "game"))
-            self.game_mode_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-            _style_toolkit_game_mode_button(self.game_mode_button)
-            self.game_mode_button.setToolTip(
-                "Set the scene to 30 fps, real-time playback, autosave with five backups, and mark every viewport "
-                "active."
-            )
-            action_row.addWidget(self.game_mode_button, 1)
             self.load_textures_button = QtWidgets.QPushButton("Load Textures")
             self.load_textures_button.setToolTip(
                 "Reload scene texture nodes and try to fix broken texture paths from the current Maya project "
@@ -4833,6 +6431,45 @@ if QtWidgets:
             )
             action_row.addWidget(self.recover_autosave_button, 1)
             main_layout.addLayout(action_row)
+
+            self.game_mode_group = QtWidgets.QGroupBox("Game Animation Mode")
+            self.game_mode_group.setObjectName("sceneHelpersGameAnimationModeGroup")
+            game_mode_layout = QtWidgets.QVBoxLayout(self.game_mode_group)
+            game_mode_layout.setContentsMargins(10, 8, 10, 8)
+            game_mode_layout.setSpacing(6)
+            game_mode_top_row = QtWidgets.QHBoxLayout()
+            game_mode_top_row.setSpacing(8)
+            self.game_mode_button = QtWidgets.QToolButton()
+            self.game_mode_button.setObjectName("sceneHelpersGameAnimationModeButton")
+            self.game_mode_button.setCheckable(True)
+            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
+            self.game_mode_button.setText("Game Animation Mode")
+            self.game_mode_button.setIcon(_make_student_core_icon("#176BFF", "game"))
+            self.game_mode_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            _style_toolkit_game_mode_button(self.game_mode_button)
+            self.game_mode_button.setToolTip(
+                "Run the checked Game Animation Mode setup actions. Tick boxes below control what this button changes."
+            )
+            game_mode_top_row.addWidget(self.game_mode_button, 0)
+            game_mode_hint = QtWidgets.QLabel("Choose exactly what the blue game button applies to this scene.")
+            game_mode_hint.setWordWrap(True)
+            game_mode_top_row.addWidget(game_mode_hint, 1)
+            game_mode_layout.addLayout(game_mode_top_row)
+            game_mode_checks = QtWidgets.QGridLayout()
+            game_mode_checks.setHorizontalSpacing(12)
+            game_mode_checks.setVerticalSpacing(4)
+            self.game_mode_action_checks = {}
+            action_settings = getattr(self.controller, "game_animation_mode_actions", _game_animation_mode_action_settings())
+            for index, (action_key, action_info) in enumerate(GAME_ANIMATION_MODE_ACTIONS.items()):
+                action_label, action_tooltip = action_info
+                checkbox = QtWidgets.QCheckBox(action_label)
+                checkbox.setObjectName("sceneHelpersGameModeOption_{0}".format(action_key))
+                checkbox.setChecked(bool(action_settings.get(action_key, True)))
+                checkbox.setToolTip(action_tooltip)
+                self.game_mode_action_checks[action_key] = checkbox
+                game_mode_checks.addWidget(checkbox, index // 3, index % 3)
+            game_mode_layout.addLayout(game_mode_checks)
+            main_layout.addWidget(self.game_mode_group)
 
             setup_row = QtWidgets.QHBoxLayout()
             setup_row.setSpacing(8)
@@ -4859,6 +6496,33 @@ if QtWidgets:
             )
             setup_row.addWidget(self.delete_teacher_rig_button, 1)
             main_layout.addLayout(setup_row)
+
+            teacher_log_group = QtWidgets.QGroupBox("Teacher Demo Edit Log")
+            teacher_log_group.setObjectName("sceneHelpersTeacherDemoEditLogGroup")
+            teacher_log_layout = QtWidgets.QVBoxLayout(teacher_log_group)
+            teacher_log_layout.setContentsMargins(10, 8, 10, 8)
+            teacher_log_layout.setSpacing(6)
+            self.teacher_demo_edit_log = QtWidgets.QPlainTextEdit()
+            self.teacher_demo_edit_log.setObjectName("sceneHelpersTeacherDemoEditLog")
+            self.teacher_demo_edit_log.setReadOnly(True)
+            self.teacher_demo_edit_log.setMaximumHeight(130)
+            self.teacher_demo_edit_log.setPlaceholderText("Duplicate a rig for teacher demo, then edit the duplicate. Changes appear here as student-readable bullet points.")
+            self.teacher_demo_edit_log.setToolTip(
+                "Plain-English list of edits made to the teacher-demo duplicate. If an edit is undone back to its original value, the bullet disappears."
+            )
+            teacher_log_layout.addWidget(self.teacher_demo_edit_log)
+            teacher_log_buttons = QtWidgets.QHBoxLayout()
+            teacher_log_buttons.setSpacing(8)
+            self.refresh_teacher_demo_log_button = QtWidgets.QPushButton("Refresh Edit Log")
+            self.refresh_teacher_demo_log_button.setObjectName("sceneHelpersRefreshTeacherDemoLogButton")
+            self.refresh_teacher_demo_log_button.setToolTip("Refresh the teacher-demo edit list from the current duplicate rig values.")
+            self.reset_teacher_demo_log_button = QtWidgets.QPushButton("Reset Log From Current Pose")
+            self.reset_teacher_demo_log_button.setObjectName("sceneHelpersResetTeacherDemoLogButton")
+            self.reset_teacher_demo_log_button.setToolTip("Clear the current list and treat the current teacher-demo duplicate pose as the new starting point.")
+            teacher_log_buttons.addWidget(self.refresh_teacher_demo_log_button, 1)
+            teacher_log_buttons.addWidget(self.reset_teacher_demo_log_button, 1)
+            teacher_log_layout.addLayout(teacher_log_buttons)
+            main_layout.addWidget(teacher_log_group)
 
             camera_row = QtWidgets.QHBoxLayout()
             camera_row.setSpacing(8)
@@ -4928,6 +6592,60 @@ if QtWidgets:
             snap_row.addWidget(self.refresh_layer_tint_button, 1)
             main_layout.addLayout(snap_row)
 
+            floating_channel_row = QtWidgets.QHBoxLayout()
+            floating_channel_row.setSpacing(8)
+            floating_channel_row.addWidget(QtWidgets.QLabel("Floating Channel Box Hotkey"))
+            self.floating_channel_hotkey_edit = QtWidgets.QLineEdit()
+            self.floating_channel_hotkey_edit.setObjectName("sceneHelpersFloatingChannelHotkeyEdit")
+            self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
+            self.floating_channel_hotkey_edit.setToolTip("Hotkey for the semi-transparent floating channel editor. Default is #. Examples: #, Ctrl+Alt+C, F8.")
+            floating_channel_row.addWidget(self.floating_channel_hotkey_edit, 1)
+            floating_channel_row.addWidget(QtWidgets.QLabel("Opacity"))
+            self.floating_channel_opacity_spin = QtWidgets.QDoubleSpinBox()
+            self.floating_channel_opacity_spin.setObjectName("sceneHelpersFloatingChannelOpacitySpin")
+            self.floating_channel_opacity_spin.setRange(0.2, 1.0)
+            self.floating_channel_opacity_spin.setDecimals(2)
+            self.floating_channel_opacity_spin.setSingleStep(0.05)
+            self.floating_channel_opacity_spin.setValue(getattr(self.controller, "floating_channel_box_opacity", maya_floating_channel_box.DEFAULT_CHANNEL_OPACITY))
+            self.floating_channel_opacity_spin.setToolTip("Transparency for the Floating Channel Box. Lower is more see-through.")
+            floating_channel_row.addWidget(self.floating_channel_opacity_spin)
+            self.set_floating_channel_hotkey_button = QtWidgets.QPushButton("Set Hotkey")
+            self.set_floating_channel_hotkey_button.setObjectName("sceneHelpersSetFloatingChannelHotkeyButton")
+            self.set_floating_channel_hotkey_button.setToolTip("Save the custom hotkey for the Floating Channel Box.")
+            floating_channel_row.addWidget(self.set_floating_channel_hotkey_button)
+            self.open_floating_channel_box_button = QtWidgets.QPushButton("Open Floating Channel Box")
+            self.open_floating_channel_box_button.setObjectName("sceneHelpersOpenFloatingChannelBoxButton")
+            self.open_floating_channel_box_button.setToolTip("Open the semi-transparent floating channel editor for the current selection.")
+            floating_channel_row.addWidget(self.open_floating_channel_box_button)
+            main_layout.addLayout(floating_channel_row)
+
+            floating_graph_row = QtWidgets.QHBoxLayout()
+            floating_graph_row.setSpacing(8)
+            floating_graph_row.addWidget(QtWidgets.QLabel("Floating Graph Editor Hotkey"))
+            self.floating_graph_hotkey_edit = QtWidgets.QLineEdit()
+            self.floating_graph_hotkey_edit.setObjectName("sceneHelpersFloatingGraphHotkeyEdit")
+            self.floating_graph_hotkey_edit.setText(getattr(self.controller, "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
+            self.floating_graph_hotkey_edit.setToolTip("Hotkey for the semi-transparent native Maya Graph Editor clone. Default is Ctrl+Semicolon.")
+            floating_graph_row.addWidget(self.floating_graph_hotkey_edit, 1)
+            floating_graph_row.addWidget(QtWidgets.QLabel("Opacity"))
+            self.floating_graph_opacity_spin = QtWidgets.QDoubleSpinBox()
+            self.floating_graph_opacity_spin.setObjectName("sceneHelpersFloatingGraphOpacitySpin")
+            self.floating_graph_opacity_spin.setRange(0.2, 1.0)
+            self.floating_graph_opacity_spin.setDecimals(2)
+            self.floating_graph_opacity_spin.setSingleStep(0.05)
+            self.floating_graph_opacity_spin.setValue(getattr(self.controller, "floating_graph_editor_opacity", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_OPACITY))
+            self.floating_graph_opacity_spin.setToolTip("Transparency for the Floating Graph Editor. Lower is more see-through.")
+            floating_graph_row.addWidget(self.floating_graph_opacity_spin)
+            self.set_floating_graph_hotkey_button = QtWidgets.QPushButton("Set Hotkey")
+            self.set_floating_graph_hotkey_button.setObjectName("sceneHelpersSetFloatingGraphHotkeyButton")
+            self.set_floating_graph_hotkey_button.setToolTip("Save the custom hotkey for the Floating Graph Editor.")
+            floating_graph_row.addWidget(self.set_floating_graph_hotkey_button)
+            self.open_floating_graph_button = QtWidgets.QPushButton("Open Floating Graph Editor")
+            self.open_floating_graph_button.setObjectName("sceneHelpersOpenFloatingGraphButton")
+            self.open_floating_graph_button.setToolTip("Open a semi-transparent native Maya Graph Editor clone that can float or dock without creating duplicates.")
+            floating_graph_row.addWidget(self.open_floating_graph_button)
+            main_layout.addLayout(floating_graph_row)
+
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
             help_box.setPlainText(
@@ -4944,7 +6662,9 @@ if QtWidgets:
                 "11. Use Camera Preset to jump between the Front, Side, and Three Quarter cameras.\n"
                 "12. Select a rig root and use Duplicate Rig For Teacher Demo when you want a separate animated copy for a student demonstration.\n"
                 "13. Use Delete Teacher Demo to remove every teacher-demo duplicate and its helper display layer.\n"
-                "14. Select controls first when you want the snap to act only on part of the scene."
+                "14. Tap # to open the Floating Channel Box, or change the hotkey here.\n"
+                "15. Use Floating Graph Editor for a translucent native Maya Graph Editor clone that you can dock into Maya.\n"
+                "16. Select controls first when you want the snap to act only on part of the scene."
             )
             help_box.setMaximumHeight(110)
             main_layout.addWidget(help_box)
@@ -4980,6 +6700,37 @@ if QtWidgets:
             self.create_scene_text_note_button.setToolTip("Create a Maya text-curve note beside the selected body part or control.")
             text_note_row.addWidget(self.create_scene_text_note_button, 1)
             main_layout.addLayout(text_note_row)
+
+            text_note_wrap_row = QtWidgets.QHBoxLayout()
+            text_note_wrap_row.setSpacing(8)
+            self.scene_text_wrap_check = QtWidgets.QCheckBox("Auto Wrap")
+            self.scene_text_wrap_check.setObjectName("sceneHelpersTextNoteWrapCheck")
+            self.scene_text_wrap_check.setChecked(SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED)
+            self.scene_text_wrap_check.setToolTip("Wrap scene text into multiple Maya text-curve lines and fit them inside the box below.")
+            text_note_wrap_row.addWidget(self.scene_text_wrap_check, 1)
+            self.scene_text_box_width_spin = QtWidgets.QDoubleSpinBox()
+            self.scene_text_box_width_spin.setObjectName("sceneHelpersTextNoteBoxWidthSpin")
+            self.scene_text_box_width_spin.setRange(SCENE_TEXT_NOTE_MIN_BOX_SIZE, SCENE_TEXT_NOTE_MAX_BOX_SIZE)
+            self.scene_text_box_width_spin.setDecimals(1)
+            self.scene_text_box_width_spin.setSingleStep(10.0)
+            self.scene_text_box_width_spin.setValue(SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH)
+            self.scene_text_box_width_spin.setPrefix("Box W ")
+            self.scene_text_box_width_spin.setToolTip("World-space width for the selected note wrap box. Text scales down if it would exceed this width.")
+            text_note_wrap_row.addWidget(self.scene_text_box_width_spin, 1)
+            self.scene_text_box_height_spin = QtWidgets.QDoubleSpinBox()
+            self.scene_text_box_height_spin.setObjectName("sceneHelpersTextNoteBoxHeightSpin")
+            self.scene_text_box_height_spin.setRange(SCENE_TEXT_NOTE_MIN_BOX_SIZE, SCENE_TEXT_NOTE_MAX_BOX_SIZE)
+            self.scene_text_box_height_spin.setDecimals(1)
+            self.scene_text_box_height_spin.setSingleStep(10.0)
+            self.scene_text_box_height_spin.setValue(SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT)
+            self.scene_text_box_height_spin.setPrefix("Box H ")
+            self.scene_text_box_height_spin.setToolTip("World-space height for the selected note wrap box. Text scales down if it would exceed this height.")
+            text_note_wrap_row.addWidget(self.scene_text_box_height_spin, 1)
+            self.apply_text_note_box_button = QtWidgets.QPushButton("Apply Box")
+            self.apply_text_note_box_button.setObjectName("sceneHelpersTextNoteApplyBoxButton")
+            self.apply_text_note_box_button.setToolTip("Apply current wrap, width, and height to the selected text note.")
+            text_note_wrap_row.addWidget(self.apply_text_note_box_button, 1)
+            main_layout.addLayout(text_note_wrap_row)
 
             text_note_list_row = QtWidgets.QHBoxLayout()
             text_note_list_row.setSpacing(8)
@@ -5024,7 +6775,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3 BETA")
+            self.version_label = QtWidgets.QLabel("Version 0.3.1")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -5036,19 +6787,33 @@ if QtWidgets:
             self.auto_snap_button.toggled.connect(self._toggle_auto_snap)
             self.animation_layer_tint_button.toggled.connect(self._toggle_animation_layer_tint)
             self.refresh_layer_tint_button.clicked.connect(self._refresh_animation_layer_tint)
+            self.set_floating_channel_hotkey_button.clicked.connect(self._set_floating_channel_hotkey)
+            self.floating_channel_opacity_spin.valueChanged.connect(self._set_floating_channel_opacity)
+            self.open_floating_channel_box_button.clicked.connect(self._open_floating_channel_box)
+            self.set_floating_graph_hotkey_button.clicked.connect(self._set_floating_graph_hotkey)
+            self.floating_graph_opacity_spin.valueChanged.connect(self._set_floating_graph_opacity)
+            self.open_floating_graph_button.clicked.connect(self._open_floating_graph_editor)
             self.snap_now_button.clicked.connect(self._snap_now)
             self.game_mode_button.toggled.connect(self._toggle_game_mode)
+            for action_key, checkbox in getattr(self, "game_mode_action_checks", {}).items():
+                checkbox.toggled.connect(lambda enabled, key=action_key: self._toggle_game_mode_action(key, enabled))
             self.load_textures_button.clicked.connect(self._load_textures)
             self.recover_autosave_button.clicked.connect(self._recover_autosave)
             self.render_env_button.clicked.connect(self._render_environment)
             self.delete_render_env_button.clicked.connect(self._delete_render_environment)
             self.duplicate_teacher_rig_button.clicked.connect(self._duplicate_teacher_rig)
             self.delete_teacher_rig_button.clicked.connect(self._delete_teacher_rig)
+            self.refresh_teacher_demo_log_button.clicked.connect(lambda: self._refresh_teacher_demo_edit_log(force_status=True))
+            self.reset_teacher_demo_log_button.clicked.connect(self._reset_teacher_demo_edit_log)
             self.render_preset_button.clicked.connect(self._go_to_render_camera)
             self.camera_height_offset_spin.valueChanged.connect(self._camera_offsets_changed)
             self.camera_dolly_offset_spin.valueChanged.connect(self._camera_offsets_changed)
             self.create_scene_text_note_button.clicked.connect(self._create_scene_text_note)
             self.scene_text_size_spin.valueChanged.connect(self._scene_text_note_size_changed)
+            self.scene_text_wrap_check.toggled.connect(self._scene_text_note_layout_changed)
+            self.scene_text_box_width_spin.valueChanged.connect(self._scene_text_note_layout_changed)
+            self.scene_text_box_height_spin.valueChanged.connect(self._scene_text_note_layout_changed)
+            self.apply_text_note_box_button.clicked.connect(self._apply_scene_text_note_box)
             self.key_text_note_on_button.clicked.connect(lambda: self._key_scene_text_note(True))
             self.key_text_note_off_button.clicked.connect(lambda: self._key_scene_text_note(False))
             self.move_text_note_button.clicked.connect(self._move_scene_text_note)
@@ -5057,6 +6822,12 @@ if QtWidgets:
             self.refresh_text_notes_button.clicked.connect(self._refresh_scene_text_notes)
             self.scene_text_note_list.itemSelectionChanged.connect(self._scene_text_note_selected)
             self._refresh_scene_text_notes()
+            self._last_teacher_demo_log_text = None
+            self.teacher_demo_log_timer = QtCore.QTimer(self)
+            self.teacher_demo_log_timer.setInterval(850)
+            self.teacher_demo_log_timer.timeout.connect(self._refresh_teacher_demo_edit_log)
+            self.teacher_demo_log_timer.start()
+            self._refresh_teacher_demo_edit_log()
 
         def _sync_from_controller(self):
             self.auto_key_button.blockSignals(True)
@@ -5066,10 +6837,9 @@ if QtWidgets:
             self.auto_snap_button.setChecked(bool(self.controller.auto_snap_enabled))
             self.auto_snap_button.blockSignals(False)
             self.game_mode_button.blockSignals(True)
-            enabled = bool(getattr(self.controller, "game_animation_mode_enabled", False))
-            self.game_mode_button.setChecked(enabled)
+            self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
             self.game_mode_button.blockSignals(False)
-            _set_game_mode_button_glow(self.game_mode_button, enabled)
+            _set_game_mode_button_glow(self.game_mode_button, bool(getattr(self.controller, "game_animation_mode_enabled", False)))
             self.animation_layer_tint_button.blockSignals(True)
             self.animation_layer_tint_button.setChecked(bool(getattr(self.controller, "animation_layer_tint_enabled", True)))
             self.animation_layer_tint_button.blockSignals(False)
@@ -5086,6 +6856,19 @@ if QtWidgets:
             self.camera_dolly_offset_spin.blockSignals(True)
             self.camera_dolly_offset_spin.setValue(float(getattr(self.controller, "scene_helpers_camera_dolly_offset", 0.0)))
             self.camera_dolly_offset_spin.blockSignals(False)
+            self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
+            self.floating_channel_opacity_spin.blockSignals(True)
+            self.floating_channel_opacity_spin.setValue(float(getattr(self.controller, "floating_channel_box_opacity", maya_floating_channel_box.DEFAULT_CHANNEL_OPACITY)))
+            self.floating_channel_opacity_spin.blockSignals(False)
+            self.floating_graph_hotkey_edit.setText(getattr(self.controller, "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
+            self.floating_graph_opacity_spin.blockSignals(True)
+            self.floating_graph_opacity_spin.setValue(float(getattr(self.controller, "floating_graph_editor_opacity", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_OPACITY)))
+            self.floating_graph_opacity_spin.blockSignals(False)
+            action_settings = getattr(self.controller, "game_animation_mode_actions", _game_animation_mode_action_settings())
+            for action_key, checkbox in getattr(self, "game_mode_action_checks", {}).items():
+                checkbox.blockSignals(True)
+                checkbox.setChecked(bool(action_settings.get(action_key, True)))
+                checkbox.blockSignals(False)
 
         def _toggle_auto_key(self, enabled):
             success, message = self.controller.set_auto_key_enabled(enabled)
@@ -5101,20 +6884,20 @@ if QtWidgets:
 
         def _toggle_animation_layer_tint(self, enabled):
             success, message = self.controller.set_animation_layer_tint_enabled(enabled)
-            bar_window = GLOBAL_TIMELINE_BAR_WINDOW
-            if bar_window is not None and hasattr(bar_window, "_refresh_animation_layer_tint"):
+            for bar_window in list(GLOBAL_TIMELINE_BAR_WIDGETS):
                 try:
-                    bar_window._refresh_animation_layer_tint()
+                    if bar_window is not None and hasattr(bar_window, "_refresh_animation_layer_tint"):
+                        bar_window._refresh_animation_layer_tint()
                 except Exception:
                     pass
             self._set_status(message, success)
 
         def _refresh_animation_layer_tint(self):
             info = self.controller.animation_layer_tint_info()
-            bar_window = GLOBAL_TIMELINE_BAR_WINDOW
-            if bar_window is not None and hasattr(bar_window, "_refresh_animation_layer_tint"):
+            for bar_window in list(GLOBAL_TIMELINE_BAR_WIDGETS):
                 try:
-                    bar_window._refresh_animation_layer_tint()
+                    if bar_window is not None and hasattr(bar_window, "_refresh_animation_layer_tint"):
+                        bar_window._refresh_animation_layer_tint()
                 except Exception:
                     pass
             self._set_status("Animation Layer Tint refreshed: {0}.".format(info.get("label") or "Base Animation"), True)
@@ -5123,18 +6906,49 @@ if QtWidgets:
             success, message = self.controller.snap_current_targets()
             self._set_status(message, success)
 
+        def _set_floating_channel_hotkey(self):
+            success, message = self.controller.set_floating_channel_box_hotkey(self.floating_channel_hotkey_edit.text())
+            self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
+            self._set_status(message, success)
+
+        def _set_floating_channel_opacity(self, opacity):
+            success, message = self.controller.set_floating_channel_box_opacity(opacity)
+            self._set_status(message, success)
+
+        def _open_floating_channel_box(self):
+            success, message = self.controller.show_floating_channel_box()
+            self._set_status(message, success)
+
+        def _set_floating_graph_hotkey(self):
+            success, message = self.controller.set_floating_graph_editor_hotkey(self.floating_graph_hotkey_edit.text())
+            self.floating_graph_hotkey_edit.setText(getattr(self.controller, "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
+            self._set_status(message, success)
+
+        def _set_floating_graph_opacity(self, opacity):
+            success, message = self.controller.set_floating_graph_editor_opacity(opacity)
+            self._set_status(message, success)
+
+        def _open_floating_graph_editor(self):
+            success, message = self.controller.show_floating_graph_editor()
+            self._set_status(message, success)
+
         def _toggle_game_mode(self, enabled):
             success, message = self.controller.set_game_animation_mode_enabled(enabled)
             if not success:
                 self.game_mode_button.blockSignals(True)
                 self.game_mode_button.setChecked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
                 self.game_mode_button.blockSignals(False)
-            bar_window = GLOBAL_TIMELINE_BAR_WINDOW
-            if bar_window is not None and hasattr(bar_window, "_set_game_button_checked"):
-                try:
-                    bar_window._set_game_button_checked(bool(getattr(self.controller, "game_animation_mode_enabled", False)))
-                except Exception:
-                    pass
+            _sync_timeline_bar_game_buttons(self.controller)
+            self._set_status(message, success)
+
+        def _toggle_game_mode_action(self, action_key, enabled):
+            success, message = self.controller.set_game_animation_mode_action_enabled(action_key, enabled)
+            if not success:
+                checkbox = getattr(self, "game_mode_action_checks", {}).get(action_key)
+                if checkbox:
+                    checkbox.blockSignals(True)
+                    checkbox.setChecked(bool(getattr(self.controller, "game_animation_mode_actions", {}).get(action_key, True)))
+                    checkbox.blockSignals(False)
             self._set_status(message, success)
 
         def _load_textures(self):
@@ -5174,6 +6988,7 @@ if QtWidgets:
             success, message, _detail = self.controller.duplicate_selected_rig_for_teacher_demo(
                 offset_x=self.teacher_rig_offset_spin.value()
             )
+            self._refresh_teacher_demo_edit_log()
             self._set_status(message, success)
 
         def _delete_teacher_rig(self):
@@ -5189,6 +7004,22 @@ if QtWidgets:
                     self._set_status("Kept teacher demo duplicates.", True)
                     return
             success, message = self.controller.delete_teacher_demo_duplicates()
+            self._refresh_teacher_demo_edit_log()
+            self._set_status(message, success)
+
+        def _refresh_teacher_demo_edit_log(self, force_status=False):
+            success, message, detail = self.controller.refresh_teacher_demo_edit_log()
+            text = detail.get("text") or "No teacher demo edits yet."
+            if getattr(self, "_last_teacher_demo_log_text", None) != text:
+                self.teacher_demo_edit_log.setPlainText(text)
+                self._last_teacher_demo_log_text = text
+            if force_status:
+                self._set_status(message, success)
+
+        def _reset_teacher_demo_edit_log(self):
+            success, message, _detail = self.controller.reset_teacher_demo_edit_log()
+            self._last_teacher_demo_log_text = None
+            self._refresh_teacher_demo_edit_log()
             self._set_status(message, success)
 
         def _selected_scene_text_note(self):
@@ -5211,6 +7042,10 @@ if QtWidgets:
                     note_data.get("anchor") or "None",
                     float(note_data.get("size") or SCENE_TEXT_NOTE_DEFAULT_SCALE),
                     "yes" if note_data.get("visible") else "no",
+                ) + "\nAuto Wrap: {0}\nBox: {1:g} x {2:g}".format(
+                    "yes" if note_data.get("wrap_enabled", SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED) else "no",
+                    float(note_data.get("box_width") or SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH),
+                    float(note_data.get("box_height") or SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT),
                 ))
                 self.scene_text_note_list.addItem(item)
                 if current_note and note_data.get("node") == current_note:
@@ -5234,6 +7069,15 @@ if QtWidgets:
                 self.scene_text_size_spin.blockSignals(True)
                 self.scene_text_size_spin.setValue(float(note_data.get("size") or SCENE_TEXT_NOTE_DEFAULT_SCALE))
                 self.scene_text_size_spin.blockSignals(False)
+                self.scene_text_wrap_check.blockSignals(True)
+                self.scene_text_wrap_check.setChecked(bool(note_data.get("wrap_enabled", SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED)))
+                self.scene_text_wrap_check.blockSignals(False)
+                self.scene_text_box_width_spin.blockSignals(True)
+                self.scene_text_box_width_spin.setValue(float(note_data.get("box_width") or SCENE_TEXT_NOTE_DEFAULT_BOX_WIDTH))
+                self.scene_text_box_width_spin.blockSignals(False)
+                self.scene_text_box_height_spin.blockSignals(True)
+                self.scene_text_box_height_spin.setValue(float(note_data.get("box_height") or SCENE_TEXT_NOTE_DEFAULT_BOX_HEIGHT))
+                self.scene_text_box_height_spin.blockSignals(False)
                 break
 
         def _create_scene_text_note(self):
@@ -5241,6 +7085,9 @@ if QtWidgets:
                 self.scene_text_input.text(),
                 color_hex=self.scene_text_color_combo.currentData() or SCENE_TEXT_NOTE_DEFAULT_COLOR,
                 size=self.scene_text_size_spin.value(),
+                wrap_enabled=self.scene_text_wrap_check.isChecked(),
+                box_width=self.scene_text_box_width_spin.value(),
+                box_height=self.scene_text_box_height_spin.value(),
             )
             self._refresh_scene_text_notes()
             if detail.get("node"):
@@ -5258,12 +7105,21 @@ if QtWidgets:
 
         def _apply_scene_text_note_style(self):
             note_node = self._selected_scene_text_note()
-            success, message = self.controller.set_scene_text_note_color(
-                note_node,
-                self.scene_text_color_combo.currentData() or SCENE_TEXT_NOTE_DEFAULT_COLOR,
-            )
+            success, message = self.controller.set_scene_text_note_text(note_node, self.scene_text_input.text())
+            if success:
+                success, message = self.controller.set_scene_text_note_color(
+                    note_node,
+                    self.scene_text_color_combo.currentData() or SCENE_TEXT_NOTE_DEFAULT_COLOR,
+                )
             if success:
                 success, message = self.controller.set_scene_text_note_size(note_node, self.scene_text_size_spin.value())
+            if success:
+                success, message = self.controller.set_scene_text_note_layout(
+                    note_node,
+                    wrap_enabled=self.scene_text_wrap_check.isChecked(),
+                    box_width=self.scene_text_box_width_spin.value(),
+                    box_height=self.scene_text_box_height_spin.value(),
+                )
             self._refresh_scene_text_notes()
             self._set_status(message, success)
 
@@ -5272,6 +7128,29 @@ if QtWidgets:
             if not note_node:
                 return
             success, message = self.controller.set_scene_text_note_size(note_node, value)
+            self._set_status(message, success)
+
+        def _apply_scene_text_note_box(self):
+            note_node = self._selected_scene_text_note()
+            success, message = self.controller.set_scene_text_note_layout(
+                note_node,
+                wrap_enabled=self.scene_text_wrap_check.isChecked(),
+                box_width=self.scene_text_box_width_spin.value(),
+                box_height=self.scene_text_box_height_spin.value(),
+            )
+            self._refresh_scene_text_notes()
+            self._set_status(message, success)
+
+        def _scene_text_note_layout_changed(self, *_args):
+            note_node = self._selected_scene_text_note()
+            if not note_node:
+                return
+            success, message = self.controller.set_scene_text_note_layout(
+                note_node,
+                wrap_enabled=self.scene_text_wrap_check.isChecked(),
+                box_width=self.scene_text_box_width_spin.value(),
+                box_height=self.scene_text_box_height_spin.value(),
+            )
             self._set_status(message, success)
 
         def _move_scene_text_note(self):

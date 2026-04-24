@@ -1,7 +1,7 @@
 """
 maya_skinning_cleanup.py
 
-Non-destructive skinned-mesh scale cleanup for Maya 2022-2026.
+Non-destructive skinned-mesh transform cleanup for Maya 2022-2026.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -263,6 +263,23 @@ def _find_base_shape(source_transform, source_shape, skin_cluster):
     return ""
 
 
+def _duplicate_visible_mesh_snapshot(source_transform, preview_name):
+    clean_transform = cmds.duplicate(source_transform, name=preview_name, rr=True)[0]
+    clean_transform = _node_long_name(clean_transform)
+    for child in cmds.listRelatives(clean_transform, children=True, fullPath=True) or []:
+        if cmds.nodeType(child) == "mesh":
+            continue
+        try:
+            cmds.delete(child)
+        except Exception:
+            pass
+    try:
+        cmds.delete(clean_transform, constructionHistory=True)
+    except Exception:
+        pass
+    return _node_long_name(clean_transform)
+
+
 def _unsupported_history_nodes(source_shape, skin_cluster):
     unsupported = []
     history = cmds.listHistory(source_shape, pruneDagObjects=True) or []
@@ -484,7 +501,10 @@ def _build_clean_mesh_snapshot(report):
     base_shape = report["base_shape"]
     short_name = _short_name(source_transform)
     preview_name = _unique_name(short_name + PREVIEW_SUFFIX)
-    clean_transform = cmds.duplicate(base_shape, name=preview_name, rr=True)[0]
+    if base_shape and cmds.objExists(base_shape):
+        clean_transform = cmds.duplicate(base_shape, name=preview_name, rr=True)[0]
+    else:
+        clean_transform = _duplicate_visible_mesh_snapshot(source_transform, preview_name)
     parent = cmds.listRelatives(source_transform, parent=True, fullPath=True) or []
     current_parent = cmds.listRelatives(clean_transform, parent=True, fullPath=True) or []
     if parent and current_parent != parent:
@@ -504,7 +524,7 @@ def _build_clean_mesh_snapshot(report):
     if not clean_shape:
         raise RuntimeError("Could not build a visible clean mesh shape from the original mesh.")
     _unlock_transform_channels(clean_transform)
-    cmds.makeIdentity(clean_transform, apply=True, translate=False, rotate=False, scale=True, normal=0)
+    cmds.makeIdentity(clean_transform, apply=True, translate=True, rotate=True, scale=True, normal=0)
     if report["uv_summary"].get("current"):
         try:
             cmds.polyUVSet(clean_shape, currentUVSet=True, uvSet=report["uv_summary"]["current"])
@@ -625,9 +645,29 @@ def _verify_cleanup(report, clean_transform, clean_shape, new_skin_cluster):
     )
     add_check("Topology + vertex order", topology_ok, "{0} verts, {1} faces".format(clean_signature["vertex_count"], clean_signature["face_count"]))
 
+    translate = cmds.getAttr(clean_transform + ".translate")[0]
+    translate_ok = all(abs(value) <= VALUE_EPSILON for value in translate)
+    add_check(
+        "Translate is 0,0,0",
+        translate_ok,
+        "translate = {0:.6f}, {1:.6f}, {2:.6f}".format(translate[0], translate[1], translate[2]),
+    )
+
+    rotate = cmds.getAttr(clean_transform + ".rotate")[0]
+    rotate_ok = all(abs(value) <= VALUE_EPSILON for value in rotate)
+    add_check(
+        "Rotate is 0,0,0",
+        rotate_ok,
+        "rotate = {0:.6f}, {1:.6f}, {2:.6f}".format(rotate[0], rotate[1], rotate[2]),
+    )
+
     scale = cmds.getAttr(clean_transform + ".scale")[0]
     scale_ok = all(abs(value - 1.0) <= VALUE_EPSILON for value in scale)
-    add_check("Scale is 1,1,1", scale_ok, "scale = {0:.6f}, {1:.6f}, {2:.6f}".format(scale[0], scale[1], scale[2]))
+    add_check(
+        "Scale is 1,1,1",
+        scale_ok,
+        "scale = {0:.6f}, {1:.6f}, {2:.6f}".format(scale[0], scale[1], scale[2]),
+    )
 
     source_points = _capture_world_points(report["source_shape"])
     clean_points = _capture_world_points(clean_shape)
@@ -697,7 +737,7 @@ def _format_report(report):
     lines = [
         "Mesh: {0}".format(_short_name(report["source_transform"])),
         "Skin Cluster: {0}".format(_short_name(report["skin_cluster"]) if report["skin_cluster"] else "None"),
-        "Base Shape: {0}".format(_short_name(report["base_shape"]) if report["base_shape"] else "None"),
+        "Base Shape: {0}".format(_short_name(report["base_shape"]) if report["base_shape"] else "Visible mesh fallback"),
         "Influences: {0}".format(len(report["skin_data"]["influences"]) if report.get("skin_data") else 0),
         "",
         "Checks:",
@@ -714,7 +754,7 @@ def _format_report(report):
 
     if report.get("result"):
         lines.append("")
-        lines.append("Clean Copy:")
+        lines.append("Frozen Copy:")
         lines.append("Preview: {0}".format(_short_name(report["result"]["clean_transform"])))
         for check in report["result"]["verification"]["checks"]:
             prefix = "GREEN" if check["passed"] else "RED"
@@ -776,7 +816,7 @@ class MayaSkinningCleanupController(object):
 
         base_shape = _find_base_shape(source_transform, source_shape, skin_cluster) if skin_cluster else ""
         if skin_cluster and not base_shape:
-            errors.append("Could not find the hidden original mesh shape needed for an exact cleanup.")
+            warnings.append("Could not find a hidden original mesh shape, so the tool will use a baked visible-mesh fallback.")
 
         unsupported_history = _unsupported_history_nodes(source_shape, skin_cluster) if skin_cluster else []
         if unsupported_history:
@@ -823,8 +863,8 @@ class MayaSkinningCleanupController(object):
         if errors:
             return False, "The selected mesh is not ready. Read the red notes below."
         if warnings:
-            return True, "The mesh can be cleaned, but read the yellow notes first."
-        return True, "The mesh looks ready for a clean copy."
+            return True, "The mesh can be frozen, but read the yellow notes first."
+        return True, "The mesh looks ready for a clean frozen copy."
 
     def delete_clean_copy(self):
         if not self.result or not self.result.get("clean_transform"):
@@ -867,12 +907,12 @@ class MayaSkinningCleanupController(object):
         }
         self.report["result"] = self.result
         if verification["passed"]:
-            return True, "Clean copy made and checked. You can replace the original when you are happy."
-        return False, "A clean copy was made, but one or more checks failed. The original mesh is still untouched."
+            return True, "Clean frozen copy made and checked. You can replace the original when you are happy."
+        return False, "A clean frozen copy was made, but one or more checks failed. The original mesh is still untouched."
 
     def replace_original(self):
         if not self.report or not self.result:
-            return False, "Make and check a clean copy first."
+            return False, "Make and check a clean frozen copy first."
         if not self.result.get("verified"):
             return False, "The clean copy did not pass all checks, so replace is blocked."
 
@@ -926,7 +966,7 @@ if QtWidgets:
             self.controller = controller
             self.controller.status_callback = self._set_status
             self.setObjectName(WINDOW_OBJECT_NAME)
-            self.setWindowTitle("Maya Skinning Cleanup")
+            self.setWindowTitle("Maya Character Freeze")
             self.setMinimumWidth(760)
             self.setMinimumHeight(620)
             self._build_ui()
@@ -938,7 +978,7 @@ if QtWidgets:
             main_layout.setSpacing(10)
 
             description = QtWidgets.QLabel(
-                "Pick one skinned mesh with bad scale. This tool makes a clean copy with scale 1,1,1 while trying to keep the same shape, skin, materials, UVs, and normals."
+                "Pick one skinned mesh with bad translate, rotate, or scale values. This tool makes a clean frozen copy with translate 0, rotate 0, and scale 1 while keeping the same shape, skin, materials, UVs, and normals."
             )
             description.setWordWrap(True)
             main_layout.addWidget(description)
@@ -956,12 +996,12 @@ if QtWidgets:
 
             self.analyze_button = QtWidgets.QPushButton("Check Selected Mesh")
             self.analyze_button.setToolTip("Check the selected skinned mesh and show red, yellow, or green notes.")
-            self.create_button = QtWidgets.QPushButton("Make Clean Copy")
-            self.create_button.setToolTip("Build a non-destructive clean copy and run the checks.")
+            self.create_button = QtWidgets.QPushButton("Make Frozen Copy")
+            self.create_button.setToolTip("Build a non-destructive frozen copy and run the checks.")
             self.replace_button = QtWidgets.QPushButton("Replace Original")
             self.replace_button.setToolTip("Only works after all checks pass. The old mesh is kept as a hidden backup.")
-            self.delete_button = QtWidgets.QPushButton("Delete Clean Copy")
-            self.delete_button.setToolTip("Remove the clean copy if you do not want to keep it.")
+            self.delete_button = QtWidgets.QPushButton("Delete Frozen Copy")
+            self.delete_button.setToolTip("Remove the frozen copy if you do not want to keep it.")
 
             button_grid.addWidget(self.analyze_button, 0, 0)
             button_grid.addWidget(self.create_button, 0, 1)

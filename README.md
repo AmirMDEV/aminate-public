@@ -8,12 +8,13 @@ A tabbed Maya toolset for animation workflow helpers.
 
 The sections in regular use in this beta are:
 
-- `Toolkit Bar` for compact color-coded timing buttons, the dockable Toolkit Bar, key nudging, inbetweens, reset pose, bake-on-twos, animated-control selection, and static-curve cleanup
-- `Scene Helpers` for the Toolkit Bar strip, Animation Layer Tint, camera presets, render setup, texture loading, and game animation mode
+- `Toolkit Bar` for the full dockable Toolkit Bar inside a tab, including History Timeline blocks, Animation Layer controls, timing buttons, Tween Machine, workflow icons, package zip, and Game Animation Mode
+- `Scene Helpers` for Animation Layer Tint, camera presets, render setup, texture loading, game animation mode, hotkey Floating Channel Box, hotkey Floating Graph Editor, text notes, and teacher demo tools
 - `Reference Manager` for saving the current scene and packaging Maya references, textures, image planes, audio, caches, and a manifest into one zip
 - `Controls Retargeter (Face and Body)` for control-based retarget between rigs
 - `Control Picker` for scene control mapping, grouping, reordering, attr lookup, synced Maya selection, and list / visual control maps
 - `Animators Pencil` for Blue Pencil-style drawing, Photoshop-style shape tools, Camera Notes view keying, layers, frame markers, ghosting, retiming, and scene-native annotation marks
+- `Animation Styling` for Spider-Verse-style held keys, configurable hold length, and timeline warnings when a future hold key would overlap an existing key
 - `History Timeline` for ZBrush-style scene snapshots, restore points, milestone notes, branch tracking, and custom auto-save rules
 - `Onion Skin` in `3D Ghost` mode
 - `Dynamic Parenting`
@@ -22,23 +23,34 @@ The sections in regular use in this beta are:
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
-`Version 0.3 BETA`
+`Version 0.3.1`
 
-## What Is New In 0.3 BETA
+## What Is New In 0.3.1
 
+- `Character Freeze` adds a safe skinned-mesh cleanup path for RapidRig-style characters. It can reset bad mesh translate and rotate values to `0`, scale to `1`, preserve skin weights and influences, and use a visible-mesh fallback when Maya has no hidden original shape.
+- `Animation Assistant` adds an early pose-balance view with floor plane, contact points, center-of-gravity setup, viewport badge, and support-area drawing. This weight / pose balance check is unfinished and should be treated as preview.
+- `Floating Graph Editor` is now dockable, can include a DAG-only Outliner, has cycle infinity controls, and opens or closes from hotkeys more reliably.
+- `Floating Channel Box` opens near the cursor, edits selected object channels more reliably, supports opacity customization, and avoids staying above every Windows app.
+- `Animation Styling` adds Spider-Verse-style held keys, blocked-hold timeline warnings, and optional stepped curves.
+- `Toolkit Bar` adds Tween Machine, tab navigation buttons, synced embedded toolbar, stronger Game Animation Mode visuals, and updated release packaging.
+- `Scene Text Notes` now support larger default size, live sizing, auto wrap boxes, keyable visibility, pointer splines, and cleaner scene grouping.
+- `Teacher Demo` rig duplication preserves more rig, material, visibility, and skinCluster data, adds clean delete, and stores student-readable edit logs in the Maya scene.
+- `History Timeline` has stronger branching, snapshot filtering, storage caps, restore safety, per-scene history switching, performance guards, and clearer snapshot labels.
+- `Aminate Mobu` adds MotionBuilder cleanup, skeleton mapping, characterization, History Timeline, packaging, and themed UI work.
 - `Scene Helpers` is now usable for render setup, scene text notes, teacher-demo rig duplication, texture refresh, camera presets, and Game Animation Mode.
 - `Controls Retargeter (Face and Body)` now works for retargeting animation between controls, between skeletons, from skeletons to controls, and between different rig layouts.
 - `Toolkit Bar` now has the titleless compact bar, custom icons, Game Animation Mode, one-click package zip, animation-layer controls, and a small History Timeline strip.
 - `History Timeline` adds scene snapshot saves, restore points, branch tracking, milestones, per-scene history folders, custom auto-save triggers, and an Auto History toggle for performance.
 - `Control Picker` can scan selected control, geometry, and skeleton roots, group controls by body or face area, sync selection with Maya, and show list plus visual picker views.
 - `Animators Pencil` adds scene-backed drawing marks, shape tools, marquee selection, camera notes, layers, frame markers, ghosting, and retiming helpers.
+- `Animation Styling` adds Spider-Verse-style key holds so a key can automatically copy its value forward by a configurable number of frames.
 - `Reference Manager` can package the current scene and external files into a zip with clearer missing-file labels and safer copy-only packaging.
 - `Scene Text Notes` let teachers place visible notes in the viewport, resize them, color them, key visibility, and attach live pointer splines to animated controls.
-- `Teacher Demo` duplicates a selected rig for side-by-side animation feedback while preserving animation, visibility, colors, materials, skinning, and cleanup controls.
+- `Teacher Demo` duplicates a selected rig for side-by-side animation feedback while preserving animation, visibility, colors, materials, skinning, and cleanup controls. It also lists teacher edits in plain-English bullet points, for example control rotations or custom attribute changes, and undone edits disappear from the list.
 
 ## Install
 
-1. Download `Aminate_v0.3_BETA.zip` from the latest release.
+1. Download `Aminate_v0.3.1.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
@@ -68,14 +80,24 @@ This section is for shot setup, timing cleanup, texture refresh, scene text note
 
 Scene Text Notes let you place feedback directly in the Maya scene. Select a control or body part, type a note, pick a color, and click `Create Text Note`. You can key the note on or off, move it beside another selected control, recolor it, refresh the list, or delete it from the UI.
 
+Floating Channel Box lets you tap `#` by default to open a small semi-transparent channel editor beside the cursor. It lists keyable and channel-box attributes for the current selection, edits matching attributes on all selected objects, and has customizable opacity and hotkeys.
+
+Floating Graph Editor opens a semi-transparent native Maya Graph Editor clone. It uses Maya's real Graph Editor panel, can toggle on and off with a customizable hotkey, and has customizable opacity.
+
+Game Animation Mode has its own Scene Helpers area. You can choose which setup actions run: 30 fps, realtime playback, Time Slider update view All, autosave backups, active viewports, texture reload, and weighted tangent conversion for existing animated curves.
+
 Simple example:
 
 1. Keep `Animation Layer Tint` on.
 2. Select or change an animation layer in Maya.
 3. The docked Toolkit Bar shows that layer name and tint color above the timeline.
 4. Click the colored layer bar to change the current animation layer, rename it, or pick its color.
-5. Use the blue game button at the far right of the Toolkit Bar for 30 fps realtime playback and student-safe autosave defaults.
+5. Use the blue game button at the far right of the Toolkit Bar for your checked game setup defaults.
 5. Use `Set Up Render Environment` for the helper cameras, light, and cyclorama.
+
+### Animation Styling
+
+Use this tab for Spider-Verse-style held keys. Set `Hold Length` to `2`, turn on `Auto duplicate new keys`, and Aminate copies a newly keyed value forward by that many frames. If another key already sits between the source key and target hold frame, Aminate skips the duplicate and marks that timeline range red so you can see the overlap.
 
 ### Dynamic Parenting
 
@@ -184,7 +206,7 @@ Simple example:
 ### Timeline Notes
 
 This section is for colored timeline ranges with readable notes attached to them.
-Use `Scene Helpers` or the docked Toolkit Bar when you need key nudging, inbetweens, reset pose, bake-on-twos, Game Animation Mode, or Animation Layer Tint next to timeline review.
+Use the `Toolkit Bar` tab or the docked Toolkit Bar when you need key nudging, inbetweens, reset pose, bake-on-twos, Game Animation Mode, or Animation Layer Tint next to timeline review.
 
 Simple example:
 
@@ -207,12 +229,13 @@ Simple example:
 - [Scene Helpers](release_screenshots/scene_helpers.png)
 - [Dynamic Pivot](release_screenshots/dynamic_pivot.png)
 - [Universal IK/FK](release_screenshots/universal_ikfk.png)
-- [Controls Retargeter](release_screenshots/face_retarget.png)
+- [Controls Retargeter](release_screenshots/controls_retargeter.png)
 - [Control Picker](release_screenshots/control_picker.png)
 - [Animators Pencil](release_screenshots/animators_pencil.png)
+- [History Timeline](release_screenshots/history_timeline.png)
 - [Onion Skin](release_screenshots/onion_skin.png)
 - [Rotation Doctor](release_screenshots/rotation_doctor.png)
-- [Skinning Cleanup](release_screenshots/skinning_cleanup.png)
+- [Character Freeze](release_screenshots/skinning_cleanup.png)
 - [Rig Scale](release_screenshots/rig_scale.png)
 - [Video Reference](release_screenshots/video_reference.png)
 - [Timeline Notes](release_screenshots/timeline_notes.png)

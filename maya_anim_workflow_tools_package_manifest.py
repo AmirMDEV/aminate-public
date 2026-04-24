@@ -1,15 +1,15 @@
-{
-  "package_name": "Aminate",
-  "version": "Version 0.3.1",
-  "release_tag": "v0.3.1",
-  "license": "Aminate Proprietary Source-Available License",
-  "license_file": "LICENSE",
-  "public_repository": "https://github.com/AmirMDEV/aminate-public",
-  "follow_amir": "https://followamir.com",
-  "donation_url": "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA",
-  "redistribution_notice": "Redistribution is allowed only for unmodified copies that keep the license, copyright, GitHub, followamir.com, and donation links.",
-  "modification_notice": "Modification, derivative works, forks, rebranding, and claims of ownership are not permitted without written permission.",
-  "runtime_files": [
+from __future__ import absolute_import, division, print_function
+
+
+LICENSE_FILE_NAME = "LICENSE"
+MANIFEST_FILE_NAME = "manifest.json"
+RELEASE_VERSION_LABEL = "Version 0.3.1"
+RELEASE_TAG = "v0.3.1"
+PUBLIC_REPO_URL = "https://github.com/AmirMDEV/aminate-public"
+FOLLOW_AMIR_URL = "https://followamir.com"
+DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
+
+RUNTIME_FILES = [
     "maya_anim_workflow_tools.py",
     "maya_anim_workflow_tools_package_manifest.py",
     "maya_animation_assistant.py",
@@ -35,6 +35,5 @@
     "maya_universal_ikfk_switcher.py",
     "maya_video_reference_tool.py",
     "game_animation_mode_icon.png",
-    "maya_anim_workflow_tools_icon.png"
-  ]
-}
+    "maya_anim_workflow_tools_icon.png",
+]

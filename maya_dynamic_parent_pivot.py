@@ -3,7 +3,7 @@ maya_dynamic_parent_pivot.py
 
 Combined Maya animation workflow tool with Dynamic Parenting, Hand / Foot Hold,
 Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter (Face and Body), Control Picker,
-Animators Pencil, Onion Skin, Rotation Doctor, Skinning Cleanup, Rig Scale, Video Reference, and Timeline Notes tabs.
+Animators Pencil, Onion Skin, Rotation Doctor, Character Freeze, Rig Scale, Video Reference, and Timeline Notes tabs.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -13,7 +13,9 @@ import math
 import os
 
 import maya_shelf_utils
+import maya_animation_assistant
 import maya_animators_pencil
+import maya_animation_styling
 import maya_contact_hold
 import maya_dynamic_parenting_tool
 import maya_control_picker
@@ -69,7 +71,7 @@ LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3 BETA"
+VERSION_LABEL = "Version 0.3.1"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
@@ -94,10 +96,12 @@ TAB_IKFK = "Universal IK/FK"
 TAB_FACE_RETARGET = "Controls Retargeter (Face and Body)"
 TAB_CONTROL_PICKER = "Control Picker"
 TAB_ANIMATORS_PENCIL = "Animators Pencil"
+TAB_ANIMATION_ASSISTANT = "Animation Assistant"
+TAB_ANIMATION_STYLING = "Animation Styling"
 TAB_HISTORY_TIMELINE = "History Timeline"
 TAB_ONION = "Onion Skin"
 TAB_ROTATION = "Rotation Doctor"
-TAB_SKIN = "Skinning Cleanup"
+TAB_SKIN = "Character Freeze"
 TAB_RIG_SCALE = "Rig Scale"
 TAB_VIDEO = "Video Reference"
 TAB_TIMELINE = "Timeline Notes"
@@ -145,6 +149,14 @@ QTabBar::tab:selected {
 QTabBar::tab:hover {
     background-color: #333333;
     color: #FFFFFF;
+}
+QToolButton#mayaAnimWorkflowTabNavButton {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0px;
+    border-radius: 4px;
 }
 QFrame#mayaAnimWorkflowTabIntro {
     background-color: #353535;
@@ -278,7 +290,7 @@ QScrollBar::sub-line {
 """
 TAB_HELP_TEXT = {
     TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
-    TAB_STUDENT_CORE: "Use this when you want compact animBot-style timing buttons and the dockable Toolkit Bar above Maya's timeline: nudge keys, insert or remove an inbetween, reset selected controls, bake on twos, select animated controls, and clean static curves.",
+    TAB_STUDENT_CORE: "Use this when you want the same Toolkit Bar that docks above Maya's timeline inside a tab: History Timeline strip, Animation Layer controls, timing helpers, workflow icons, package zip, and Game Animation Mode.",
     TAB_TIMING: "Use this when you want the Scene Helpers quick buttons for Auto Key, Auto Snap To Frames, Animation Layer Tint, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Delete Render Environment, Camera Offset controls, and Camera Preset plus whole-frame timing cleanup.",
     TAB_REFERENCE_MANAGER: "Use this when you want one zip containing the saved Maya scene plus referenced scenes, textures, image planes, audio, caches, and a manifest so the shot can move to another machine.",
     TAB_PARENTING: "Use this when one prop or control needs to switch between hand, gun, world, or mixed parents without popping. Best for reloads, pickups, passes, and drops.",
@@ -289,10 +301,12 @@ TAB_HELP_TEXT = {
     TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. If you grab too many, remove the extra source or target control(s). Load Selected Source fills the source list in the order you picked. Load Selected Target fills the target list in the order you picked. Pair By Order maps source item 1 to target item 1, source item 2 to target item 2, and so on. Auto Map By Name can guess similar controls for you. Retarget selected controls for one control pair row or retarget all controls for every control pair row. Quick Pair Edit only changes the saved row you click first.",
     TAB_CONTROL_PICKER: "Use this when you want a synced list and visual control map for a rig. It auto-finds likely controls by name, groups them by face, body, side, tail, wings, and FK/IK, keeps Maya and the picker in sync, lets you reorder the list, and shows the keyable attrs for the control you pick.",
     TAB_ANIMATORS_PENCIL: "Use this when you want expanded Blue Pencil-style drawing stored as real Maya curves and text in the scene. Pencil marks stay visible without this tool installed. Use it for 2D animation notes, layers, frame markers, ghosting, retiming, camera-based drawings, and quick annotation shapes.",
+    TAB_ANIMATION_ASSISTANT: "Use this when you want Aminate to check pose balance. Pick a floor plane, add the controls that can touch the floor, pick a center of gravity control, and get a tiny balanced or unbalanced viewport light plus support area drawing.",
+    TAB_ANIMATION_STYLING: "Use this when you want Into the Spider-Verse-style held keys. Set a hold length, auto-copy new key values into the future, and mark timeline ranges where nearby keys block that hold.",
     TAB_HISTORY_TIMELINE: "Use this when you want ZBrush-style restore points for animation work. It saves full Maya scene snapshots beside the scene, tracks branches, notes, file size, custom auto-save rules, and protected milestones.",
     TAB_ONION: "Use this when you want to see ghosted past and future poses to judge spacing, arcs, and timing.",
     TAB_ROTATION: "Use this when rotations are flipping, gimbaling, or reading strangely and you want the safest fix suggestion.",
-    TAB_SKIN: "Use this when a skinned mesh has bad transform scale and you need a clean copy without losing weights or look.",
+    TAB_SKIN: "Use this when a skinned character mesh has bad translate, rotate, or scale values and needs frozen transforms without losing skin weights, influences, materials, UVs, or normals.",
     TAB_RIG_SCALE: "Use this when you need a safely scaled export copy of a character for game-engine export.",
     TAB_VIDEO: "Use this when you want video or image reference in the scene for tracing, timing, and annotation.",
     TAB_TIMELINE: "Use this when you want readable colored notes directly on the timeline so you can scrub and review shot notes.",
@@ -1483,6 +1497,8 @@ class MayaAnimWorkflowController(object):
         self.contact_hold_controller = maya_contact_hold.MayaContactHoldController() if MAYA_AVAILABLE else None
         self.surface_contact_controller = maya_surface_contact.MayaSurfaceContactController() if MAYA_AVAILABLE else None
         self.animators_pencil_controller = maya_animators_pencil.AnimatorsPencilController() if MAYA_AVAILABLE else None
+        self.animation_assistant_controller = maya_animation_assistant.AnimationAssistantController() if MAYA_AVAILABLE else None
+        self.animation_styling_controller = maya_animation_styling.AnimationStylingController() if MAYA_AVAILABLE else None
         self.control_picker_controller = maya_control_picker.ControlPickerController() if MAYA_AVAILABLE else None
         self.history_timeline_controller = maya_history_timeline.MayaHistoryTimelineController() if MAYA_AVAILABLE else None
         self.timing_controller = maya_timing_tools.MayaTimingToolsController() if MAYA_AVAILABLE else None
@@ -1527,6 +1543,16 @@ class MayaAnimWorkflowController(object):
         if self.surface_contact_controller:
             try:
                 self.surface_contact_controller.shutdown()
+            except Exception:
+                pass
+        if self.animation_assistant_controller:
+            try:
+                self.animation_assistant_controller.shutdown()
+            except Exception:
+                pass
+        if self.animation_styling_controller:
+            try:
+                self.animation_styling_controller.shutdown()
             except Exception:
                 pass
         if self.onion_controller:
@@ -2220,6 +2246,8 @@ if QtWidgets:
             self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
             self.tab_widget.setUsesScrollButtons(True)
             self.tab_widget.setMovable(True)
+            self.tab_widget.setElideMode(QtCore.Qt.ElideNone)
+            self.tab_widget.setCornerWidget(self._build_tab_navigation_widget(), QtCore.Qt.TopRightCorner)
             main_layout.addWidget(self.tab_widget, 1)
             self.parenting_page, self.parenting_tab = self._make_scroll_tab()
             self.contact_hold_page, self.contact_hold_tab = self._make_scroll_tab()
@@ -2229,6 +2257,8 @@ if QtWidgets:
             self.face_retarget_page, self.face_retarget_tab = self._make_scroll_tab()
             self.control_picker_page, self.control_picker_tab = self._make_scroll_tab()
             self.animators_pencil_page, self.animators_pencil_tab = self._make_scroll_tab()
+            self.animation_assistant_page, self.animation_assistant_tab = self._make_scroll_tab()
+            self.animation_styling_page, self.animation_styling_tab = self._make_scroll_tab()
             self.history_timeline_page, self.history_timeline_tab = self._make_scroll_tab()
             self.onion_page, self.onion_tab = self._make_scroll_tab()
             self.rotation_page, self.rotation_tab = self._make_scroll_tab()
@@ -2252,6 +2282,8 @@ if QtWidgets:
             self.tab_widget.addTab(self.face_retarget_tab, TAB_FACE_RETARGET)
             self.tab_widget.addTab(self.control_picker_tab, TAB_CONTROL_PICKER)
             self.tab_widget.addTab(self.animators_pencil_tab, TAB_ANIMATORS_PENCIL)
+            self.tab_widget.addTab(self.animation_assistant_tab, TAB_ANIMATION_ASSISTANT)
+            self.tab_widget.addTab(self.animation_styling_tab, TAB_ANIMATION_STYLING)
             self.tab_widget.addTab(self.history_timeline_tab, TAB_HISTORY_TIMELINE)
             self.tab_widget.addTab(self.onion_tab, TAB_ONION)
             self.tab_widget.addTab(self.rotation_tab, TAB_ROTATION)
@@ -2268,6 +2300,8 @@ if QtWidgets:
             self._build_face_retarget_tab()
             self._build_control_picker_tab()
             self._build_animators_pencil_tab()
+            self._build_animation_assistant_tab()
+            self._build_animation_styling_tab()
             self._build_history_timeline_tab()
             self._build_onion_tab()
             self._build_rotation_tab()
@@ -2279,6 +2313,8 @@ if QtWidgets:
             self._build_student_core_tab()
             self._build_timing_tab()
             self._build_reference_manager_tab()
+            self.tab_widget.currentChanged.connect(self._update_tab_navigation_buttons)
+            self._update_tab_navigation_buttons()
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setObjectName("mayaAnimWorkflowStatusLabel")
             self.status_label.setWordWrap(True)
@@ -2300,6 +2336,44 @@ if QtWidgets:
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+
+        def _build_tab_navigation_widget(self):
+            nav_widget = QtWidgets.QWidget()
+            nav_layout = QtWidgets.QHBoxLayout(nav_widget)
+            nav_layout.setContentsMargins(0, 0, 0, 0)
+            nav_layout.setSpacing(4)
+            self.tab_nav_left_button = QtWidgets.QToolButton(nav_widget)
+            self.tab_nav_left_button.setObjectName("mayaAnimWorkflowTabNavButton")
+            self.tab_nav_left_button.setText("<")
+            self.tab_nav_left_button.setToolTip("Go to the tab on the left.")
+            self.tab_nav_left_button.clicked.connect(lambda: self._step_tab_navigation(-1))
+            nav_layout.addWidget(self.tab_nav_left_button)
+            self.tab_nav_right_button = QtWidgets.QToolButton(nav_widget)
+            self.tab_nav_right_button.setObjectName("mayaAnimWorkflowTabNavButton")
+            self.tab_nav_right_button.setText(">")
+            self.tab_nav_right_button.setToolTip("Go to the tab on the right.")
+            self.tab_nav_right_button.clicked.connect(lambda: self._step_tab_navigation(1))
+            nav_layout.addWidget(self.tab_nav_right_button)
+            return nav_widget
+
+        def _step_tab_navigation(self, direction):
+            if not self.tab_widget:
+                return
+            current_index = self.tab_widget.currentIndex()
+            max_index = max(0, self.tab_widget.count() - 1)
+            target_index = max(0, min(max_index, current_index + int(direction)))
+            if target_index != current_index:
+                self.tab_widget.setCurrentIndex(target_index)
+
+        def _update_tab_navigation_buttons(self, *_args):
+            if not self.tab_widget:
+                return
+            current_index = self.tab_widget.currentIndex()
+            max_index = max(0, self.tab_widget.count() - 1)
+            if hasattr(self, "tab_nav_left_button") and self.tab_nav_left_button:
+                self.tab_nav_left_button.setEnabled(current_index > 0)
+            if hasattr(self, "tab_nav_right_button") and self.tab_nav_right_button:
+                self.tab_nav_right_button.setEnabled(current_index < max_index)
 
         def _build_tab_intro(self, tab_name):
             frame = QtWidgets.QFrame()
@@ -2561,6 +2635,28 @@ if QtWidgets:
             )
             layout.addWidget(self.animators_pencil_panel, 1)
 
+        def _build_animation_assistant_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.animation_assistant_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_ANIMATION_ASSISTANT))
+            self.animation_assistant_panel = maya_animation_assistant.AnimationAssistantPanel(
+                controller=self.controller.animation_assistant_controller,
+                parent=self.animation_assistant_page,
+                status_callback=self._set_status,
+            )
+            layout.addWidget(self.animation_assistant_panel, 1)
+
+        def _build_animation_styling_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.animation_styling_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_ANIMATION_STYLING))
+            self.animation_styling_panel = maya_animation_styling.AnimationStylingPanel(
+                controller=self.controller.animation_styling_controller,
+                parent=self.animation_styling_page,
+                status_callback=self._set_status,
+            )
+            layout.addWidget(self.animation_styling_panel, 1)
+
         def _build_history_timeline_tab(self):
             layout = QtWidgets.QVBoxLayout(self.history_timeline_page)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -2643,9 +2739,9 @@ if QtWidgets:
                 "- Use -1 and +1 to nudge selected Graph Editor keys, or all keys on selected controls.\n"
                 "- Use In to add an inbetween key on the current frame, and Cut to remove keys on the current frame.\n"
                 "- Use Zero to reset selected controls, 2s to bake selected controls every two frames, Anim to pick animated controls, and Clean to remove static curves.\n"
-                "- Open Scene Helpers when you want the full Toolkit Bar strip inside a tab, or use the docked Toolkit Bar.\n\n"
+                "- Open the Toolkit Bar tab when you want the full docked Toolkit Bar strip inside the main Aminate window.\n\n"
                 "Scene Helpers\n"
-                "- Use this when you want the Toolkit Bar strip plus Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons.\n"
+                "- Use this when you want Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons.\n"
                 "- Use Auto Key when you want Maya to key changes as you animate.\n"
                 "- Leave Auto Snap To Frames on if you want the tool to watch for timing changes for you.\n"
                 "- Click Snap Selected Keys To Frames if keys are already off-frame.\n"
@@ -2745,12 +2841,12 @@ if QtWidgets:
                 "- Pick the animated controls and click Analyze Selected.\n"
                 "- Read the warning list.\n"
                 "- Click Use Best Fix for the safest quick fix, or choose a specific fix button if you know what you want.\n\n"
-                "Skinning Cleanup\n"
-                "- Use this when a skinned mesh has bad scale and you want a clean replacement copy.\n"
-                "- Pick one skinned mesh with bad scale.\n"
+                "Character Freeze\n"
+                "- Use this when a skinned mesh has bad translate, rotate, or scale values and you want a clean replacement copy.\n"
+                "- Pick one skinned mesh, for example low on a RapidRig character.\n"
                 "- Click Check Selected Mesh.\n"
                 "- Read the red or yellow notes.\n"
-                "- Click Make Clean Copy.\n"
+                "- Click Make Frozen Copy.\n"
                 "- If every check turns green, click Replace Original.\n\n"
                 "Rig Scale\n"
                 "- Use this when you need an export-safe scaled copy for Unreal or another game engine.\n"
@@ -2789,28 +2885,44 @@ if QtWidgets:
             layout = QtWidgets.QVBoxLayout(self.student_core_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_STUDENT_CORE))
-            self.student_core_panel = maya_timing_tools.StudentCoreToolbarPanel(
-                self.controller.timing_controller,
-                self._set_status,
-                parent=self.student_core_page,
+            self.student_core_panel = self._embed_tool_panel(
+                maya_timing_tools.StudentTimelineButtonBarWindow(
+                    self.controller.timing_controller,
+                    self._set_status,
+                    parent=self.student_core_page,
+                    embedded=True,
+                    start_history_watcher=False,
+                    max_history_markers=36,
+                ),
+                self.student_core_page,
             )
             layout.addWidget(self.student_core_panel)
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
             help_box.setPlainText(
-                "Toolkit Bar buttons are short, dockable, color-coded animation helpers.\n\n"
-                "- -1 and +1 move selected Graph Editor keys, or all keys on selected controls.\n"
-                "- In inserts an inbetween key on the current frame.\n"
-                "- Cut removes keys on the current frame.\n"
-                "- Zero resets selected controls to translate 0, rotate 0, and scale 1.\n"
-                "- 2s bakes selected controls across the playback range every two frames.\n"
-                "- Anim selects every transform with animation curves.\n"
-                "- Clean removes static animation curves from selected controls when every value is the same.\n\n"
-                "Use Open Toolkit Bar when you want to restore the small strip above Maya's timeline."
+                "This tab mirrors the docked Toolkit Bar above Maya's timeline.\n\n"
+                "- The History strip, Animation Layer controls, timing buttons, workflow icons, package zip, and Game Animation Mode button are all shown here.\n"
+                "- Changes made from this tab use the same controller as the docked bar, so Game Animation Mode and animation layer state stay synced.\n"
+                "- Use the docked bar for fast timeline work, or this tab when you want the same controls inside Aminate."
             )
-            help_box.setMaximumHeight(170)
+            help_box.setMaximumHeight(135)
             layout.addWidget(help_box)
+            open_button = QtWidgets.QPushButton("Open Docked Toolkit Bar")
+            open_button.setToolTip("Restore the small docked Toolkit Bar above Maya's timeline.")
+            open_button.clicked.connect(self._open_student_core_toolbar)
+            layout.addWidget(open_button)
             layout.addStretch(1)
+
+        def _open_student_core_toolbar(self):
+            try:
+                maya_timing_tools.launch_student_timeline_button_bar(
+                    dock=True,
+                    controller=self.controller.timing_controller,
+                    status_callback=self._set_status,
+                )
+                self._set_status("Toolkit Bar is docked above Maya's timeline.", True)
+            except Exception as exc:
+                self._set_status("Could not open Toolkit Bar: {0}".format(exc), False)
 
         def _build_timing_tab(self):
             layout = QtWidgets.QVBoxLayout(self.timing_page)
@@ -2886,6 +2998,15 @@ if QtWidgets:
                 "animator_pencil": "animators_pencil",
                 "pencil": "animators_pencil",
                 "blue_pencil": "animators_pencil",
+                "animation_assistant": "animation_assistant",
+                "assistant": "animation_assistant",
+                "balance": "animation_assistant",
+                "pose_balance": "animation_assistant",
+                "animation_styling": "animation_styling",
+                "styling": "animation_styling",
+                "spider_verse": "animation_styling",
+                "held_keys": "animation_styling",
+                "holds": "animation_styling",
                 "history": "history_timeline",
                 "history_timeline": "history_timeline",
                 "snapshots": "history_timeline",
@@ -2895,9 +3016,12 @@ if QtWidgets:
                 "onion_skin": "onion_skin",
                 "rotation": "rotation_doctor",
                 "rotation_doctor": "rotation_doctor",
-                "skin": "skinning_cleanup",
-                "skinning": "skinning_cleanup",
-                "skinning_cleanup": "skinning_cleanup",
+                "skin": "character_freeze",
+                "skinning": "character_freeze",
+                "skinning_cleanup": "character_freeze",
+                "freeze": "character_freeze",
+                "character_freeze": "character_freeze",
+                "transform_cleanup": "character_freeze",
                 "rig_scale": "rig_scale",
                 "scale": "rig_scale",
                 "video": "video_reference",
