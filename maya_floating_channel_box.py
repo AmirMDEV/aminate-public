@@ -1081,6 +1081,18 @@ def apply_cycle_infinity_to_graph_editor():
     return True, "Cycle infinity enabled on {0} curve(s).".format(changed)
 
 
+def apply_euler_flip_to_graph_editor():
+    if not MAYA_AVAILABLE:
+        return False, "Maya is not available."
+    try:
+        import maya_rotation_doctor
+        success, message = maya_rotation_doctor.flip_current_euler_key()
+    except Exception as exc:
+        return False, "Euler flip failed: {0}".format(exc)
+    _fit_graph_editor_curves()
+    return success, message
+
+
 def _resize_graph_editor_split():
     if not cmds:
         return False
@@ -1304,10 +1316,10 @@ def _ensure_graph_editor_window():
         )
         cmds.rowLayout(
             GRAPH_EDITOR_HEADER_NAME,
-            numberOfColumns=6,
+            numberOfColumns=7,
             adjustableColumn=2,
-            columnAttach=[(1, "both", 8), (2, "both", 8), (3, "both", 4), (4, "both", 4), (5, "both", 4), (6, "both", 8)],
-            columnAlign=[(1, "left"), (2, "left"), (3, "right"), (4, "right"), (5, "right"), (6, "right")],
+            columnAttach=[(1, "both", 8), (2, "both", 8), (3, "both", 4), (4, "both", 4), (5, "both", 4), (6, "both", 4), (7, "both", 8)],
+            columnAlign=[(1, "left"), (2, "left"), (3, "right"), (4, "right"), (5, "right"), (6, "right"), (7, "right")],
             height=34,
             parent=GRAPH_EDITOR_CONTAINER_NAME,
             backgroundColor=(0.188, 0.188, 0.188),
@@ -1325,6 +1337,13 @@ def _ensure_graph_editor_window():
             height=24,
             backgroundColor=(0.17, 0.17, 0.17),
             command=lambda *_args: apply_cycle_infinity_to_graph_editor(),
+        )
+        cmds.button(
+            label="Euler Flip",
+            annotation="Blender-style fix for selected rotation keys: rewrites the current key to the nearest safe Euler equivalent.",
+            height=24,
+            backgroundColor=(0.17, 0.17, 0.17),
+            command=lambda *_args: apply_euler_flip_to_graph_editor(),
         )
         cmds.button(
             label="Refresh",

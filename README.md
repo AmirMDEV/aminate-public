@@ -16,6 +16,7 @@ The sections in regular use in this beta are:
 - `Animators Pencil` for Blue Pencil-style drawing, Photoshop-style shape tools, Camera Notes view keying, layers, frame markers, ghosting, retiming, and scene-native annotation marks
 - `Animation Styling` for Spider-Verse-style held keys, configurable hold length, and timeline warnings when a future hold key would overlap an existing key
 - `History Timeline` for ZBrush-style scene snapshots, restore points, milestone notes, branch tracking, and custom auto-save rules
+- `Rotation Doctor` for rotation flip diagnosis, broad Euler cleanup, and one-key Blender-style Euler flipping from the Graph Editor or current keyed frame
 - `Onion Skin` in `3D Ghost` mode
 - `Dynamic Parenting`
 - `Hand / Foot Hold`, mainly the foot-hold workflow
@@ -28,6 +29,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 ## What Is New In 0.3.1
 
 - `Character Freeze` adds a safe skinned-mesh cleanup path for RapidRig-style characters. It can reset bad mesh translate and rotate values to `0`, scale to `1`, preserve skin weights and influences, and use a visible-mesh fallback when Maya has no hidden original shape.
+- `Rotation Doctor` adds `Flip Current Key`, and the Floating Graph Editor adds `Euler Flip`, for a Blender-style Euler fix that rewrites the selected Graph Editor rotation key, or current-frame selected-control key, to the nearest safe equivalent rotation.
 - `Animation Assistant` adds an early pose-balance view with floor plane, contact points, center-of-gravity setup, viewport badge, and support-area drawing. This weight / pose balance check is unfinished and should be treated as preview.
 - `Floating Graph Editor` is now dockable, can include a DAG-only Outliner, has cycle infinity controls, and opens or closes from hotkeys more reliably.
 - `Floating Channel Box` opens near the cursor, edits selected object channels more reliably, supports opacity customization, and avoids staying above every Windows app.
@@ -54,7 +56,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `install_maya_anim_workflow_tools_dragdrop.py` into the Maya viewport.
+5. Drag `Aminate drag and drop this onto Maya viewport.py` into the Maya viewport.
 6. The tool installs, opens, and docks automatically.
 7. After install, Maya opens Aminate and the Toolkit Bar when Maya starts.
 

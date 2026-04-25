@@ -336,6 +336,24 @@ def _set_auto_snapshot_enabled_option(enabled):
         pass
 
 
+def _show_auto_history_security_warning(parent=None):
+    message = (
+        "Auto History may not work well with rigs like Amanda that trigger many Maya security popups.\n\n"
+        "Those popups can block snapshot loading and saving during restore. If this rig is trusted, use Scene Helpers > Disable Maya Security Popups first, or keep Auto History off and save manual steps."
+    )
+    if QtWidgets:
+        try:
+            QtWidgets.QMessageBox.warning(parent, "Auto History And Security Popups", message)
+            return
+        except Exception:
+            pass
+    if om:
+        try:
+            om.MGlobal.displayWarning(message.replace("\n\n", " "))
+        except Exception:
+            pass
+
+
 def _scene_summary_changed(previous_summary, current_summary):
     previous_summary = previous_summary or {}
     current_summary = current_summary or {}
@@ -2120,6 +2138,8 @@ if QtWidgets:
             self.refresh()
 
         def _toggle_auto_history(self, checked):
+            if checked:
+                _show_auto_history_security_warning(self)
             success, message = self.controller.set_auto_snapshot_enabled(bool(checked), parent=self, interval_ms=2000)
             self._set_status(message, success)
             self.refresh()
@@ -2669,6 +2689,8 @@ if QtWidgets:
                 checkbox.setEnabled(self.controller.auto_snapshot_enabled() and not checked)
 
         def _auto_enabled_toggled(self, checked):
+            if checked:
+                _show_auto_history_security_warning(self)
             success, message = self.controller.set_auto_snapshot_enabled(bool(checked), parent=self, interval_ms=2000)
             self._set_status(message, success)
             self._refresh_auto_snapshot_controls()

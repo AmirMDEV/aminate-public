@@ -85,6 +85,13 @@ GAME_ANIMATION_MODE_ACTIONS = collections.OrderedDict(
         ("weighted_tangents", ("Weighted Tangents", "Convert all existing animation curves and future tangent defaults to weighted tangents.")),
     )
 )
+MAYA_SECURITY_PROMPT_OPTION_VARS = (
+    "SafeModeOption",
+    "SafeModeImportOption",
+    "SafeModeBuiltInCheck",
+    "SafeModeUserSetupHashOption",
+    "TrustCenterPathOption",
+)
 DEFAULT_RENDER_ENV_LIGHT_EXPOSURE = 1.5
 DEFAULT_RENDER_ENV_LIGHT_INTENSITY = 0.2
 DEFAULT_RENDER_ENV_SCALE_MULTIPLIER = 3.5
@@ -4184,6 +4191,30 @@ class MayaTimingToolsController(object):
         except Exception as exc:
             return False, "History Timeline auto snapshot skipped: {0}".format(exc)
 
+    def disable_maya_security_popups(self):
+        if not MAYA_AVAILABLE or not cmds:
+            return False, "Maya is not available."
+        previous_values = []
+        for option_name in MAYA_SECURITY_PROMPT_OPTION_VARS:
+            try:
+                previous = cmds.optionVar(query=option_name) if cmds.optionVar(exists=option_name) else "<missing>"
+                cmds.optionVar(intValue=(option_name, 0))
+                previous_values.append("{0}={1}".format(option_name, previous))
+            except Exception:
+                pass
+        try:
+            cmds.savePrefs(general=True)
+        except Exception:
+            try:
+                cmds.savePrefs()
+            except Exception:
+                pass
+        if not previous_values:
+            return False, "Could not find Maya security popup settings to change."
+        message = "Maya security popups disabled for trusted rigs. Restart Maya if an already-open scene keeps warning."
+        self._emit_status(message, True)
+        return True, message
+
     def create_animation_layer_from_bar(self, name=None, add_selected=True):
         try:
             cmds.undoInfo(openChunk=True, chunkName="ToolkitBarCreateAnimationLayer")
@@ -6430,6 +6461,12 @@ if QtWidgets:
                 "Open the latest autosave for the current scene, or recover the last crash if Maya closed unexpectedly."
             )
             action_row.addWidget(self.recover_autosave_button, 1)
+            self.disable_security_popups_button = QtWidgets.QPushButton("Disable Maya Security Popups")
+            self.disable_security_popups_button.setObjectName("sceneHelpersDisableSecurityPopupsButton")
+            self.disable_security_popups_button.setToolTip(
+                "Turn off Maya Safe Mode / Trust Center popup checks for trusted classroom rigs that repeatedly block scene load and History Timeline restore. Only use this for rigs you trust."
+            )
+            action_row.addWidget(self.disable_security_popups_button, 1)
             main_layout.addLayout(action_row)
 
             self.game_mode_group = QtWidgets.QGroupBox("Game Animation Mode")
@@ -6799,6 +6836,7 @@ if QtWidgets:
                 checkbox.toggled.connect(lambda enabled, key=action_key: self._toggle_game_mode_action(key, enabled))
             self.load_textures_button.clicked.connect(self._load_textures)
             self.recover_autosave_button.clicked.connect(self._recover_autosave)
+            self.disable_security_popups_button.clicked.connect(self._disable_maya_security_popups)
             self.render_env_button.clicked.connect(self._render_environment)
             self.delete_render_env_button.clicked.connect(self._delete_render_environment)
             self.duplicate_teacher_rig_button.clicked.connect(self._duplicate_teacher_rig)
@@ -6961,6 +6999,21 @@ if QtWidgets:
                 force=True,
                 prefer_current_scene=True,
             )
+            self._set_status(message, success)
+
+        def _disable_maya_security_popups(self):
+            if QtWidgets:
+                result = QtWidgets.QMessageBox.warning(
+                    self,
+                    "Disable Maya Security Popups",
+                    "Only do this for rigs you trust.\n\nThis turns off Maya Safe Mode / Trust Center popup checks that can interrupt Aminate History Timeline save and restore. Unknown downloaded rigs can contain unsafe scripts.",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No,
+                )
+                if result != QtWidgets.QMessageBox.Yes:
+                    self._set_status("Kept Maya security popup settings unchanged.", True)
+                    return
+            success, message = self.controller.disable_maya_security_popups()
             self._set_status(message, success)
 
         def _render_environment(self):

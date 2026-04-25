@@ -54,6 +54,7 @@ ROTATE_ATTRS = ("rotateX", "rotateY", "rotateZ")
 ROTATE_ORDER_NAMES = {0: "xyz", 1: "yzx", 2: "zxy", 3: "xzy", 4: "yxz", 5: "zyx"}
 RECIPE_LABELS = {
     "clean_euler_discontinuity": "Fix Flips",
+    "flip_current_key_euler": "Flip Current Key",
     "preserve_spin_and_unroll": "Keep Big Spins",
     "switch_interp_to_synchronized_euler": "Smooth Euler",
     "switch_interp_to_quaternion": "Quaternion Mode",
@@ -301,6 +302,133 @@ def _equivalent_candidates(value):
 
 def _nearest_equivalent(value, reference):
     return min(_equivalent_candidates(value), key=lambda candidate: abs(candidate - reference))
+
+
+def _nearest_equivalent_to_context(value, previous_value=None, next_value=None):
+    references = []
+    if previous_value is not None:
+        references.append(float(previous_value))
+    if next_value is not None:
+        references.append(float(next_value))
+    if not references:
+        return _normalized_angle(value)
+    reference = sum(references) / float(len(references))
+    return _nearest_equivalent(value, reference)
+
+
+def _output_plug_for_curve(curve_name):
+    if not MAYA_AVAILABLE or not curve_name or not cmds.objExists(curve_name):
+        return ""
+    plugs = cmds.listConnections(curve_name + ".output", source=False, destination=True, plugs=True) or []
+    for plug_name in plugs:
+        attr_name = plug_name.split(".")[-1]
+        if attr_name in ROTATE_ATTRS:
+            return plug_name
+    return plugs[0] if plugs else ""
+
+
+def _is_rotate_curve(curve_name):
+    if not MAYA_AVAILABLE or not curve_name or not cmds.objExists(curve_name):
+        return False
+    if cmds.nodeType(curve_name) != "animCurveTA":
+        return False
+    plug_name = _output_plug_for_curve(curve_name)
+    return plug_name.split(".")[-1] in ROTATE_ATTRS
+
+
+def _curve_key_data(curve_name):
+    times = cmds.keyframe(curve_name, query=True, timeChange=True) or []
+    values = cmds.keyframe(curve_name, query=True, valueChange=True) or []
+    key_count = min(len(times), len(values))
+    return [(float(times[index]), float(values[index])) for index in range(key_count)]
+
+
+def _neighbor_values_for_time(curve_name, time_value):
+    key_data = _curve_key_data(curve_name)
+    previous_values = [value for key_time, value in key_data if key_time < (float(time_value) - VALUE_EPSILON)]
+    next_values = [value for key_time, value in key_data if key_time > (float(time_value) + VALUE_EPSILON)]
+    previous_value = previous_values[-1] if previous_values else None
+    next_value = next_values[0] if next_values else None
+    return previous_value, next_value
+
+
+def _selected_rotate_curve_keys():
+    if not MAYA_AVAILABLE:
+        return []
+    curve_names = cmds.keyframe(query=True, selected=True, name=True) or []
+    selected = []
+    seen = set()
+    for curve_name in _dedupe_preserve_order(curve_names):
+        if not _is_rotate_curve(curve_name):
+            continue
+        times = cmds.keyframe(curve_name, query=True, selected=True, timeChange=True) or []
+        values = cmds.keyframe(curve_name, query=True, selected=True, valueChange=True) or []
+        for index in range(min(len(times), len(values))):
+            key = (curve_name, float(times[index]))
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(
+                {
+                    "curve": curve_name,
+                    "time": float(times[index]),
+                    "value": float(values[index]),
+                    "plug": _output_plug_for_curve(curve_name),
+                }
+            )
+    return selected
+
+
+def _current_frame_rotate_keys_for_selection():
+    if not MAYA_AVAILABLE:
+        return []
+    current_time = float(cmds.currentTime(query=True))
+    keys = []
+    seen = set()
+    for node_name in _selected_transform_targets():
+        for attr_name in ROTATE_ATTRS:
+            for curve_name in _curve_names_for_attr(node_name, attr_name):
+                if not _is_rotate_curve(curve_name):
+                    continue
+                values = cmds.keyframe(curve_name, query=True, time=(current_time, current_time), valueChange=True) or []
+                if not values:
+                    continue
+                key = (curve_name, current_time)
+                if key in seen:
+                    continue
+                seen.add(key)
+                keys.append(
+                    {
+                        "curve": curve_name,
+                        "time": current_time,
+                        "value": float(values[0]),
+                        "plug": "{0}.{1}".format(node_name, attr_name),
+                    }
+                )
+    return keys
+
+
+def _fix_euler_keys(keys):
+    changed = []
+    for key_info in keys:
+        curve_name = key_info["curve"]
+        time_value = key_info["time"]
+        old_value = key_info["value"]
+        previous_value, next_value = _neighbor_values_for_time(curve_name, time_value)
+        new_value = _nearest_equivalent_to_context(old_value, previous_value, next_value)
+        if abs(new_value - old_value) <= VALUE_EPSILON:
+            continue
+        cmds.keyframe(curve_name, edit=True, time=(time_value, time_value), valueChange=float(new_value))
+        changed.append(
+            {
+                "curve": curve_name,
+                "plug": key_info.get("plug") or _output_plug_for_curve(curve_name),
+                "time": time_value,
+                "old_value": old_value,
+                "new_value": new_value,
+            }
+        )
+    return changed
 
 
 def _best_spin_preserving_candidate(value, previous_solved):
@@ -636,7 +764,34 @@ class MayaRotationDoctorController(object):
         target_reports = reports or list(self.reports)
         return self._apply_recipe_to_reports(recipe_name, target_reports)
 
+    def flip_current_key(self):
+        keys = _selected_rotate_curve_keys()
+        source = "selected Graph Editor key(s)"
+        if not keys:
+            keys = _current_frame_rotate_keys_for_selection()
+            source = "current-frame rotation key(s)"
+        if not keys:
+            return False, "Select a rotate key in the Graph Editor, or select an animated control on a keyed frame."
+
+        cmds.undoInfo(openChunk=True, chunkName="MayaRotationDoctor_flip_current_key_euler")
+        try:
+            changed = _fix_euler_keys(keys)
+        except Exception as exc:
+            _warning("Current key Euler flip failed: {0}".format(exc))
+            _warning(traceback.format_exc())
+            return False, "Current key flip failed: {0}".format(exc)
+        finally:
+            cmds.undoInfo(closeChunk=True)
+
+        if not changed:
+            return False, "The {0} already use the nearest safe Euler value.".format(source)
+
+        self._reanalyze_last_targets()
+        return True, "Flipped {0} Euler key(s) to the nearest safe value.".format(len(changed))
+
     def _apply_recipe_to_reports(self, recipe_name, reports):
+        if recipe_name == "flip_current_key_euler":
+            return self.flip_current_key()
         if not reports:
             return False, "Analyze some controls first."
         if recipe_name not in RECIPE_LABELS:
@@ -780,6 +935,10 @@ if QtWidgets:
             self.apply_recommended_button.setToolTip("Apply the safest fix the tool recommends for the selected controls.")
             self.euler_cleanup_button = QtWidgets.QPushButton("Fix Flips")
             self.euler_cleanup_button.setToolTip("Fix the most common rotation flips and jumps.")
+            self.flip_current_key_button = QtWidgets.QPushButton("Flip Current Key")
+            self.flip_current_key_button.setToolTip(
+                "Blender-style Euler flip for the selected Graph Editor rotate key, or the current keyed frame on selected controls."
+            )
             self.preserve_spins_button = QtWidgets.QPushButton("Keep Big Spins")
             self.preserve_spins_button.setToolTip("Keep big planned spins while still cleaning obvious jumps.")
             self.sync_euler_button = QtWidgets.QPushButton("Smooth Euler")
@@ -794,7 +953,8 @@ if QtWidgets:
             button_grid.addWidget(self.analyze_button, 0, 0)
             button_grid.addWidget(self.apply_recommended_button, 0, 1)
             button_grid.addWidget(self.euler_cleanup_button, 0, 2)
-            button_grid.addWidget(self.preserve_spins_button, 0, 3)
+            button_grid.addWidget(self.flip_current_key_button, 0, 3)
+            button_grid.addWidget(self.preserve_spins_button, 0, 4)
             button_grid.addWidget(self.sync_euler_button, 1, 0)
             button_grid.addWidget(self.quaternion_button, 1, 1)
             button_grid.addWidget(self.custom_pass_button, 1, 2)
@@ -853,6 +1013,7 @@ if QtWidgets:
             self.analyze_button.clicked.connect(self._analyze_selection)
             self.apply_recommended_button.clicked.connect(self._apply_recommended)
             self.euler_cleanup_button.clicked.connect(lambda: self._apply_recipe("clean_euler_discontinuity"))
+            self.flip_current_key_button.clicked.connect(lambda: self._apply_recipe("flip_current_key_euler"))
             self.preserve_spins_button.clicked.connect(lambda: self._apply_recipe("preserve_spin_and_unroll"))
             self.sync_euler_button.clicked.connect(lambda: self._apply_recipe("switch_interp_to_synchronized_euler"))
             self.quaternion_button.clicked.connect(lambda: self._apply_recipe("switch_interp_to_quaternion"))
@@ -995,8 +1156,22 @@ def launch_maya_rotation_doctor(dock=False):
     return GLOBAL_WINDOW
 
 
+def flip_current_euler_key():
+    """Public command for shelves or Maya hotkeys."""
+    if not MAYA_AVAILABLE:
+        raise RuntimeError("maya_rotation_doctor.flip_current_euler_key() must run inside Autodesk Maya.")
+    controller = MayaRotationDoctorController()
+    success, message = controller.flip_current_key()
+    if success:
+        _debug(message)
+    else:
+        _warning(message)
+    return success, message
+
+
 __all__ = [
     "launch_maya_rotation_doctor",
+    "flip_current_euler_key",
     "install_maya_rotation_doctor_shelf_button",
     "MayaRotationDoctorController",
 ]

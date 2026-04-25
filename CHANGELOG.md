@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Renamed generated Aminate release packaging from `student_package` to `release_package`, renamed release build scripts, and changed the packaged Maya drag-and-drop installer name to `Aminate drag and drop this onto Maya viewport.py` for clearer public/private release installs.
+- Added a Rotation Doctor `Flip Current Key` button, Floating Graph Editor `Euler Flip` button, and public command for Blender-style Euler key flipping, correcting selected Graph Editor rotation keys or current-frame keyed controls to the nearest safe equivalent value.
+- Added a Scene Helpers `Disable Maya Security Popups` button for trusted classroom rigs that trigger repeated Maya Safe Mode / Trust Center dialogs during open, save, or History Timeline restore.
+- Added an Auto History warning popup explaining that rigs like Amanda can break automatic snapshot save and restore when Maya security popups interrupt file operations.
+
 ## Version 0.3.1 - 2026-04-24
 
 - Added a `Character Freeze` tab for skinned character meshes such as RapidRig output, creating a checked frozen copy with translate and rotate reset to `0,0,0` and scale reset to `1,1,1` while preserving skin influences, vertex weights, materials, UVs, hard or soft edges, and normals before optional replacement.
