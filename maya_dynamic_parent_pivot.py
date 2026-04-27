@@ -151,12 +151,29 @@ QTabBar::tab:hover {
     color: #FFFFFF;
 }
 QToolButton#mayaAnimWorkflowTabNavButton {
-    min-width: 22px;
-    max-width: 22px;
-    min-height: 22px;
-    max-height: 22px;
-    padding: 0px;
-    border-radius: 4px;
+    min-width: 34px;
+    max-width: 44px;
+    min-height: 24px;
+    max-height: 26px;
+    padding: 2px 6px;
+    border-radius: 7px;
+    background-color: #113B4A;
+    color: #FFFFFF;
+    border: 1px solid #4CC9F0;
+    font-weight: 800;
+}
+QToolButton#mayaAnimWorkflowTabNavButton:hover {
+    background-color: #176075;
+    border-color: #79E2FF;
+}
+QToolButton#mayaAnimWorkflowTabNavButton:pressed {
+    background-color: #0E2C38;
+    border-color: #B7F2FF;
+}
+QToolButton#mayaAnimWorkflowTabNavButton:disabled {
+    background-color: #252525;
+    color: #6E6E6E;
+    border-color: #3A3A3A;
 }
 QFrame#mayaAnimWorkflowTabIntro {
     background-color: #353535;
@@ -2323,7 +2340,7 @@ if QtWidgets:
             self.tab_widget = QtWidgets.QTabWidget()
             self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
             _allow_tiny_shell_widget(self.tab_widget)
-            self.tab_widget.setUsesScrollButtons(True)
+            self.tab_widget.setUsesScrollButtons(False)
             self.tab_widget.setMovable(True)
             self.tab_widget.setElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
             self.tab_widget.setCornerWidget(self._build_tab_navigation_widget(), QtCore.Qt.TopRightCorner)
@@ -2428,13 +2445,13 @@ if QtWidgets:
             nav_layout.setSpacing(4)
             self.tab_nav_left_button = QtWidgets.QToolButton(nav_widget)
             self.tab_nav_left_button.setObjectName("mayaAnimWorkflowTabNavButton")
-            self.tab_nav_left_button.setText("<")
+            self.tab_nav_left_button.setText("<<")
             self.tab_nav_left_button.setToolTip("Go to the tab on the left.")
             self.tab_nav_left_button.clicked.connect(lambda: self._step_tab_navigation(-1))
             nav_layout.addWidget(self.tab_nav_left_button)
             self.tab_nav_right_button = QtWidgets.QToolButton(nav_widget)
             self.tab_nav_right_button.setObjectName("mayaAnimWorkflowTabNavButton")
-            self.tab_nav_right_button.setText(">")
+            self.tab_nav_right_button.setText(">>")
             self.tab_nav_right_button.setToolTip("Go to the tab on the right.")
             self.tab_nav_right_button.clicked.connect(lambda: self._step_tab_navigation(1))
             nav_layout.addWidget(self.tab_nav_right_button)

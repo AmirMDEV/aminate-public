@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Removed Qt's built-in tab overflow buttons beside the Aminate tab arrows, made the custom tab arrows larger and highlighted, and added smoke coverage for the custom-only tab navigation state.
 - Made the main Aminate window scale down for smaller monitors, reduced the startup minimum size to `160x120`, enabled horizontal scrollbars on every tab, loosened shell layout constraints, and clamped startup window size to the active screen.
 - Fixed `Aminate_v0.3.1.zip` release packaging so `manifest.json` exists at the package root and inside the payload folder, and fixed the drag-and-drop installer manifest copy path used during Maya install.
 - Renamed generated Aminate release packaging from `student_package` to `release_package`, renamed release build scripts, and changed the packaged Maya drag-and-drop installer name to `Aminate drag and drop this onto Maya viewport.py` for clearer public/private release installs.
