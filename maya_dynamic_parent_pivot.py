@@ -3,7 +3,7 @@ maya_dynamic_parent_pivot.py
 
 Combined Maya animation workflow tool with Dynamic Parenting, Hand / Foot Hold,
 Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter (Face and Body), Control Picker,
-Animators Pencil, Onion Skin, Rotation Doctor, Character Freeze, Rig Scale, Video Reference, and Timeline Notes tabs.
+Animators Pencil, Onion Skin, Rotation Doctor, Character Skinning, Rig Scale, Video Reference, and Timeline Notes tabs.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -26,6 +26,7 @@ import maya_onion_skin
 import maya_surface_contact
 import maya_timing_tools
 import maya_rotation_doctor
+import maya_skin_transfer
 import maya_skinning_cleanup
 import maya_rig_scale_export
 import maya_timeline_notes
@@ -101,7 +102,7 @@ TAB_ANIMATION_STYLING = "Animation Styling"
 TAB_HISTORY_TIMELINE = "History Timeline"
 TAB_ONION = "Onion Skin"
 TAB_ROTATION = "Rotation Doctor"
-TAB_SKIN = "Character Freeze"
+TAB_SKIN = "Character Skinning"
 TAB_RIG_SCALE = "Rig Scale"
 TAB_VIDEO = "Video Reference"
 TAB_TIMELINE = "Timeline Notes"
@@ -339,7 +340,7 @@ TAB_HELP_TEXT = {
     TAB_HISTORY_TIMELINE: "Use this when you want ZBrush-style restore points for animation work. It saves full Maya scene snapshots beside the scene, tracks branches, notes, file size, custom auto-save rules, and protected milestones.",
     TAB_ONION: "Use this when you want to see ghosted past and future poses to judge spacing, arcs, and timing.",
     TAB_ROTATION: "Use this when rotations are flipping, gimbaling, or reading strangely and you want the safest fix suggestion.",
-    TAB_SKIN: "Use this when a skinned character mesh has bad translate, rotate, or scale values and needs frozen transforms without losing skin weights, influences, materials, UVs, or normals.",
+    TAB_SKIN: "Use this for skinning fixes: freeze bad character mesh transforms safely, or copy exact skin weights from one same-topology mesh to another.",
     TAB_RIG_SCALE: "Use this when you need a safely scaled export copy of a character for game-engine export.",
     TAB_VIDEO: "Use this when you want video or image reference in the scene for tracing, timing, and annotation.",
     TAB_TIMELINE: "Use this when you want readable colored notes directly on the timeline so you can scrub and review shot notes.",
@@ -771,6 +772,7 @@ def _close_existing_window():
         maya_surface_contact,
         maya_onion_skin,
         maya_rotation_doctor,
+        maya_skin_transfer,
         maya_skinning_cleanup,
         maya_rig_scale_export,
         maya_video_reference_tool,
@@ -1610,6 +1612,7 @@ class MayaAnimWorkflowController(object):
         self.timing_controller = maya_timing_tools.MayaTimingToolsController() if MAYA_AVAILABLE else None
         self.onion_controller = maya_onion_skin.MayaOnionSkinController() if MAYA_AVAILABLE else None
         self.rotation_controller = maya_rotation_doctor.MayaRotationDoctorController() if MAYA_AVAILABLE else None
+        self.skin_transfer_controller = maya_skin_transfer.MayaSkinTransferController() if MAYA_AVAILABLE else None
         self.skinning_controller = maya_skinning_cleanup.MayaSkinningCleanupController() if MAYA_AVAILABLE else None
         self.rig_scale_controller = maya_rig_scale_export.MayaRigScaleExportController() if MAYA_AVAILABLE else None
         self.video_reference_controller = maya_video_reference_tool.MayaVideoReferenceController() if MAYA_AVAILABLE else None
@@ -1669,6 +1672,11 @@ class MayaAnimWorkflowController(object):
         if self.rotation_controller:
             try:
                 self.rotation_controller.shutdown()
+            except Exception:
+                pass
+        if self.skin_transfer_controller:
+            try:
+                self.skin_transfer_controller.shutdown()
             except Exception:
                 pass
         if self.skinning_controller:
@@ -2847,11 +2855,24 @@ if QtWidgets:
             layout = QtWidgets.QVBoxLayout(self.skin_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_SKIN))
+
+            freeze_heading = QtWidgets.QLabel("Freeze Bad Mesh Transforms")
+            freeze_heading.setStyleSheet("font-size: 15px; font-weight: 800; color: #F2F2F2;")
+            layout.addWidget(freeze_heading)
             self.skin_panel = self._embed_tool_panel(
                 maya_skinning_cleanup.MayaSkinningCleanupWindow(self.controller.skinning_controller, parent=self.skin_page),
                 self.skin_page,
             )
             layout.addWidget(self.skin_panel, 1)
+
+            transfer_heading = QtWidgets.QLabel("Copy Exact Skinning")
+            transfer_heading.setStyleSheet("font-size: 15px; font-weight: 800; color: #F2F2F2;")
+            layout.addWidget(transfer_heading)
+            self.skin_transfer_panel = self._embed_tool_panel(
+                maya_skin_transfer.MayaSkinTransferWindow(self.controller.skin_transfer_controller, parent=self.skin_page, show_footer=False),
+                self.skin_page,
+            )
+            layout.addWidget(self.skin_transfer_panel, 0)
 
         def _build_rig_scale_tab(self):
             layout = QtWidgets.QVBoxLayout(self.rig_scale_page)
@@ -2996,13 +3017,14 @@ if QtWidgets:
                 "- Pick the animated controls and click Analyze Selected.\n"
                 "- Read the warning list.\n"
                 "- Click Use Best Fix for the safest quick fix, or choose a specific fix button if you know what you want.\n\n"
-                "Character Freeze\n"
+                "Character Skinning\n"
                 "- Use this when a skinned mesh has bad translate, rotate, or scale values and you want a clean replacement copy.\n"
                 "- Pick one skinned mesh, for example low on a RapidRig character.\n"
                 "- Click Check Selected Mesh.\n"
                 "- Read the red or yellow notes.\n"
                 "- Click Make Frozen Copy.\n"
                 "- If every check turns green, click Replace Original.\n\n"
+                "- To copy exact skinning, select the skinned source mesh first, select the matching target mesh second, and click Copy Selected Pair Now.\n\n"
                 "Rig Scale\n"
                 "- Use this when you need an export-safe scaled copy for Unreal or another game engine.\n"
                 "- Pick the character root or any object under the character and click Use Selected Character.\n"
@@ -3171,12 +3193,17 @@ if QtWidgets:
                 "onion_skin": "onion_skin",
                 "rotation": "rotation_doctor",
                 "rotation_doctor": "rotation_doctor",
-                "skin": "character_freeze",
-                "skinning": "character_freeze",
-                "skinning_cleanup": "character_freeze",
-                "freeze": "character_freeze",
-                "character_freeze": "character_freeze",
-                "transform_cleanup": "character_freeze",
+                "skin_transfer": "character_skinning",
+                "transfer_skin": "character_skinning",
+                "copy_skin": "character_skinning",
+                "skin_to_skin": "character_skinning",
+                "skin": "character_skinning",
+                "skinning": "character_skinning",
+                "skinning_cleanup": "character_skinning",
+                "freeze": "character_skinning",
+                "character_freeze": "character_skinning",
+                "character_skinning": "character_skinning",
+                "transform_cleanup": "character_skinning",
                 "rig_scale": "rig_scale",
                 "scale": "rig_scale",
                 "video": "video_reference",

@@ -28,6 +28,7 @@
     "maya_rig_scale_export.py",
     "maya_rotation_doctor.py",
     "maya_shelf_utils.py",
+    "maya_skin_transfer.py",
     "maya_skinning_cleanup.py",
     "maya_surface_contact.py",
     "maya_timeline_notes.py",

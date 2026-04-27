@@ -970,7 +970,7 @@ if QtWidgets:
             self.controller = controller
             self.controller.status_callback = self._set_status
             self.setObjectName(WINDOW_OBJECT_NAME)
-            self.setWindowTitle("Maya Character Freeze")
+            self.setWindowTitle("Maya Character Skinning")
             self.setMinimumWidth(760)
             self.setMinimumHeight(620)
             self._build_ui()

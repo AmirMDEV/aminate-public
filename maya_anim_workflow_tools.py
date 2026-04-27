@@ -26,6 +26,7 @@ import maya_surface_contact as _surface_contact  # noqa: F401
 import maya_timing_tools as _timing_tools  # noqa: F401
 import maya_onion_skin as _onion  # noqa: F401
 import maya_rotation_doctor as _rotation  # noqa: F401
+import maya_skin_transfer as _skin_transfer  # noqa: F401
 import maya_skinning_cleanup as _skin  # noqa: F401
 import maya_rig_scale_export as _rig_scale  # noqa: F401
 import maya_video_reference_tool as _video_reference  # noqa: F401
@@ -48,6 +49,7 @@ _WORKFLOW_MODULE_NAMES = (
     "maya_timing_tools",
     "maya_onion_skin",
     "maya_rotation_doctor",
+    "maya_skin_transfer",
     "maya_skinning_cleanup",
     "maya_rig_scale_export",
     "maya_video_reference_tool",
@@ -68,7 +70,7 @@ def _force_own_root_first():
 
 def _refresh_modules():
     global _parenting, _contact_hold, _animators_pencil, _animation_assistant, _animation_styling, _control_picker, _face_retarget, _floating_channel_box, _history_timeline, _reference_manager, _surface_contact
-    global _timing_tools, _onion, _rotation, _skin, _rig_scale, _video_reference, _timeline_notes
+    global _timing_tools, _onion, _rotation, _skin_transfer, _skin, _rig_scale, _video_reference, _timeline_notes
     global _crash_recovery, _impl
     _force_own_root_first()
     for module_name in _WORKFLOW_MODULE_NAMES:
@@ -88,6 +90,7 @@ def _refresh_modules():
     _timing_tools = importlib.import_module("maya_timing_tools")
     _onion = importlib.import_module("maya_onion_skin")
     _rotation = importlib.import_module("maya_rotation_doctor")
+    _skin_transfer = importlib.import_module("maya_skin_transfer")
     _skin = importlib.import_module("maya_skinning_cleanup")
     _rig_scale = importlib.import_module("maya_rig_scale_export")
     _video_reference = importlib.import_module("maya_video_reference_tool")
