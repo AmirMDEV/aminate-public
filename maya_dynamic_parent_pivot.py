@@ -414,6 +414,50 @@ def _screen_limited_size(preferred_width, preferred_height, min_width=420, min_h
         return width, height
 
 
+def _layout_size_constraint(member_name, fallback=None):
+    if not QtWidgets:
+        return fallback
+    layout_class = getattr(QtWidgets, "QLayout", None)
+    if not layout_class:
+        return fallback
+    if hasattr(layout_class, member_name):
+        return getattr(layout_class, member_name)
+    scoped_enum = getattr(layout_class, "SizeConstraint", None)
+    if scoped_enum and hasattr(scoped_enum, member_name):
+        return getattr(scoped_enum, member_name)
+    return fallback
+
+
+def _set_no_size_constraint(layout):
+    if not layout:
+        return
+    constraint = _layout_size_constraint("SetNoConstraint")
+    if constraint is None:
+        return
+    try:
+        layout.setSizeConstraint(constraint)
+    except Exception:
+        pass
+
+
+def _allow_tiny_shell_widget(widget):
+    if not widget:
+        return
+    try:
+        widget.setMinimumSize(0, 0)
+    except Exception:
+        try:
+            widget.setMinimumWidth(0)
+            widget.setMinimumHeight(0)
+        except Exception:
+            pass
+    if hasattr(widget, "setSizePolicy") and QtWidgets:
+        try:
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
+        except Exception:
+            pass
+
+
 def _style_donate_button(button):
     if not button or not QtWidgets:
         return
@@ -2169,11 +2213,11 @@ if QtWidgets:
             self.controller = controller
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Aminate")
-            self.setMinimumSize(420, 360)
-            start_width, start_height = _screen_limited_size(1180, 860, min_width=420, min_height=360)
+            self.setMinimumSize(160, 120)
+            start_width, start_height = _screen_limited_size(1180, 860, min_width=160, min_height=120)
             self.resize(start_width, start_height)
             if hasattr(self, "setSizePolicy"):
-                self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+                self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
             self._build_ui()
             self._populate_profile_names()
             self._set_initial_tab(initial_tab)
@@ -2260,25 +2304,28 @@ if QtWidgets:
                 page.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             scroll = QtWidgets.QScrollArea()
             scroll.setObjectName("mayaAnimWorkflowTabScroll")
+            scroll.setMinimumSize(0, 0)
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
             scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
             scroll.setVerticalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
             if hasattr(scroll, "setSizePolicy"):
-                scroll.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+                scroll.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
             scroll.setWidget(page)
             return page, scroll
 
         def _build_ui(self):
             self.setStyleSheet(AMINATE_WINDOW_STYLESHEET)
             main_layout = QtWidgets.QVBoxLayout(self)
+            _set_no_size_constraint(main_layout)
             main_layout.setContentsMargins(8, 8, 8, 8)
             main_layout.setSpacing(8)
             self.tab_widget = QtWidgets.QTabWidget()
             self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
+            _allow_tiny_shell_widget(self.tab_widget)
             self.tab_widget.setUsesScrollButtons(True)
             self.tab_widget.setMovable(True)
-            self.tab_widget.setElideMode(QtCore.Qt.ElideNone)
+            self.tab_widget.setElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
             self.tab_widget.setCornerWidget(self._build_tab_navigation_widget(), QtCore.Qt.TopRightCorner)
             main_layout.addWidget(self.tab_widget, 1)
             self.parenting_page, self.parenting_tab = self._make_scroll_tab()
@@ -2349,20 +2396,25 @@ if QtWidgets:
             self._update_tab_navigation_buttons()
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setObjectName("mayaAnimWorkflowStatusLabel")
+            _allow_tiny_shell_widget(self.status_label)
             self.status_label.setWordWrap(True)
             main_layout.addWidget(self.status_label)
             footer_layout = QtWidgets.QHBoxLayout()
+            _set_no_size_constraint(footer_layout)
             self.brand_label = QtWidgets.QLabel('Built by Amir. Follow Amir at <a href="{0}">followamir.com</a>.'.format(FOLLOW_AMIR_URL))
             self.brand_label.setObjectName("mayaAnimWorkflowBrandLabel")
+            _allow_tiny_shell_widget(self.brand_label)
             self.brand_label.setOpenExternalLinks(False)
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
             self.version_label = QtWidgets.QLabel(VERSION_LABEL)
             self.version_label.setObjectName("mayaAnimWorkflowVersionLabel")
+            _allow_tiny_shell_widget(self.version_label)
             self.version_label.setToolTip("Current public student release label.")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
+            self.donate_button.setMinimumWidth(0)
             _style_donate_button(self.donate_button)
             self.donate_button.setToolTip("Open Amir's PayPal donate link. Set AMIR_PAYPAL_DONATE_URL or AMIR_DONATE_URL to customize it.")
             self.donate_button.clicked.connect(self._open_donate_url)
