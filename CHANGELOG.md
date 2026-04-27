@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fixed the Aminate top tab bar so tab labels keep readable widths instead of collapsing into single-letter tabs, while custom `<<` and `>>` navigation still moves between tabs.
+- Fixed the Aminate top tab bar so tab labels keep readable widths instead of collapsing into single-letter tabs, removed the tiny native Qt overflow triangles, and kept only the custom `<<` and `>>` navigation buttons.
 - Added a dedicated all-tabs Aminate resize smoke that can test either the repo copy or the installed Maya scripts copy, and verified all 21 tabs expose vertical and horizontal scroll ranges when squashed to `220x180`.
 - Made Aminate tab scrollbars visibly thick enough to use with a normal mouse, and hardened dockable child panels so automated standalone resize tests use plain dialogs when no Maya main window exists.
 - Removed Qt's built-in tab overflow buttons beside the Aminate tab arrows, made the custom tab arrows larger and highlighted, and added smoke coverage for the custom-only tab navigation state.

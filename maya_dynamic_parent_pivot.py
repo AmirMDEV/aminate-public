@@ -2360,7 +2360,7 @@ if QtWidgets:
             self.tab_widget = QtWidgets.QTabWidget()
             self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
             _allow_tiny_shell_widget(self.tab_widget)
-            self.tab_widget.setUsesScrollButtons(True)
+            self.tab_widget.setUsesScrollButtons(False)
             self.tab_widget.setMovable(True)
             self.tab_widget.setElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
             self._configure_main_tab_bar()
@@ -2469,7 +2469,7 @@ if QtWidgets:
             except Exception:
                 pass
             try:
-                tab_bar.setUsesScrollButtons(True)
+                tab_bar.setUsesScrollButtons(False)
             except Exception:
                 pass
             try:
