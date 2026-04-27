@@ -164,6 +164,10 @@ def _source_root():
 def _load_manifest(source_root):
     manifest_path = os.path.join(source_root, DEFAULT_MANIFEST_FILE_NAME)
     if not os.path.exists(manifest_path):
+        sibling_manifest = os.path.join(os.path.dirname(source_root), DEFAULT_MANIFEST_FILE_NAME)
+        if os.path.exists(sibling_manifest):
+            manifest_path = sibling_manifest
+    if not os.path.exists(manifest_path):
         try:
             from maya_anim_workflow_tools_package_manifest import (
                 MANIFEST_FILE_NAME as package_manifest_file_name,
@@ -201,8 +205,12 @@ def _copy_runtime_files(source_root, destination_root, runtime_files):
             raise RuntimeError("Missing runtime file in installer payload: {0}".format(file_name))
         shutil.copy2(source_path, os.path.join(destination_root, file_name))
     manifest_path = os.path.join(source_root, DEFAULT_MANIFEST_FILE_NAME)
+    if not os.path.exists(manifest_path):
+        sibling_manifest = os.path.join(os.path.dirname(source_root), DEFAULT_MANIFEST_FILE_NAME)
+        if os.path.exists(sibling_manifest):
+            manifest_path = sibling_manifest
     if os.path.exists(manifest_path):
-        shutil.copy2(manifest_path, os.path.join(destination_root, MANIFEST_FILE_NAME))
+        shutil.copy2(manifest_path, os.path.join(destination_root, DEFAULT_MANIFEST_FILE_NAME))
 
 
 def install_maya_anim_workflow_tools_from_dragdrop():
