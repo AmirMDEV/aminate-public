@@ -94,6 +94,36 @@ _short_name = hold_utils._short_name
 _node_long_name = hold_utils._node_long_name
 _selected_controls = hold_utils._selected_controls
 
+
+def _screen_limited_size(preferred_width, preferred_height, min_width=420, min_height=360, margin=96):
+    width = int(preferred_width)
+    height = int(preferred_height)
+    if not QtWidgets:
+        return width, height
+    try:
+        app = QtWidgets.QApplication.instance()
+        screen = None
+        if app:
+            if QtGui and hasattr(QtGui, "QCursor") and hasattr(app, "screenAt"):
+                try:
+                    screen = app.screenAt(QtGui.QCursor.pos())
+                except Exception:
+                    screen = None
+            if screen is None and hasattr(app, "primaryScreen"):
+                screen = app.primaryScreen()
+        if screen and hasattr(screen, "availableGeometry"):
+            geometry = screen.availableGeometry()
+        elif app and hasattr(app, "desktop"):
+            geometry = app.desktop().availableGeometry()
+        else:
+            return width, height
+        available_width = max(int(min_width), int(geometry.width()) - int(margin))
+        available_height = max(int(min_height), int(geometry.height()) - int(margin))
+        return min(width, available_width), min(height, available_height)
+    except Exception:
+        return width, height
+
+
 _SIDE_TOKEN_MIRRORS = {
     "left": "right",
     "right": "left",
@@ -877,8 +907,9 @@ if QtWidgets:
             self.controller = controller
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Controls Retargeter (Face and Body)")
-            self.setMinimumSize(480, 520)
-            self.resize(900, 860)
+            self.setMinimumSize(420, 360)
+            start_width, start_height = _screen_limited_size(900, 860, min_width=420, min_height=360)
+            self.resize(start_width, start_height)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             self._build_ui()

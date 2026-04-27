@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Made the main Aminate window scale down for smaller monitors, reduced the startup minimum size, enabled horizontal scrollbars on every tab, and clamped startup window size to the active screen.
 - Fixed `Aminate_v0.3.1.zip` release packaging so `manifest.json` exists at the package root and inside the payload folder, and fixed the drag-and-drop installer manifest copy path used during Maya install.
 - Renamed generated Aminate release packaging from `student_package` to `release_package`, renamed release build scripts, and changed the packaged Maya drag-and-drop installer name to `Aminate drag and drop this onto Maya viewport.py` for clearer public/private release installs.
 - Added a Rotation Doctor `Flip Current Key` button, Floating Graph Editor `Euler Flip` button, and public command for Blender-style Euler key flipping, correcting selected Graph Editor rotation keys or current-frame keyed controls to the nearest safe equivalent value.

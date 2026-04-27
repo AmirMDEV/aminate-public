@@ -385,6 +385,35 @@ def _qt_flag(scope_name, member_name, fallback=None):
     return fallback
 
 
+def _screen_limited_size(preferred_width, preferred_height, min_width=420, min_height=360, margin=96):
+    width = int(preferred_width)
+    height = int(preferred_height)
+    if not QtWidgets:
+        return width, height
+    try:
+        app = QtWidgets.QApplication.instance()
+        screen = None
+        if app:
+            if QtGui and hasattr(QtGui, "QCursor") and hasattr(app, "screenAt"):
+                try:
+                    screen = app.screenAt(QtGui.QCursor.pos())
+                except Exception:
+                    screen = None
+            if screen is None and hasattr(app, "primaryScreen"):
+                screen = app.primaryScreen()
+        if screen and hasattr(screen, "availableGeometry"):
+            geometry = screen.availableGeometry()
+        elif app and hasattr(app, "desktop"):
+            geometry = app.desktop().availableGeometry()
+        else:
+            return width, height
+        available_width = max(int(min_width), int(geometry.width()) - int(margin))
+        available_height = max(int(min_height), int(geometry.height()) - int(margin))
+        return min(width, available_width), min(height, available_height)
+    except Exception:
+        return width, height
+
+
 def _style_donate_button(button):
     if not button or not QtWidgets:
         return
@@ -2140,8 +2169,9 @@ if QtWidgets:
             self.controller = controller
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Aminate")
-            self.setMinimumSize(760, 520)
-            self.resize(1180, 860)
+            self.setMinimumSize(420, 360)
+            start_width, start_height = _screen_limited_size(1180, 860, min_width=420, min_height=360)
+            self.resize(start_width, start_height)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             self._build_ui()
@@ -2232,8 +2262,10 @@ if QtWidgets:
             scroll.setObjectName("mayaAnimWorkflowTabScroll")
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-            scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAlwaysOff", QtCore.Qt.ScrollBarAlwaysOff))
+            scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
             scroll.setVerticalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
+            if hasattr(scroll, "setSizePolicy"):
+                scroll.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             scroll.setWidget(page)
             return page, scroll
 
