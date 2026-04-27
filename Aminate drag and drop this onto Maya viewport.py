@@ -29,6 +29,7 @@ DEFAULT_RUNTIME_FILES = [
     "maya_rig_scale_export.py",
     "maya_rotation_doctor.py",
     "maya_shelf_utils.py",
+    "maya_skin_transfer.py",
     "maya_skinning_cleanup.py",
     "maya_surface_contact.py",
     "maya_timeline_notes.py",
@@ -226,6 +227,16 @@ def install_maya_anim_workflow_tools_from_dragdrop():
     sys.path.insert(0, destination_root)
 
     import importlib
+    for stale_module_name in ("maya_dynamic_parent_pivot", "maya_anim_workflow_tools"):
+        stale_module = sys.modules.get(stale_module_name)
+        if stale_module:
+            stale_impl = getattr(stale_module, "_impl", stale_module)
+            stale_close = getattr(stale_impl, "_close_existing_window", None)
+            if stale_close:
+                try:
+                    stale_close()
+                except Exception:
+                    pass
     for module_name in list(sys.modules):
         if module_name == "maya_anim_workflow_tools" or module_name.startswith("maya_"):
             sys.modules.pop(module_name, None)

@@ -177,6 +177,10 @@ def _copy_exact_skin(source_target, target_target, replace_existing=True):
     return new_skin
 
 
+def _status_payload(state, text):
+    return {"state": state, "text": text}
+
+
 class MayaSkinTransferController(object):
     def __init__(self):
         self.sources = []
@@ -227,10 +231,10 @@ class MayaSkinTransferController(object):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
         targets = _mesh_targets_from_selection()
-        if len(targets) != 2:
-            return False, "Select exactly two meshes: source first, target second."
+        if len(targets) < 2:
+            return False, "Select the skinned source first, then one or more target meshes."
         self.sources = [targets[0]]
-        self.targets = [targets[1]]
+        self.targets = targets[1:]
         return self.copy_loaded()
 
     def _paired_targets(self):
@@ -248,6 +252,11 @@ class MayaSkinTransferController(object):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
         try:
+            validation = self.validation_summary()
+            if validation["source"]["state"] == "bad":
+                raise RuntimeError(validation["source"]["text"])
+            if validation["target"]["state"] == "bad":
+                raise RuntimeError(validation["target"]["text"])
             pairs = self._paired_targets()
             results = []
             cmds.undoInfo(openChunk=True, chunkName="AminateExactSkinTransfer")
@@ -270,6 +279,65 @@ class MayaSkinTransferController(object):
             message = "Could not copy skinning: {0}".format(exc)
             self._set_status(message, False)
             return False, message
+
+    def validation_summary(self):
+        if not MAYA_AVAILABLE:
+            return {
+                "source": _status_payload("bad", "Maya required."),
+                "target": _status_payload("bad", "Maya required."),
+            }
+        if not self.sources:
+            return {
+                "source": _status_payload("warn", "Source: pick skinned mesh first."),
+                "target": _status_payload("warn", "Target: pick matching mesh second."),
+            }
+        if not self.targets:
+            source = self.sources[0]
+            source_skin = skin_utils._find_skin_cluster(source["shape"])
+            source_state = "good" if source_skin else "bad"
+            source_text = "Source: skinned." if source_skin else "Source: selected mesh has no skinCluster."
+            return {
+                "source": _status_payload(source_state, source_text),
+                "target": _status_payload("warn", "Target: pick one or more target meshes."),
+            }
+        try:
+            pairs = self._paired_targets()
+        except Exception as exc:
+            return {
+                "source": _status_payload("bad", str(exc)),
+                "target": _status_payload("bad", str(exc)),
+            }
+        bad_sources = []
+        bad_targets = []
+        for source_target, target_target in pairs:
+            source_skin = skin_utils._find_skin_cluster(source_target["shape"])
+            if not source_skin:
+                bad_sources.append(skin_utils._short_name(source_target["transform"]))
+                continue
+            matches, source_topology, target_topology = _topology_matches(source_target["shape"], target_target["shape"])
+            if not matches:
+                bad_targets.append(
+                    "{0} verts {1}, target {2} verts {3}".format(
+                        skin_utils._short_name(source_target["transform"]),
+                        source_topology.get("vertex_count"),
+                        skin_utils._short_name(target_target["transform"]),
+                        target_topology.get("vertex_count"),
+                    )
+                )
+        if bad_sources:
+            return {
+                "source": _status_payload("bad", "Source not skinned: {0}".format(", ".join(bad_sources))),
+                "target": _status_payload("warn", "Target: waiting for valid source."),
+            }
+        if bad_targets:
+            return {
+                "source": _status_payload("good", "Source: skinned."),
+                "target": _status_payload("bad", "Topology mismatch: {0}".format("; ".join(bad_targets))),
+            }
+        return {
+            "source": _status_payload("good", "Source: skinned."),
+            "target": _status_payload("good", "Target: topology matches. Ready to copy."),
+        }
 
 
 if QtWidgets:
@@ -322,6 +390,8 @@ if QtWidgets:
             self.source_line.setReadOnly(True)
             self.target_line = QtWidgets.QLineEdit()
             self.target_line.setReadOnly(True)
+            self.source_badge = QtWidgets.QLabel("Source: pick skinned mesh first.")
+            self.target_badge = QtWidgets.QLabel("Target: pick matching mesh second.")
             self.load_source_button = QtWidgets.QPushButton("1 Load Source")
             self.load_target_button = QtWidgets.QPushButton("2 Load Target")
             self.copy_loaded_button = QtWidgets.QPushButton("3 Copy Exact Skinning")
@@ -329,10 +399,12 @@ if QtWidgets:
             grid.addWidget(QtWidgets.QLabel("Source"), 0, 0)
             grid.addWidget(self.source_line, 0, 1)
             grid.addWidget(self.load_source_button, 0, 2)
-            grid.addWidget(QtWidgets.QLabel("Target"), 1, 0)
-            grid.addWidget(self.target_line, 1, 1)
-            grid.addWidget(self.load_target_button, 1, 2)
-            grid.addWidget(self.copy_loaded_button, 2, 0, 1, 3)
+            grid.addWidget(self.source_badge, 1, 1, 1, 2)
+            grid.addWidget(QtWidgets.QLabel("Target"), 2, 0)
+            grid.addWidget(self.target_line, 2, 1)
+            grid.addWidget(self.load_target_button, 2, 2)
+            grid.addWidget(self.target_badge, 3, 1, 1, 2)
+            grid.addWidget(self.copy_loaded_button, 4, 0, 1, 3)
             main_layout.addLayout(grid)
 
             note = QtWidgets.QLabel(
@@ -367,9 +439,32 @@ if QtWidgets:
         def _sync_lists(self):
             self.source_line.setText(_short_list(self.controller.sources))
             self.target_line.setText(_short_list(self.controller.targets))
+            self._sync_badges()
+
+        def _sync_badges(self):
+            validation = self.controller.validation_summary()
+            self._set_badge(self.source_badge, validation["source"])
+            self._set_badge(self.target_badge, validation["target"])
+
+        def _set_badge(self, label, payload):
+            colors = {
+                "good": ("#103C1D", "#59D987"),
+                "bad": ("#4A1515", "#FF7A7A"),
+                "warn": ("#463812", "#FFD166"),
+            }
+            background, foreground = colors.get(payload.get("state"), colors["warn"])
+            label.setText(payload.get("text") or "")
+            label.setWordWrap(True)
+            label.setStyleSheet(
+                "QLabel {{ background-color: {0}; color: {1}; border: 1px solid {1}; border-radius: 4px; padding: 4px 6px; font-weight: 700; }}".format(
+                    background,
+                    foreground,
+                )
+            )
 
         def _set_status(self, message, success=True):
             self.status_label.setText(message)
+            self._sync_badges()
 
         def _load_sources(self):
             success, message = self.controller.load_sources_from_selection()

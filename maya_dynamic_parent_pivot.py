@@ -753,6 +753,7 @@ def _ensure_single_workflow_widget(keep_widget=None):
 
 
 def _close_existing_window():
+    global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
     global GLOBAL_DOCK_HOST
     if GLOBAL_WINDOW is not None:
@@ -777,6 +778,7 @@ def _close_existing_window():
         maya_rig_scale_export,
         maya_video_reference_tool,
         maya_timeline_notes,
+        maya_timing_tools,
         maya_face_retarget,
     ):
         try:
@@ -787,6 +789,7 @@ def _close_existing_window():
             pass
     GLOBAL_WINDOW = None
     GLOBAL_DOCK_HOST = None
+    GLOBAL_CONTROLLER = None
     _delete_workspace_control(WORKSPACE_CONTROL_NAME)
     _delete_workspace_control(LEGACY_WORKSPACE_CONTROL_NAME)
     if not QtWidgets:
@@ -3542,6 +3545,16 @@ def _shelf_button_command(repo_path):
         "import importlib\n"
         "import sys\n"
         "repo_path = r\"{0}\"\n"
+        "for _aminate_module_name in ('maya_dynamic_parent_pivot', 'maya_anim_workflow_tools'):\n"
+        "    _aminate_module = sys.modules.get(_aminate_module_name)\n"
+        "    if _aminate_module:\n"
+        "        _aminate_impl = getattr(_aminate_module, '_impl', _aminate_module)\n"
+        "        _aminate_close = getattr(_aminate_impl, '_close_existing_window', None)\n"
+        "        if _aminate_close:\n"
+        "            try:\n"
+        "                _aminate_close()\n"
+        "            except Exception:\n"
+        "                pass\n"
         "while repo_path in sys.path:\n"
         "    sys.path.remove(repo_path)\n"
         "sys.path.insert(0, repo_path)\n"

@@ -61,6 +61,20 @@ _WORKFLOW_MODULE_NAMES = (
 _MODULE_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
+def _close_loaded_workflow_ui():
+    for module_name in ("maya_dynamic_parent_pivot", "maya_anim_workflow_tools"):
+        module = sys.modules.get(module_name)
+        if not module:
+            continue
+        impl = getattr(module, "_impl", module)
+        close_fn = getattr(impl, "_close_existing_window", None)
+        if close_fn:
+            try:
+                close_fn()
+            except Exception:
+                pass
+
+
 def _force_own_root_first():
     while _MODULE_ROOT in sys.path:
         sys.path.remove(_MODULE_ROOT)
@@ -72,6 +86,7 @@ def _refresh_modules():
     global _parenting, _contact_hold, _animators_pencil, _animation_assistant, _animation_styling, _control_picker, _face_retarget, _floating_channel_box, _history_timeline, _reference_manager, _surface_contact
     global _timing_tools, _onion, _rotation, _skin_transfer, _skin, _rig_scale, _video_reference, _timeline_notes
     global _crash_recovery, _impl
+    _close_loaded_workflow_ui()
     _force_own_root_first()
     for module_name in _WORKFLOW_MODULE_NAMES:
         sys.modules.pop(module_name, None)
