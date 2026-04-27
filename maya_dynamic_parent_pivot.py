@@ -138,6 +138,8 @@ QTabBar::tab {
     border-bottom-color: #2B2B2B;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
+    min-width: 108px;
+    max-width: 190px;
     padding: 7px 10px;
     margin-right: 2px;
 }
@@ -149,6 +151,14 @@ QTabBar::tab:selected {
 QTabBar::tab:hover {
     background-color: #333333;
     color: #FFFFFF;
+}
+QTabBar QToolButton {
+    width: 0px;
+    height: 0px;
+    border: 0px;
+    margin: 0px;
+    padding: 0px;
+    background: transparent;
 }
 QToolButton#mayaAnimWorkflowTabNavButton {
     min-width: 34px;
@@ -2350,9 +2360,10 @@ if QtWidgets:
             self.tab_widget = QtWidgets.QTabWidget()
             self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
             _allow_tiny_shell_widget(self.tab_widget)
-            self.tab_widget.setUsesScrollButtons(False)
+            self.tab_widget.setUsesScrollButtons(True)
             self.tab_widget.setMovable(True)
             self.tab_widget.setElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
+            self._configure_main_tab_bar()
             self.tab_widget.setCornerWidget(self._build_tab_navigation_widget(), QtCore.Qt.TopRightCorner)
             main_layout.addWidget(self.tab_widget, 1)
             self.parenting_page, self.parenting_tab = self._make_scroll_tab()
@@ -2397,6 +2408,7 @@ if QtWidgets:
             self.tab_widget.addTab(self.rig_scale_tab, TAB_RIG_SCALE)
             self.tab_widget.addTab(self.video_tab, TAB_VIDEO)
             self.tab_widget.addTab(self.timeline_tab, TAB_TIMELINE)
+            self._refresh_tab_tooltips()
             self.tab_intro_labels = {}
             self._build_parenting_tab()
             self._build_contact_hold_tab()
@@ -2447,6 +2459,38 @@ if QtWidgets:
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+
+        def _configure_main_tab_bar(self):
+            tab_bar = self.tab_widget.tabBar() if self.tab_widget else None
+            if not tab_bar:
+                return
+            try:
+                tab_bar.setExpanding(False)
+            except Exception:
+                pass
+            try:
+                tab_bar.setUsesScrollButtons(True)
+            except Exception:
+                pass
+            try:
+                tab_bar.setElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
+            except Exception:
+                pass
+            if hasattr(tab_bar, "setSizePolicy"):
+                try:
+                    tab_bar.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+                except Exception:
+                    pass
+
+        def _refresh_tab_tooltips(self):
+            if not self.tab_widget:
+                return
+            for index in range(self.tab_widget.count()):
+                label = self.tab_widget.tabText(index)
+                try:
+                    self.tab_widget.setTabToolTip(index, label)
+                except Exception:
+                    pass
 
         def _build_tab_navigation_widget(self):
             nav_widget = QtWidgets.QWidget()
