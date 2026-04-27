@@ -894,9 +894,13 @@ MayaFaceRetargetController = FaceRetargetController
 
 if QtWidgets:
     try:
+        from maya.OpenMayaUI import MQtUtil
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-        _WindowBase = type("MayaFaceRetargetWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        if MQtUtil.mainWindow() is not None:
+            _WindowBase = type("MayaFaceRetargetWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        else:
+            _WindowBase = type("MayaFaceRetargetWindowBase", (QtWidgets.QDialog,), {})
     except Exception:
         _WindowBase = type("MayaFaceRetargetWindowBase", (QtWidgets.QDialog,), {})
 

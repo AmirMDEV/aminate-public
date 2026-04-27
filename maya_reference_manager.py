@@ -567,7 +567,12 @@ class ReferencePackageController(object):
 
 
 if QtWidgets:
-    if MayaQWidgetDockableMixin is not None:
+    try:
+        from maya.OpenMayaUI import MQtUtil
+        _HAS_MAYA_MAIN_WINDOW = MQtUtil.mainWindow() is not None
+    except Exception:
+        _HAS_MAYA_MAIN_WINDOW = False
+    if MayaQWidgetDockableMixin is not None and _HAS_MAYA_MAIN_WINDOW:
         _WindowBase = type("MayaReferenceManagerWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
     else:
         _WindowBase = type("MayaReferenceManagerWindowBase", (QtWidgets.QDialog,), {})

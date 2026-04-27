@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a dedicated all-tabs Aminate resize smoke that can test either the repo copy or the installed Maya scripts copy, and verified all 21 tabs expose vertical and horizontal scroll ranges when squashed to `220x180`.
+- Made Aminate tab scrollbars visibly thick enough to use with a normal mouse, and hardened dockable child panels so automated standalone resize tests use plain dialogs when no Maya main window exists.
 - Removed Qt's built-in tab overflow buttons beside the Aminate tab arrows, made the custom tab arrows larger and highlighted, and added smoke coverage for the custom-only tab navigation state.
 - Made the main Aminate window scale down for smaller monitors, reduced the startup minimum size to `160x120`, enabled horizontal scrollbars on every tab, loosened shell layout constraints, and clamped startup window size to the active screen.
 - Fixed `Aminate_v0.3.1.zip` release packaging so `manifest.json` exists at the package root and inside the payload folder, and fixed the drag-and-drop installer manifest copy path used during Maya install.

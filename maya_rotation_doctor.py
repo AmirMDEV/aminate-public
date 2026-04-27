@@ -888,9 +888,13 @@ class MayaRotationDoctorController(object):
 
 if QtWidgets:
     try:
+        from maya.OpenMayaUI import MQtUtil
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-        _WindowBase = type("MayaRotationDoctorBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        if MQtUtil.mainWindow() is not None:
+            _WindowBase = type("MayaRotationDoctorBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        else:
+            _WindowBase = type("MayaRotationDoctorBase", (QtWidgets.QDialog,), {})
     except Exception:
         _WindowBase = type("MayaRotationDoctorBase", (QtWidgets.QDialog,), {})
 

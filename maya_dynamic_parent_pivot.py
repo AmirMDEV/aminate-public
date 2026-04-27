@@ -288,6 +288,12 @@ QScrollBar:horizontal {
     border: 0px;
     margin: 0px;
 }
+QScrollBar:vertical {
+    width: 14px;
+}
+QScrollBar:horizontal {
+    height: 14px;
+}
 QScrollBar::handle:vertical,
 QScrollBar::handle:horizontal {
     background-color: #4A4A4A;
@@ -2217,9 +2223,13 @@ class MayaAnimWorkflowController(object):
 
 if QtWidgets:
     try:
+        from maya.OpenMayaUI import MQtUtil
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-        _WindowBase = type("MayaAnimWorkflowWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        if MQtUtil.mainWindow() is not None:
+            _WindowBase = type("MayaAnimWorkflowWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        else:
+            _WindowBase = type("MayaAnimWorkflowWindowBase", (QtWidgets.QDialog,), {})
     except Exception:
         _WindowBase = type("MayaAnimWorkflowWindowBase", (QtWidgets.QDialog,), {})
 

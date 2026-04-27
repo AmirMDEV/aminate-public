@@ -546,7 +546,12 @@ class AnimationStylingController(object):
 
 
 if QtWidgets:
-    _WindowBase = type("AnimationStylingWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {}) if MayaQWidgetDockableMixin else type("AnimationStylingWindowBase", (QtWidgets.QDialog,), {})
+    try:
+        from maya.OpenMayaUI import MQtUtil
+        _HAS_MAYA_MAIN_WINDOW = MQtUtil.mainWindow() is not None
+    except Exception:
+        _HAS_MAYA_MAIN_WINDOW = False
+    _WindowBase = type("AnimationStylingWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {}) if MayaQWidgetDockableMixin and _HAS_MAYA_MAIN_WINDOW else type("AnimationStylingWindowBase", (QtWidgets.QDialog,), {})
 
 
     class AnimationStylingPanel(QtWidgets.QWidget):

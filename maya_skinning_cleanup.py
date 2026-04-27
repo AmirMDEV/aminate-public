@@ -952,9 +952,13 @@ class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
 
 if QtWidgets:
     try:
+        from maya.OpenMayaUI import MQtUtil
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-        _WindowBase = type("MayaSkinningCleanupBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        if MQtUtil.mainWindow() is not None:
+            _WindowBase = type("MayaSkinningCleanupBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+        else:
+            _WindowBase = type("MayaSkinningCleanupBase", (QtWidgets.QDialog,), {})
     except Exception:
         _WindowBase = type("MayaSkinningCleanupBase", (QtWidgets.QDialog,), {})
 
