@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Simplified Character Skinning transform cleanup into one primary button: `Replace Mesh With Frozen Transform Mesh`, which builds the verified frozen mesh, replaces the selected skinned mesh, preserves weights/materials/UVs/normals, and keeps the old mesh hidden as a backup.
 - Renamed `Character Freeze` to `Character Skinning` in the Aminate UI and added a super-simple exact skin transfer workflow in that same tab: select the skinned source mesh, select the matching target mesh, then click `Copy Selected Pair Now`.
 - Added green/red readiness badges to Character Skinning exact skin transfer so source skinning and target topology are checked before copying, and hardened Aminate relaunch/install so stale docked UI closes before the latest modules reload.
 - Fixed the Aminate top tab bar so tab labels keep readable widths instead of collapsing into single-letter tabs, removed the tiny native Qt overflow triangles, and kept only the custom `<<` and `>>` navigation buttons.

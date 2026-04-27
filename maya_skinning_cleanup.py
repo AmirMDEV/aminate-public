@@ -732,7 +732,7 @@ def _verify_cleanup(report, clean_transform, clean_shape, new_skin_cluster):
 
 def _format_report(report):
     if not report:
-        return "Pick one skinned mesh, then click Check Selected Mesh."
+        return "Pick one skinned mesh, then click Replace Mesh With Frozen Transform Mesh."
 
     lines = [
         "Mesh: {0}".format(_short_name(report["source_transform"])),
@@ -945,6 +945,27 @@ class MayaSkinningCleanupController(object):
         self.result["clean_transform"] = final_transform
         return True, "Replaced the original mesh. The old one is still in the scene as a hidden backup."
 
+    def replace_with_frozen_transform_mesh(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="AminateReplaceWithFrozenTransformMesh")
+            success, message = self.analyze_selection()
+            if not success:
+                return False, message
+            success, message = self.create_clean_copy()
+            if not success:
+                return False, message
+            success, message = self.replace_original()
+            if not success:
+                return False, message
+            return True, "Replaced selected skinned mesh with a clean frozen-transform mesh. Skin weights, influences, materials, UVs, and normals were preserved."
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+
 
 class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
     pass
@@ -982,43 +1003,38 @@ if QtWidgets:
             main_layout.setSpacing(10)
 
             description = QtWidgets.QLabel(
-                "Pick one skinned mesh with bad translate, rotate, or scale values. This tool makes a clean frozen copy with translate 0, rotate 0, and scale 1 while keeping the same shape, skin, materials, UVs, and normals."
+                "Select an already skinned mesh with bad translate, rotate, or scale values, then press the button below. Aminate replaces it with a clean frozen-transform mesh while preserving skin weights."
             )
             description.setWordWrap(True)
             main_layout.addWidget(description)
 
             note = QtWidgets.QLabel(
-                "The normal path is safe: your original mesh stays untouched until every check passes and you press Replace Original."
+                "The old mesh is kept as a hidden backup after the replacement. Reference meshes are blocked so they are not changed by mistake."
             )
             note.setWordWrap(True)
             note.setStyleSheet("color: #B8D7FF;")
             main_layout.addWidget(note)
 
-            button_grid = QtWidgets.QGridLayout()
-            button_grid.setHorizontalSpacing(8)
-            button_grid.setVerticalSpacing(8)
-
             self.analyze_button = QtWidgets.QPushButton("Check Selected Mesh")
             self.analyze_button.setToolTip("Check the selected skinned mesh and show red, yellow, or green notes.")
-            self.create_button = QtWidgets.QPushButton("Make Frozen Copy")
-            self.create_button.setToolTip("Build a non-destructive frozen copy and run the checks.")
+            self.create_button = QtWidgets.QPushButton("Replace Mesh With Frozen Transform Mesh")
+            self.create_button.setMinimumHeight(42)
+            self.create_button.setToolTip("One-click fix: make a verified frozen copy, replace the selected mesh, and keep the old mesh hidden as a backup.")
             self.replace_button = QtWidgets.QPushButton("Replace Original")
             self.replace_button.setToolTip("Only works after all checks pass. The old mesh is kept as a hidden backup.")
             self.delete_button = QtWidgets.QPushButton("Delete Frozen Copy")
             self.delete_button.setToolTip("Remove the frozen copy if you do not want to keep it.")
-
-            button_grid.addWidget(self.analyze_button, 0, 0)
-            button_grid.addWidget(self.create_button, 0, 1)
-            button_grid.addWidget(self.replace_button, 1, 0)
-            button_grid.addWidget(self.delete_button, 1, 1)
-            main_layout.addLayout(button_grid)
+            self.analyze_button.hide()
+            self.replace_button.hide()
+            self.delete_button.hide()
+            main_layout.addWidget(self.create_button)
 
             self.report_text = QtWidgets.QPlainTextEdit()
             self.report_text.setReadOnly(True)
             self.report_text.setToolTip("Red means stop. Yellow means check carefully. Green means ready.")
             main_layout.addWidget(self.report_text, 1)
 
-            self.status_label = QtWidgets.QLabel("Pick one skinned mesh, then click Check Selected Mesh.")
+            self.status_label = QtWidgets.QLabel("Pick one skinned mesh, then click Replace Mesh With Frozen Transform Mesh.")
             self.status_label.setWordWrap(True)
             selectable_flag = _qt_flag("TextInteractionFlag", "TextSelectableByMouse", 0)
             self.status_label.setTextInteractionFlags(selectable_flag)
@@ -1044,7 +1060,7 @@ if QtWidgets:
             main_layout.addLayout(footer_layout)
 
             self.analyze_button.clicked.connect(self._analyze)
-            self.create_button.clicked.connect(self._create_clean_copy)
+            self.create_button.clicked.connect(self._replace_with_frozen_transform_mesh)
             self.replace_button.clicked.connect(self._replace_original)
             self.delete_button.clicked.connect(self._delete_clean_copy)
 
@@ -1061,6 +1077,11 @@ if QtWidgets:
 
         def _create_clean_copy(self):
             success, message = self.controller.create_clean_copy()
+            self._refresh_report()
+            self._set_status(message, success)
+
+        def _replace_with_frozen_transform_mesh(self):
+            success, message = self.controller.replace_with_frozen_transform_mesh()
             self._refresh_report()
             self._set_status(message, success)
 

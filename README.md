@@ -28,7 +28,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 ## What Is New In 0.3.1
 
-- `Character Skinning` keeps skinning tools together. It can reset bad mesh translate and rotate values to `0`, scale to `1`, preserve skin weights and influences, use a visible-mesh fallback when Maya has no hidden original shape, and copy exact skinning from a skinned source mesh to a same-topology target mesh.
+- `Character Skinning` keeps skinning tools together. One button replaces a badly transformed skinned mesh with a clean frozen-transform mesh while preserving skin weights and influences, and the same tab can copy exact skinning from a skinned source mesh to a same-topology target mesh.
 - `Rotation Doctor` adds `Flip Current Key`, and the Floating Graph Editor adds `Euler Flip`, for a Blender-style Euler fix that rewrites the selected Graph Editor rotation key, or current-frame selected-control key, to the nearest safe equivalent rotation.
 - `Animation Assistant` adds an early pose-balance view with floor plane, contact points, center-of-gravity setup, viewport badge, and support-area drawing. This weight / pose balance check is unfinished and should be treated as preview.
 - `Floating Graph Editor` is now dockable, can include a DAG-only Outliner, has cycle infinity controls, and opens or closes from hotkeys more reliably.
