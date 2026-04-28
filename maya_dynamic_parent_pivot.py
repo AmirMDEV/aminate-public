@@ -332,7 +332,7 @@ TAB_HELP_TEXT = {
     TAB_SURFACE_CONTACT: "Use this when a hand, foot, or other control should stay clamped to a selected mesh surface in real time. The solver stays live, follows the selected mesh, and can be keyed on or off.",
     TAB_PIVOT: "Use this when you want to turn from a temporary pivot point without changing the real rig pivot.",
     TAB_IKFK: "Use this when you need to switch an arm or leg cleanly between IK and FK and keep the pose matched.",
-    TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. If you grab too many, remove the extra source or target control(s). Load Selected Source fills the source list in the order you picked. Load Selected Target fills the target list in the order you picked. Pair By Order maps source item 1 to target item 1, source item 2 to target item 2, and so on. Auto Map By Name can guess similar controls for you. Retarget selected controls for one control pair row or retarget all controls for every control pair row. Quick Pair Edit only changes the saved row you click first.",
+    TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. Put a source control on the left and its target control on the right. Empty rows are ignored. Auto Map By Name matches controls quickly from names, and Retarget All Controls bakes onto the target controls. Reduce Keys keeps only the original source keyframes.",
     TAB_CONTROL_PICKER: "Use this when you want a synced list and visual control map for a rig. It auto-finds likely controls by name, groups them by face, body, side, tail, wings, and FK/IK, keeps Maya and the picker in sync, lets you reorder the list, and shows the keyable attrs for the control you pick.",
     TAB_ANIMATORS_PENCIL: "Use this when you want expanded Blue Pencil-style drawing stored as real Maya curves and text in the scene. Pencil marks stay visible without this tool installed. Use it for 2D animation notes, layers, frame markers, ghosting, retiming, camera-based drawings, and quick annotation shapes.",
     TAB_ANIMATION_ASSISTANT: "Use this when you want Aminate to check pose balance. Pick a floor plane, add the controls that can touch the floor, pick a center of gravity control, and get a tiny balanced or unbalanced viewport light plus support area drawing.",
@@ -2774,7 +2774,9 @@ if QtWidgets:
             layout = QtWidgets.QVBoxLayout(self.face_retarget_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_FACE_RETARGET))
-            layout.addWidget(QtWidgets.QLabel("Pick the source controls first, then the target controls. Load Selected Source and Load Selected Target fill each list in the order you picked. Pair By Order maps item 1 to item 1, item 2 to item 2, and so on. Auto Map By Name can pair similar face or body controls for you. If you load too many, remove the extra source or target control. If you need to fix one saved row, click it first and use Quick Pair Edit."))
+            face_hint = QtWidgets.QLabel("Fill paired rows: source control on the left, target control on the right. A new empty row appears automatically and empty rows are ignored. Auto Map By Name pairs matching names quickly. Retarget All Controls bakes every completed row.")
+            face_hint.setWordWrap(True)
+            layout.addWidget(face_hint)
             self.face_retarget_panel = self._embed_tool_panel(
                 maya_face_retarget.MayaFaceRetargetWindow(self.controller.face_retarget_controller, parent=self.face_retarget_page),
                 self.face_retarget_page,

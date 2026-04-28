@@ -456,6 +456,54 @@ def _name_match_score(source_node, target_node):
     return min(score, 1.0)
 
 
+def _fast_match_key(node_name):
+    return "".join(_match_core_tokens(_mirror_match_tokens(_match_tokens(node_name))))
+
+
+def _normal_match_key(node_name):
+    return "".join(_match_core_tokens(_match_tokens(node_name)))
+
+
+def _source_key_times(source_node):
+    times = cmds.keyframe(source_node, query=True, timeChange=True) or []
+    rounded = []
+    for time_value in times:
+        rounded_time = int(round(float(time_value)))
+        if rounded_time not in rounded:
+            rounded.append(rounded_time)
+    return sorted(rounded)
+
+
+def _reduce_target_keys_to_source_times(source_node, target_node, bake_attrs, start_time, end_time):
+    keep_times = set(_source_key_times(source_node))
+    if not keep_times:
+        return
+    for attr_name in bake_attrs:
+        target_times = cmds.keyframe(target_node, attribute=attr_name, query=True, timeChange=True) or []
+        for time_value in target_times:
+            rounded_time = int(round(float(time_value)))
+            if rounded_time in keep_times:
+                if abs(float(time_value) - float(rounded_time)) <= 1.0e-3:
+                    continue
+                try:
+                    cmds.keyframe(
+                        target_node,
+                        attribute=attr_name,
+                        edit=True,
+                        time=(float(time_value), float(time_value)),
+                        relative=True,
+                        timeChange=float(rounded_time) - float(time_value),
+                    )
+                except Exception:
+                    pass
+                continue
+            if float(start_time) - 1.0e-3 <= float(time_value) <= float(end_time) + 1.0e-3:
+                try:
+                    cmds.cutKey(target_node, attribute=attr_name, time=(float(time_value), float(time_value)), clear=True)
+                except Exception:
+                    pass
+
+
 class FaceRetargetController(object):
     def __init__(self):
         self.source_nodes = []
@@ -644,6 +692,21 @@ class FaceRetargetController(object):
             return "Saved {0} control pair(s). {1}".format(count, extra_message)
         return "Saved {0} control pair(s).".format(count)
 
+    def upsert_pair(self, source_node, target_node):
+        source_node = _node_long_name(source_node or "")
+        target_node = _node_long_name(target_node or "")
+        if not source_node or not target_node:
+            return False, "Pick both a source control and a target control."
+        if not cmds.objExists(source_node) or not cmds.objExists(target_node):
+            return False, "The chosen source or target control no longer exists."
+        payload = self._pair_payload_for_nodes(source_node, target_node)
+        record_node = _create_or_update_pair(source_node, target_node, payload)
+        self.source_nodes = _dedupe_preserve_order(list(self.source_nodes) + [source_node])
+        self.target_nodes = _dedupe_preserve_order(list(self.target_nodes) + [target_node])
+        self.set_selected_records([record_node])
+        self.analyze_setup()
+        return True, "Saved control pair: {0} -> {1}.".format(_short_name(source_node), _short_name(target_node))
+
     def pair_by_order(self):
         if not self.source_nodes:
             return False, "Pick the source controls first."
@@ -681,16 +744,32 @@ class FaceRetargetController(object):
         paired_records = []
         skipped_sources = 0
         used_targets = set()
+        target_key_map = {}
+        for target_node in available_targets:
+            for key in (_fast_match_key(target_node), _normal_match_key(target_node)):
+                if key and key not in target_key_map:
+                    target_key_map[key] = target_node
         for source_node in [_node_long_name(node_name) for node_name in self.source_nodes if node_name and cmds.objExists(node_name)]:
             best_target = ""
             best_score = 0.0
-            for target_node in available_targets:
-                if target_node in used_targets:
-                    continue
-                score = _name_match_score(source_node, target_node)
-                if score > best_score:
-                    best_score = score
-                    best_target = target_node
+            for key in (_fast_match_key(source_node), _normal_match_key(source_node)):
+                candidate = target_key_map.get(key, "")
+                if candidate and candidate not in used_targets:
+                    best_target = candidate
+                    best_score = 1.0
+                    break
+            if not best_target:
+                source_tokens = set(_match_core_tokens(_match_tokens(source_node)))
+                for target_node in available_targets:
+                    if target_node in used_targets:
+                        continue
+                    target_tokens = set(_match_core_tokens(_match_tokens(target_node)))
+                    if source_tokens and target_tokens and not (source_tokens & target_tokens):
+                        continue
+                    score = _name_match_score(source_node, target_node)
+                    if score > best_score:
+                        best_score = score
+                        best_target = target_node
             if not best_target or best_score < 0.45:
                 skipped_sources += 1
                 continue
@@ -840,18 +919,14 @@ class FaceRetargetController(object):
             )
 
             if self.reduce_keys:
-                for target_node in target_nodes:
-                    for attr_name in bake_attrs:
-                        try:
-                            cmds.simplify(
-                                target_node,
-                                animation="objects",
-                                attribute=attr_name,
-                                time=(start_time, end_time),
-                                valueTolerance=float(self.value_tolerance),
-                            )
-                        except Exception:
-                            pass
+                for payload in entries:
+                    _reduce_target_keys_to_source_times(
+                        payload["source"],
+                        payload["target"],
+                        bake_attrs,
+                        start_time,
+                        end_time,
+                    )
             self._round_key_times_to_whole_frames(target_nodes, bake_attrs, start_time, end_time)
 
             for record_node in records:
@@ -928,56 +1003,43 @@ if QtWidgets:
             intro_group = QtWidgets.QGroupBox("How To Use")
             intro_layout = QtWidgets.QVBoxLayout(intro_group)
             intro = QtWidgets.QLabel(
-                "1. Pick the source controls on the first rig and click Load Selected Source.\n"
-                "2. Pick the target controls on the second rig and click Load Selected Target.\n"
-                "3. Keep the same order on both sides. Source item 1 maps to Target item 1, Source item 2 maps to Target item 2, and so on.\n"
-                "4. If you pick too many, remove the extra source or target control.\n"
-                "5. Click Pair By Order to match the lists by position, or Auto Map By Name if the names are a little different.\n"
-                "6. If a saved pair row needs a fix, click that row first. Quick Pair Edit only changes the selected row.\n"
-                "7. Click Retarget Selected Controls for one control pair row or Retarget All Controls for every control pair row.\n"
-                "This works on controls, not bones. It bakes onto the target controls so you can edit them directly.\n"
-                "The tool uses the actual keyed source range, not the full playback range."
+                "Put a source control on the left and its target control on the right. Each completed row becomes one retarget pair. Empty rows are ignored.\n"
+                "Use Auto Map By Name for fast name matching, or fill rows manually from Maya selection.\n"
+                "Click Retarget All Controls to bake source motion onto the target controls. Reduce Keys keeps only the original source keyframes."
             )
             intro.setWordWrap(True)
             intro_layout.addWidget(intro)
             main_layout.addWidget(intro_group)
 
-            pick_layout = QtWidgets.QVBoxLayout()
-            pick_layout.setSpacing(12)
+            pair_map_group = QtWidgets.QGroupBox("Control Pairs")
+            pair_map_layout = QtWidgets.QVBoxLayout(pair_map_group)
+            pair_map_hint = QtWidgets.QLabel(
+                "Each row is one source control paired to one target control. Pick controls into the boxes, or type names. A blank row is always added automatically and is ignored by Retarget."
+            )
+            pair_map_hint.setWordWrap(True)
+            pair_map_layout.addWidget(pair_map_hint)
+            self.pair_rows_layout = QtWidgets.QVBoxLayout()
+            self.pair_rows_layout.setSpacing(8)
+            pair_map_layout.addLayout(self.pair_rows_layout)
+            load_row = QtWidgets.QHBoxLayout()
+            self.use_source_button = QtWidgets.QPushButton("Load Selected Sources")
+            self.use_source_button.setToolTip("Load the selected controls down the left side of the pair rows.")
+            self.use_target_button = QtWidgets.QPushButton("Load Selected Targets")
+            self.use_target_button.setToolTip("Load the selected controls down the right side of the pair rows.")
+            self.remove_source_button = QtWidgets.QPushButton("Clear Sources")
+            self.remove_target_button = QtWidgets.QPushButton("Clear Targets")
+            load_row.addWidget(self.use_source_button)
+            load_row.addWidget(self.use_target_button)
+            load_row.addWidget(self.remove_source_button)
+            load_row.addWidget(self.remove_target_button)
+            pair_map_layout.addLayout(load_row)
+            main_layout.addWidget(pair_map_group)
 
-            source_group = QtWidgets.QGroupBox("Source List")
-            source_layout = QtWidgets.QVBoxLayout(source_group)
-            if hasattr(source_group, "setSizePolicy"):
-                source_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             self.source_box = QtWidgets.QPlainTextEdit()
-            self.source_box.setPlaceholderText("One control per line. Top line becomes Source item 1.")
-            self.source_box.setMaximumHeight(80)
-            source_layout.addWidget(self.source_box)
-            self.use_source_button = QtWidgets.QPushButton(PAIR_SOURCE_EDIT_LABEL)
-            self.use_source_button.setToolTip("Load the current scene selection into the Source List in the order you picked it. If a saved pair row is selected, this updates that row's source instead.")
-            source_layout.addWidget(self.use_source_button)
-            self.remove_source_button = QtWidgets.QPushButton("Remove Selected Source")
-            self.remove_source_button.setToolTip("Select one or more controls in the scene and remove them from the source list.")
-            source_layout.addWidget(self.remove_source_button)
-            pick_layout.addWidget(source_group)
-
-            target_group = QtWidgets.QGroupBox("Target List")
-            target_layout = QtWidgets.QVBoxLayout(target_group)
-            if hasattr(target_group, "setSizePolicy"):
-                target_group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            self.source_box.hide()
             self.target_box = QtWidgets.QPlainTextEdit()
-            self.target_box.setPlaceholderText("One control per line. Top line becomes Target item 1.")
-            self.target_box.setMaximumHeight(80)
-            target_layout.addWidget(self.target_box)
-            self.use_target_button = QtWidgets.QPushButton(PAIR_TARGET_EDIT_LABEL)
-            self.use_target_button.setToolTip("Load the current scene selection into the Target List in the order you picked it. If a saved pair row is selected, this updates that row's target instead.")
-            target_layout.addWidget(self.use_target_button)
-            self.remove_target_button = QtWidgets.QPushButton("Remove Selected Target")
-            self.remove_target_button.setToolTip("Select one or more controls in the scene and remove them from the target list.")
-            target_layout.addWidget(self.remove_target_button)
-            pick_layout.addWidget(target_group)
-
-            main_layout.addLayout(pick_layout)
+            self.target_box.hide()
+            self.pair_row_widgets = []
 
             options_row = QtWidgets.QHBoxLayout()
             self.maintain_offset_check = QtWidgets.QCheckBox("Maintain Offset")
@@ -1007,15 +1069,15 @@ if QtWidgets:
             self.check_button.setToolTip("Check the current source list, target list, and saved control pairs.")
             self.retarget_selected_button.setToolTip("Bake the selected control pair row from the source controls onto the target controls.")
             self.retarget_all_button.setToolTip("Bake every saved control pair from the source controls onto the target controls.")
-            action_row.addWidget(self.pair_button)
             action_row.addWidget(self.auto_map_button)
-            action_row.addWidget(self.check_button)
             main_layout.addLayout(action_row)
 
             retarget_row = QtWidgets.QHBoxLayout()
-            retarget_row.addWidget(self.retarget_selected_button)
             retarget_row.addWidget(self.retarget_all_button)
             main_layout.addLayout(retarget_row)
+            self.pair_button.hide()
+            self.check_button.hide()
+            self.retarget_selected_button.hide()
 
             quick_group = QtWidgets.QGroupBox(PAIR_EDITOR_GROUP_LABEL)
             quick_layout = QtWidgets.QVBoxLayout(quick_group)
@@ -1026,6 +1088,7 @@ if QtWidgets:
             )
             quick_hint.setWordWrap(True)
             quick_layout.addWidget(quick_hint)
+            self.quick_pair_group = quick_group
 
             source_edit_row = QtWidgets.QHBoxLayout()
             source_label = QtWidgets.QLabel("Source Control")
@@ -1056,6 +1119,7 @@ if QtWidgets:
             quick_layout.addLayout(target_edit_row)
 
             main_layout.addWidget(quick_group)
+            quick_group.hide()
 
             pair_group = QtWidgets.QGroupBox("Saved Pair Of Controls In Scene")
             pair_layout = QtWidgets.QVBoxLayout(pair_group)
@@ -1084,6 +1148,7 @@ if QtWidgets:
             manage_row.addWidget(self.delete_all_button)
             pair_layout.addLayout(manage_row)
             main_layout.addWidget(pair_group, 1)
+            pair_group.hide()
 
             self.report_box = QtWidgets.QPlainTextEdit()
             self.report_box.setReadOnly(True)
@@ -1129,6 +1194,136 @@ if QtWidgets:
             self.pairs_table.itemSelectionChanged.connect(self._on_pair_selection_changed)
             self.pairs_table.itemDoubleClicked.connect(self._load_selected_pair)
 
+        def _clear_layout(self, layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                child_layout = item.layout()
+                if widget:
+                    widget.deleteLater()
+                elif child_layout:
+                    self._clear_layout(child_layout)
+
+        def _make_pair_row(self, source_value="", target_value="", record_node="", row_index=0):
+            row_layout = QtWidgets.QHBoxLayout()
+            source_edit = QtWidgets.QLineEdit(source_value or "")
+            source_edit.setPlaceholderText("Source control")
+            target_edit = QtWidgets.QLineEdit(target_value or "")
+            target_edit.setPlaceholderText("Target control")
+            source_pick = QtWidgets.QPushButton("Pick Source")
+            target_pick = QtWidgets.QPushButton("Pick Target")
+            delete_button = QtWidgets.QPushButton("X")
+            arrow_label = QtWidgets.QLabel("<->")
+            arrow_label.setAlignment(QtCore.Qt.AlignCenter)
+            row_layout.addWidget(source_edit, 3)
+            row_layout.addWidget(source_pick)
+            row_layout.addWidget(arrow_label)
+            row_layout.addWidget(target_edit, 3)
+            row_layout.addWidget(target_pick)
+            row_layout.addWidget(delete_button)
+            self.pair_rows_layout.addLayout(row_layout)
+            row = {
+                "source": source_edit,
+                "target": target_edit,
+                "record": record_node,
+                "layout": row_layout,
+            }
+            self.pair_row_widgets.append(row)
+            source_pick.clicked.connect(lambda _checked=False, index=row_index: self._row_use_selected_source(index))
+            target_pick.clicked.connect(lambda _checked=False, index=row_index: self._row_use_selected_target(index))
+            delete_button.clicked.connect(lambda _checked=False, index=row_index: self._delete_pair_row(index))
+            source_edit.editingFinished.connect(lambda index=row_index: self._apply_pair_row(index))
+            target_edit.editingFinished.connect(lambda index=row_index: self._apply_pair_row(index))
+
+        def _row_values(self):
+            rows = []
+            for row in getattr(self, "pair_row_widgets", []):
+                source_value = row["source"].text().strip()
+                target_value = row["target"].text().strip()
+                rows.append({"source": source_value, "target": target_value, "record": row.get("record", "")})
+            return rows
+
+        def _rebuild_pair_rows(self):
+            if not hasattr(self, "pair_rows_layout"):
+                return
+            self._clear_layout(self.pair_rows_layout)
+            self.pair_row_widgets = []
+            rows = []
+            for payload in self.controller.pair_entries(from_selection=False):
+                rows.append(
+                    {
+                        "source": payload.get("source", ""),
+                        "target": payload.get("target", ""),
+                        "record": payload.get("record", ""),
+                    }
+                )
+            if not rows and (self.controller.source_nodes or self.controller.target_nodes):
+                row_count = max(len(self.controller.source_nodes), len(self.controller.target_nodes))
+                for index in range(row_count):
+                    rows.append(
+                        {
+                            "source": self.controller.source_nodes[index] if index < len(self.controller.source_nodes) else "",
+                            "target": self.controller.target_nodes[index] if index < len(self.controller.target_nodes) else "",
+                            "record": "",
+                        }
+                    )
+            rows.append({"source": "", "target": "", "record": ""})
+            for row_index, row in enumerate(rows):
+                self._make_pair_row(row.get("source", ""), row.get("target", ""), row.get("record", ""), row_index)
+
+        def _save_complete_rows(self):
+            saved = 0
+            for row in self._row_values():
+                source_value = row["source"]
+                target_value = row["target"]
+                if not source_value and not target_value:
+                    continue
+                if source_value and target_value:
+                    success, _message = self.controller.upsert_pair(source_value, target_value)
+                    if success:
+                        saved += 1
+            return saved
+
+        def _apply_pair_row(self, row_index):
+            if row_index < 0 or row_index >= len(self.pair_row_widgets):
+                return
+            row = self.pair_row_widgets[row_index]
+            source_value = row["source"].text().strip()
+            target_value = row["target"].text().strip()
+            if not source_value or not target_value:
+                return
+            success, message = self.controller.upsert_pair(source_value, target_value)
+            self._sync_from_controller()
+            self._set_status(message, success)
+
+        def _row_use_selected_source(self, row_index):
+            selected_nodes = _selected_controls()
+            if not selected_nodes or row_index >= len(self.pair_row_widgets):
+                self._set_status("Pick one source control in Maya first.", False)
+                return
+            self.pair_row_widgets[row_index]["source"].setText(_node_long_name(selected_nodes[0]))
+            self._apply_pair_row(row_index)
+
+        def _row_use_selected_target(self, row_index):
+            selected_nodes = _selected_controls()
+            if not selected_nodes or row_index >= len(self.pair_row_widgets):
+                self._set_status("Pick one target control in Maya first.", False)
+                return
+            self.pair_row_widgets[row_index]["target"].setText(_node_long_name(selected_nodes[0]))
+            self._apply_pair_row(row_index)
+
+        def _delete_pair_row(self, row_index):
+            if row_index < 0 or row_index >= len(self.pair_row_widgets):
+                return
+            record_node = self.pair_row_widgets[row_index].get("record", "")
+            if record_node:
+                self.controller.set_selected_records([record_node])
+                success, message = self.controller.delete_selected()
+            else:
+                success, message = True, "Cleared the empty row."
+            self._sync_from_controller()
+            self._set_status(message, success)
+
         def _selected_table_records(self):
             rows = sorted(set(index.row() for index in self.pairs_table.selectionModel().selectedRows()))
             record_nodes = []
@@ -1165,9 +1360,10 @@ if QtWidgets:
             target_value = selected_payload.get("target", "") if selected_payload else ""
             source_values = list(self.controller.source_nodes)
             target_values = list(self.controller.target_nodes)
-            scene_values = _scene_transform_candidates()
-            source_values.extend(scene_values)
-            target_values.extend(scene_values)
+            if getattr(self, "quick_pair_group", None) and self.quick_pair_group.isVisible():
+                scene_values = _scene_transform_candidates()
+                source_values.extend(scene_values)
+                target_values.extend(scene_values)
             if source_value and source_value not in source_values:
                 source_values.append(source_value)
             if target_value and target_value not in target_values:
@@ -1221,11 +1417,21 @@ if QtWidgets:
             self.reduce_keys_check.blockSignals(False)
             self._refresh_pair_editor()
             self._refresh_table()
+            self._rebuild_pair_rows()
             self.report_box.setPlainText(self._report_text())
 
         def _sync_to_controller(self):
-            self.controller.source_nodes = _control_list_from_text(self.source_box.toPlainText())
-            self.controller.target_nodes = _control_list_from_text(self.target_box.toPlainText())
+            row_values = self._row_values() if hasattr(self, "pair_row_widgets") else []
+            if row_values:
+                self.controller.source_nodes = _dedupe_preserve_order(
+                    _node_long_name(row["source"]) for row in row_values if row.get("source") and cmds.objExists(row.get("source"))
+                )
+                self.controller.target_nodes = _dedupe_preserve_order(
+                    _node_long_name(row["target"]) for row in row_values if row.get("target") and cmds.objExists(row.get("target"))
+                )
+            else:
+                self.controller.source_nodes = _control_list_from_text(self.source_box.toPlainText())
+                self.controller.target_nodes = _control_list_from_text(self.target_box.toPlainText())
             self.controller.maintain_offset = bool(self.maintain_offset_check.isChecked())
             self.controller.follow_translate = bool(self.follow_translate_check.isChecked())
             self.controller.follow_rotate = bool(self.follow_rotate_check.isChecked())
@@ -1269,28 +1475,24 @@ if QtWidgets:
             return "\n".join(lines).strip()
 
         def _use_selected_source(self):
-            if self.controller.selected_records:
-                success, message = self.controller.update_selected_pair_source_from_selection()
-            else:
-                success, message = self.controller.set_source_from_selection()
+            success, message = self.controller.set_source_from_selection()
             self._sync_from_controller()
             self._set_status(message, success)
 
         def _remove_selected_source(self):
-            success, message = self.controller.remove_source_from_selection()
+            self.controller.source_nodes = []
+            success, message = True, "Cleared source rows."
             self._sync_from_controller()
             self._set_status(message, success)
 
         def _use_selected_target(self):
-            if self.controller.selected_records:
-                success, message = self.controller.update_selected_pair_target_from_selection()
-            else:
-                success, message = self.controller.set_target_from_selection()
+            success, message = self.controller.set_target_from_selection()
             self._sync_from_controller()
             self._set_status(message, success)
 
         def _remove_selected_target(self):
-            success, message = self.controller.remove_target_from_selection()
+            self.controller.target_nodes = []
+            success, message = True, "Cleared target rows."
             self._sync_from_controller()
             self._set_status(message, success)
 
@@ -1314,6 +1516,7 @@ if QtWidgets:
 
         def _retarget_selected_pairs(self):
             self._sync_to_controller()
+            self._save_complete_rows()
             self.controller.set_selected_records(self._selected_table_records())
             success, message = self.controller.retarget_selected_pairs()
             self._sync_from_controller()
@@ -1321,6 +1524,7 @@ if QtWidgets:
 
         def _retarget_all_pairs(self):
             self._sync_to_controller()
+            self._save_complete_rows()
             success, message = self.controller.retarget_all_pairs()
             self._sync_from_controller()
             self._set_status(message, success)

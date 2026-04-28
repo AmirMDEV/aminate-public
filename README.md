@@ -29,6 +29,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 ## What Is New In 0.3.1
 
 - `Character Skinning` keeps skinning tools together. One button replaces a badly transformed skinned mesh with a clean frozen-transform mesh while preserving skin weights and influences, and the same tab can copy exact skinning from a skinned source mesh to a same-topology target mesh.
+- `Controls Retargeter (Face and Body)` is now a simple pair-row workflow: source control on the left, target control on the right, pick controls from selection, auto-map by name quickly, and reduce baked keys back to the exact source keyframes.
 - `Rotation Doctor` adds `Flip Current Key`, and the Floating Graph Editor adds `Euler Flip`, for a Blender-style Euler fix that rewrites the selected Graph Editor rotation key, or current-frame selected-control key, to the nearest safe equivalent rotation.
 - `Animation Assistant` adds an early pose-balance view with floor plane, contact points, center-of-gravity setup, viewport badge, and support-area drawing. This weight / pose balance check is unfinished and should be treated as preview.
 - `Floating Graph Editor` is now dockable, can include a DAG-only Outliner, has cycle infinity controls, and opens or closes from hotkeys more reliably.
@@ -231,7 +232,7 @@ Simple example:
 - [Scene Helpers](release_screenshots/scene_helpers.png)
 - [Dynamic Pivot](release_screenshots/dynamic_pivot.png)
 - [Universal IK/FK](release_screenshots/universal_ikfk.png)
-- [Controls Retargeter](release_screenshots/controls_retargeter.png)
+- [Controls Retargeter](release_screenshots/face_retarget.png)
 - [Control Picker](release_screenshots/control_picker.png)
 - [Animators Pencil](release_screenshots/animators_pencil.png)
 - [History Timeline](release_screenshots/history_timeline.png)
