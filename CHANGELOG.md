@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed Controls Retargeter Maintain Offset baking so each target keeps its starting offset from the source at the source control's first keyed frame, preventing foot controls from baking with the wrong offset when Maya is parked later in the shot.
 - Redesigned `Controls Retargeter (Face and Body)` into clear source-to-target control pair rows with pick-from-selection buttons, automatic blank-row creation, ignored empty rows, faster name-based Auto Map, and Reduce Keys that keeps the exact source keyframes.
 - Split Aminate's custom tab navigation arrows so `<<` sits on the left side of the top tab bar and `>>` sits on the right side.
 - Simplified Character Skinning transform cleanup into one primary button: `Replace Mesh With Frozen Transform Mesh`, which builds the verified frozen mesh, replaces the selected skinned mesh, preserves weights/materials/UVs/normals, and keeps the old mesh hidden as a backup.

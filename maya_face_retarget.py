@@ -504,6 +504,14 @@ def _reduce_target_keys_to_source_times(source_node, target_node, bake_attrs, st
                     pass
 
 
+def _bake_sample_times(start_time, end_time):
+    if abs(float(start_time) - float(end_time)) <= 1.0e-3:
+        return [float(start_time)]
+    first_frame = int(math.floor(float(start_time) + 0.0001))
+    last_frame = int(math.ceil(float(end_time) - 0.0001))
+    return [float(frame_value) for frame_value in range(first_frame, last_frame + 1)]
+
+
 class FaceRetargetController(object):
     def __init__(self):
         self.source_nodes = []
@@ -882,41 +890,64 @@ class FaceRetargetController(object):
         if not entries or start_time is None or end_time is None:
             start_time, end_time = _playback_range()
         target_nodes = []
-        temp_constraints = []
         bake_attrs = _bake_attributes({"follow_translate": self.follow_translate, "follow_rotate": self.follow_rotate})
         if not bake_attrs:
             return False, "There are no channels to bake."
 
-        temp_constraints = []
+        original_time = None
         try:
             cmds.undoInfo(openChunk=True)
         except Exception:
             pass
 
         try:
+            try:
+                original_time = float(cmds.currentTime(query=True))
+            except Exception:
+                original_time = None
             for payload in entries:
                 source_node = payload["source"]
                 target_node = payload["target"]
-                if self.follow_translate and self.follow_rotate:
-                    constraint = cmds.parentConstraint(source_node, target_node, maintainOffset=bool(self.maintain_offset))[0]
-                elif self.follow_translate:
-                    constraint = cmds.pointConstraint(source_node, target_node, maintainOffset=bool(self.maintain_offset))[0]
-                else:
-                    constraint = cmds.orientConstraint(source_node, target_node, maintainOffset=bool(self.maintain_offset))[0]
-                temp_constraints.append(constraint)
                 target_nodes.append(target_node)
-
-            target_nodes = _dedupe_preserve_order(target_nodes)
-            cmds.bakeResults(
-                target_nodes,
-                simulation=True,
-                time=(start_time, end_time),
-                sampleBy=1,
-                disableImplicitControl=True,
-                preserveOutsideKeys=True,
-                sparseAnimCurveBake=False,
-                at=bake_attrs,
-            )
+                source_start_time, _source_end_time = self._key_range_from_nodes([source_node])
+                if source_start_time is None:
+                    source_start_time = start_time
+                cmds.currentTime(source_start_time, edit=True)
+                baselines = {}
+                for attr_name in bake_attrs:
+                    source_attr = "{0}.{1}".format(source_node, attr_name)
+                    target_attr = "{0}.{1}".format(target_node, attr_name)
+                    if not cmds.objExists(source_attr) or not cmds.objExists(target_attr):
+                        continue
+                    try:
+                        baselines[attr_name] = (
+                            float(cmds.getAttr(source_attr)),
+                            float(cmds.getAttr(target_attr)),
+                        )
+                    except Exception:
+                        continue
+                if source_node != target_node:
+                    for attr_name in baselines:
+                        try:
+                            cmds.cutKey(target_node, attribute=attr_name, time=(start_time, end_time), clear=True)
+                        except Exception:
+                            pass
+                for time_value in _bake_sample_times(start_time, end_time):
+                    cmds.currentTime(time_value, edit=True)
+                    for attr_name, baseline in baselines.items():
+                        source_start_value, target_start_value = baseline
+                        try:
+                            source_value = float(cmds.getAttr("{0}.{1}".format(source_node, attr_name)))
+                        except Exception:
+                            continue
+                        if self.maintain_offset:
+                            target_value = target_start_value + (source_value - source_start_value)
+                        else:
+                            target_value = source_value
+                        try:
+                            cmds.setKeyframe(target_node, attribute=attr_name, time=time_value, value=target_value)
+                        except Exception:
+                            pass
 
             if self.reduce_keys:
                 for payload in entries:
@@ -946,16 +977,15 @@ class FaceRetargetController(object):
         except Exception as exc:
             return False, "Retarget and bake failed: {0}".format(exc)
         finally:
-            for constraint_node in temp_constraints:
-                if cmds.objExists(constraint_node):
-                    try:
-                        cmds.delete(constraint_node)
-                    except Exception:
-                        pass
             try:
                 cmds.undoInfo(closeChunk=True)
             except Exception:
                 pass
+            if original_time is not None:
+                try:
+                    cmds.currentTime(original_time, edit=True)
+                except Exception:
+                    pass
 
     def shutdown(self):
         self.source_nodes = []
@@ -1044,6 +1074,7 @@ if QtWidgets:
             options_row = QtWidgets.QHBoxLayout()
             self.maintain_offset_check = QtWidgets.QCheckBox("Maintain Offset")
             self.maintain_offset_check.setChecked(DEFAULT_MAINTAIN_OFFSET)
+            self.maintain_offset_check.setToolTip("Keep the target's starting difference from the source at the source's first keyed frame.")
             self.follow_translate_check = QtWidgets.QCheckBox("Follow Translation")
             self.follow_translate_check.setChecked(DEFAULT_FOLLOW_TRANSLATE)
             self.follow_rotate_check = QtWidgets.QCheckBox("Follow Rotation")
