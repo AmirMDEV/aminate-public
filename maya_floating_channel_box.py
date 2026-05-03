@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
 import functools
+import re
 import time
 
 try:
@@ -177,6 +178,9 @@ def normalize_hotkey(hotkey_text, default_value=DEFAULT_HOTKEY):
     text = (hotkey_text or "").strip()
     if not text:
         return default_value
+    text = re.sub(r"\s*\+\s*", "+", text)
+    text = re.sub(r"\s*-\s*", "+", text)
+    text = re.sub(r"\s+", "+", text)
     if text == "#":
         return "#"
     if text in (";", ":", "'", "`"):
@@ -188,7 +192,7 @@ def normalize_hotkey(hotkey_text, default_value=DEFAULT_HOTKEY):
         }.get(text, text)
     if text == "\\":
         return "Backslash"
-    lowered = text.lower().replace(" ", "")
+    lowered = text.lower().replace(" ", "").replace("+", "")
     if lowered in ("semicolon", "semi", "semicolonkey"):
         return "Semicolon"
     if lowered in ("apostrophe", "quote", "singlequote"):
@@ -202,21 +206,39 @@ def normalize_hotkey(hotkey_text, default_value=DEFAULT_HOTKEY):
     if lowered in ("rightalt", "ralt", "altgr"):
         return "Right Alt"
     parts = []
-    for part in text.replace("-", "+").split("+"):
+    modifier_order = {"Ctrl": 0, "Shift": 1, "Alt": 2, "Meta": 3}
+    seen_modifiers = set()
+    key_part = ""
+    for part in text.split("+"):
         part = part.strip()
         if not part:
             continue
         low = part.lower()
         if low in ("ctrl", "control"):
-            parts.append("Ctrl")
+            seen_modifiers.add("Ctrl")
         elif low == "shift":
-            parts.append("Shift")
+            seen_modifiers.add("Shift")
         elif low in ("alt", "left alt", "leftalt", "lalt"):
-            parts.append("Alt")
+            seen_modifiers.add("Alt")
         elif low in ("cmd", "meta", "win", "windows"):
-            parts.append("Meta")
+            seen_modifiers.add("Meta")
         else:
-            parts.append(part.upper() if len(part) == 1 else part)
+            key_part = part.upper() if len(part) == 1 else {
+                ";": "Semicolon",
+                ":": "Semicolon",
+                "'": "Apostrophe",
+                "`": "Backquote",
+                "\\": "Backslash",
+                "semi": "Semicolon",
+                "quote": "Apostrophe",
+                "singlequote": "Apostrophe",
+                "backtick": "Backquote",
+                "grave": "Backquote",
+            }.get(low, part)
+    for modifier in sorted(seen_modifiers, key=lambda value: modifier_order[value]):
+        parts.append(modifier)
+    if key_part:
+        parts.append(key_part)
     return "+".join(parts) if parts else default_value
 
 

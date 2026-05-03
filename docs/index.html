@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aminate Tutorials</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Aminate local help</p>
+      <h1>Button tutorials</h1>
+      <p class="summary">Quick visual notes for every Aminate tool area, with a button index for the fast controls students use most.</p>
+    </div>
+    <div class="hero-actions">
+      <input id="search" type="search" placeholder="Search tools or buttons">
+      <a class="home-link" href="https://followamir.com">followamir.com</a>
+    </div>
+  </header>
+
+  <nav class="tool-strip" id="toolStrip" aria-label="Aminate tools"></nav>
+
+  <main>
+    <section class="section intro">
+      <h2>How to use this page</h2>
+      <p>Pick a tool icon, skim what it is for, then follow the short steps. Tutorial media can be still screenshots or GIFs; drop newer GIFs into <code>docs/assets</code> and update <code>docs-data.js</code>.</p>
+    </section>
+    <section id="sections" class="sections"></section>
+    <section class="section">
+      <h2>Button Index</h2>
+      <p class="muted">This index mirrors the compact Toolkit Bar and core workflow buttons so tooltips are searchable outside Maya.</p>
+      <div id="buttonIndex" class="button-index"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Built by Amir.</span>
+    <a href="https://followamir.com">Follow Amir at followamir.com</a>
+    <a class="donate" href="https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA">Donate</a>
+  </footer>
+
+  <script src="docs-data.js"></script>
+  <script>
+    const sectionsRoot = document.getElementById("sections");
+    const stripRoot = document.getElementById("toolStrip");
+    const indexRoot = document.getElementById("buttonIndex");
+    const search = document.getElementById("search");
+
+    function list(items) {
+      return "<ul>" + items.map((item) => `<li>${item}</li>`).join("") + "</ul>";
+    }
+
+    function render(filterText = "") {
+      const filter = filterText.trim().toLowerCase();
+      const sections = window.AMINATE_DOCS.sections.filter((section) => {
+        const haystack = [section.title, section.short, section.purpose, section.when, section.buttons.join(" "), section.steps.join(" "), section.tips.join(" ")].join(" ").toLowerCase();
+        return !filter || haystack.includes(filter);
+      });
+
+      stripRoot.innerHTML = window.AMINATE_DOCS.sections.map((section) => (
+        `<a class="tool-chip" href="#${section.id}" title="${section.title}">
+          <span>${section.icon}</span><strong>${section.short}</strong>
+        </a>`
+      )).join("");
+
+      sectionsRoot.innerHTML = sections.map((section) => (
+        `<article class="section tool-card" id="${section.id}">
+          <div class="media-wrap">
+            <img src="${section.media}" alt="${section.title} tutorial media" loading="lazy">
+          </div>
+          <div class="copy">
+            <p class="eyebrow">${section.short}</p>
+            <h2>${section.title}</h2>
+            <p>${section.purpose}</p>
+            <h3>Use it when</h3>
+            <p>${section.when}</p>
+            <h3>Steps</h3>
+            ${list(section.steps)}
+            <h3>Main buttons</h3>
+            <div class="button-list">${section.buttons.map((button) => `<span>${button}</span>`).join("")}</div>
+            <h3>Tip</h3>
+            ${list(section.tips)}
+          </div>
+        </article>`
+      )).join("");
+
+      const buttons = window.AMINATE_DOCS.buttons.filter((button) => {
+        const haystack = [button.label, button.group, button.tooltip].join(" ").toLowerCase();
+        return !filter || haystack.includes(filter);
+      });
+      indexRoot.innerHTML = buttons.map((button) => (
+        `<div class="index-row">
+          <strong>${button.label}</strong>
+          <span>${button.group}</span>
+          <p>${button.tooltip}</p>
+        </div>`
+      )).join("");
+    }
+
+    search.addEventListener("input", () => render(search.value));
+    render();
+  </script>
+</body>
+</html>

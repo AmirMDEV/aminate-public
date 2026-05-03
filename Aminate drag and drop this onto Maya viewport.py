@@ -39,6 +39,9 @@ DEFAULT_RUNTIME_FILES = [
     "game_animation_mode_icon.png",
     "maya_anim_workflow_tools_icon.png",
 ]
+DEFAULT_STATIC_DIRS = [
+    "docs",
+]
 
 
 def _managed_user_setup_block(destination_root):
@@ -174,11 +177,13 @@ def _load_manifest(source_root):
                 MANIFEST_FILE_NAME as package_manifest_file_name,
                 RELEASE_VERSION_LABEL,
                 RUNTIME_FILES,
+                STATIC_DIRS,
             )
             return {
                 "package_name": PACKAGE_FOLDER_NAME,
                 "version": RELEASE_VERSION_LABEL,
                 "runtime_files": list(RUNTIME_FILES),
+                "static_dirs": list(STATIC_DIRS),
                 "manifest_file_name": package_manifest_file_name,
             }
         except Exception:
@@ -187,6 +192,7 @@ def _load_manifest(source_root):
             "package_name": PACKAGE_FOLDER_NAME,
             "version": "dev",
             "runtime_files": list(DEFAULT_RUNTIME_FILES),
+            "static_dirs": list(DEFAULT_STATIC_DIRS),
         }
     with open(manifest_path, "r") as handle:
         return json.load(handle)
@@ -214,13 +220,28 @@ def _copy_runtime_files(source_root, destination_root, runtime_files):
         shutil.copy2(manifest_path, os.path.join(destination_root, DEFAULT_MANIFEST_FILE_NAME))
 
 
+def _copy_static_dirs(source_root, destination_root, static_dirs):
+    if not os.path.isdir(destination_root):
+        os.makedirs(destination_root)
+    for dir_name in static_dirs:
+        source_path = os.path.join(source_root, dir_name)
+        if not os.path.isdir(source_path):
+            raise RuntimeError("Missing static directory in installer payload: {0}".format(dir_name))
+        destination_path = os.path.join(destination_root, dir_name)
+        if os.path.isdir(destination_path):
+            shutil.rmtree(destination_path)
+        shutil.copytree(source_path, destination_path)
+
+
 def install_maya_anim_workflow_tools_from_dragdrop():
     cmds = _maya_api()
     source_root = _source_root()
     manifest = _load_manifest(source_root)
-    runtime_files = manifest.get("runtime_files") or list(RUNTIME_FILES)
+    runtime_files = manifest.get("runtime_files") or list(DEFAULT_RUNTIME_FILES)
+    static_dirs = manifest.get("static_dirs") or list(DEFAULT_STATIC_DIRS)
     destination_root = _install_root(cmds)
     _copy_runtime_files(source_root, destination_root, runtime_files)
+    _copy_static_dirs(source_root, destination_root, static_dirs)
 
     while destination_root in sys.path:
         sys.path.remove(destination_root)

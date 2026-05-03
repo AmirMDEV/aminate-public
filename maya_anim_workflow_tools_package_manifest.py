@@ -3,8 +3,8 @@ from __future__ import absolute_import, division, print_function
 
 LICENSE_FILE_NAME = "LICENSE"
 MANIFEST_FILE_NAME = "manifest.json"
-RELEASE_VERSION_LABEL = "Version 0.3.1"
-RELEASE_TAG = "v0.3.1"
+RELEASE_VERSION_LABEL = "Version 0.3.2"
+RELEASE_TAG = "v0.3.2"
 PUBLIC_REPO_URL = "https://github.com/AmirMDEV/aminate-public"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
@@ -37,4 +37,8 @@ RUNTIME_FILES = [
     "maya_video_reference_tool.py",
     "game_animation_mode_icon.png",
     "maya_anim_workflow_tools_icon.png",
+]
+
+STATIC_DIRS = [
+    "docs",
 ]

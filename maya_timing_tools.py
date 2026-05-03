@@ -56,6 +56,13 @@ ANIMATION_LAYER_TINT_OPTION = "AmirMayaAnimWorkflowAnimationLayerTint"
 GAME_ANIMATION_MODE_OPTION = "AmirMayaAnimWorkflowGameAnimationMode"
 GAME_ANIMATION_MODE_ACTION_OPTION_PREFIX = "AmirMayaAnimWorkflowGameAnimationModeAction"
 FLOATING_CHANNEL_BOX_HOTKEY_OPTION = maya_floating_channel_box.HOTKEY_OPTION
+TWEEN_MACHINE_HOTKEY_OPTION = "AmirMayaAnimWorkflowTweenMachineHotkey"
+TWEEN_MACHINE_OPACITY_OPTION = "AmirMayaAnimWorkflowTweenMachineOpacity"
+DEFAULT_TWEEN_MACHINE_HOTKEY = "Backquote"
+LEGACY_DEFAULT_TWEEN_MACHINE_HOTKEYS = ("Ctrl+Alt+T",)
+DEFAULT_TWEEN_MACHINE_OPACITY = 0.82
+_TWEEN_MACHINE_HOTKEY_MANAGER = None
+_TWEEN_MACHINE_POPUP = None
 ANIMATION_LAYER_CUSTOM_COLOR_ATTR = "aminateLayerColor"
 DEFAULT_AUTO_SNAP = True
 DEFAULT_ANIMATION_LAYER_TINT = True
@@ -2265,6 +2272,25 @@ def _save_option_var_float(option_name, value):
         pass
 
 
+def _option_var_string(option_name, default):
+    if not cmds or not cmds.optionVar(exists=option_name):
+        return default
+    try:
+        value = cmds.optionVar(query=option_name)
+        return value if value else default
+    except Exception:
+        return default
+
+
+def _save_option_var_string(option_name, value):
+    if not cmds:
+        return
+    try:
+        cmds.optionVar(stringValue=(option_name, value or ""))
+    except Exception:
+        pass
+
+
 def _current_time_unit():
     if not cmds:
         return DEFAULT_TIME_UNIT
@@ -4096,6 +4122,8 @@ class MayaTimingToolsController(object):
         self.floating_channel_box_opacity = maya_floating_channel_box.get_channel_opacity()
         self.floating_graph_editor_hotkey = maya_floating_channel_box.get_graph_editor_hotkey()
         self.floating_graph_editor_opacity = maya_floating_channel_box.get_graph_editor_opacity()
+        self.tween_machine_hotkey = self.get_tween_machine_hotkey()
+        self.tween_machine_opacity = self.get_tween_machine_opacity()
         self.teacher_demo_edit_order = []
         self.teacher_demo_edit_records = {}
         try:
@@ -4105,6 +4133,10 @@ class MayaTimingToolsController(object):
         self._floating_channel_box_manager = maya_floating_channel_box.install_global_hotkey(
             self.floating_channel_box_hotkey,
             self.floating_graph_editor_hotkey,
+        )
+        self._tween_machine_hotkey_manager = install_tween_machine_hotkey(
+            self,
+            self.tween_machine_hotkey,
         )
         _install_auto_key_warning_callback()
         self._install_idle_watch()
@@ -4309,6 +4341,11 @@ class MayaTimingToolsController(object):
             maya_floating_channel_box.shutdown_global_hotkey()
         except Exception:
             pass
+        try:
+            shutdown_tween_machine_hotkey(self._tween_machine_hotkey_manager)
+        except Exception:
+            pass
+        self._tween_machine_hotkey_manager = None
 
     def set_floating_channel_box_hotkey(self, hotkey_text):
         self.floating_channel_box_hotkey = maya_floating_channel_box.set_hotkey(hotkey_text)
@@ -4325,6 +4362,47 @@ class MayaTimingToolsController(object):
         message = "Floating Channel Box opacity set to {0:.2f}.".format(self.floating_channel_box_opacity)
         self._emit_status(message, True)
         return True, message
+
+    def get_tween_machine_hotkey(self):
+        hotkey_text = maya_floating_channel_box.normalize_hotkey(
+            _option_var_string(TWEEN_MACHINE_HOTKEY_OPTION, DEFAULT_TWEEN_MACHINE_HOTKEY),
+            default_value=DEFAULT_TWEEN_MACHINE_HOTKEY,
+        )
+        if hotkey_text in LEGACY_DEFAULT_TWEEN_MACHINE_HOTKEYS:
+            _save_option_var_string(TWEEN_MACHINE_HOTKEY_OPTION, DEFAULT_TWEEN_MACHINE_HOTKEY)
+            return DEFAULT_TWEEN_MACHINE_HOTKEY
+        return hotkey_text
+
+    def set_tween_machine_hotkey(self, hotkey_text):
+        self.tween_machine_hotkey = maya_floating_channel_box.normalize_hotkey(
+            hotkey_text,
+            default_value=DEFAULT_TWEEN_MACHINE_HOTKEY,
+        )
+        _save_option_var_string(TWEEN_MACHINE_HOTKEY_OPTION, self.tween_machine_hotkey)
+        self._tween_machine_hotkey_manager = install_tween_machine_hotkey(
+            self,
+            self.tween_machine_hotkey,
+        )
+        message = "Tween Machine hotkey set to {0}.".format(self.tween_machine_hotkey)
+        self._emit_status(message, True)
+        return True, message
+
+    def get_tween_machine_opacity(self):
+        return max(0.2, min(1.0, _option_var_float(TWEEN_MACHINE_OPACITY_OPTION, DEFAULT_TWEEN_MACHINE_OPACITY)))
+
+    def set_tween_machine_opacity(self, opacity):
+        self.tween_machine_opacity = max(0.2, min(1.0, float(opacity)))
+        _save_option_var_float(TWEEN_MACHINE_OPACITY_OPTION, self.tween_machine_opacity)
+        message = "Tween Machine opacity set to {0:.2f}.".format(self.tween_machine_opacity)
+        self._emit_status(message, True)
+        return True, message
+
+    def show_tween_machine(self):
+        popup = show_tween_machine_popup_for_controller(self)
+        success = bool(popup)
+        message = "Tween Machine opened." if success else "Tween Machine needs Maya and Qt."
+        self._emit_status(message, success)
+        return success, message
 
     def set_floating_graph_editor_hotkey(self, hotkey_text):
         self.floating_graph_editor_hotkey = maya_floating_channel_box.set_graph_editor_hotkey(hotkey_text)
@@ -4568,67 +4646,98 @@ class MayaTimingToolsController(object):
             return False, "No inbetweens were added. Pick controls with animation and move to an unkeyed frame."
         return True, "Inserted {0} inbetween key(s) on {1}.".format(inserted, scope_label)
 
-    def apply_tween_machine(self, percent):
+    def build_tween_machine_context(self):
         if not MAYA_AVAILABLE:
-            return False, "This tool only works inside Maya."
+            return {"items": [], "message": "This tool only works inside Maya.", "valid": False}
         nodes = _selected_transform_nodes()
         if not nodes:
-            return False, "Select animated controls before using Tween Machine."
+            return {"items": [], "message": "Select animated controls before using Tween Machine.", "valid": False}
+        current_time = float(cmds.currentTime(query=True))
+        items = []
+        missing_pairs = 0
+        for node_name in nodes:
+            keyable_attrs = cmds.listAttr(node_name, keyable=True) or []
+            for attr_name in keyable_attrs:
+                plug = "{0}.{1}".format(node_name, attr_name)
+                try:
+                    if cmds.getAttr(plug, lock=True) or not cmds.getAttr(plug, settable=True):
+                        continue
+                except Exception:
+                    continue
+                try:
+                    times = [float(value) for value in (cmds.keyframe(node_name, attribute=attr_name, query=True, timeChange=True) or [])]
+                except Exception:
+                    times = []
+                left_times = [value for value in times if value < current_time - 1.0e-4]
+                right_times = [value for value in times if value > current_time + 1.0e-4]
+                if not left_times or not right_times:
+                    missing_pairs += 1
+                    continue
+                left_time = max(left_times)
+                right_time = min(right_times)
+                try:
+                    left_value = float(cmds.getAttr(plug, time=left_time))
+                    right_value = float(cmds.getAttr(plug, time=right_time))
+                except Exception:
+                    continue
+                items.append(
+                    {
+                        "node": node_name,
+                        "attribute": attr_name,
+                        "plug": plug,
+                        "left_value": left_value,
+                        "right_value": right_value,
+                    }
+                )
+        if not items:
+            if missing_pairs:
+                message = "Tween Machine needs a previous and next key around the current frame."
+            else:
+                message = "No settable keyed channels were found for Tween Machine."
+            return {"items": [], "message": message, "valid": False}
+        return {"items": items, "time": current_time, "message": "Tween Machine ready.", "valid": True}
+
+    def apply_tween_machine(self, percent, context=None, key=True):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
         try:
             percent = max(0.0, min(100.0, float(percent)))
         except Exception:
             percent = 50.0
         blend = percent / 100.0
-        current_time = float(cmds.currentTime(query=True))
-        keyed_attrs = 0
-        missing_pairs = 0
-        try:
-            cmds.undoInfo(openChunk=True, chunkName="StudentCoreTweenMachine")
-        except Exception:
-            pass
-        try:
-            for node_name in nodes:
-                keyable_attrs = cmds.listAttr(node_name, keyable=True) or []
-                for attr_name in keyable_attrs:
-                    plug = "{0}.{1}".format(node_name, attr_name)
-                    try:
-                        if cmds.getAttr(plug, lock=True) or not cmds.getAttr(plug, settable=True):
-                            continue
-                    except Exception:
-                        continue
-                    try:
-                        times = [float(value) for value in (cmds.keyframe(node_name, attribute=attr_name, query=True, timeChange=True) or [])]
-                    except Exception:
-                        times = []
-                    left_times = [value for value in times if value < current_time - 1.0e-4]
-                    right_times = [value for value in times if value > current_time + 1.0e-4]
-                    if not left_times or not right_times:
-                        missing_pairs += 1
-                        continue
-                    left_time = max(left_times)
-                    right_time = min(right_times)
-                    try:
-                        left_value = float(cmds.getAttr(plug, time=left_time))
-                        right_value = float(cmds.getAttr(plug, time=right_time))
-                    except Exception:
-                        continue
-                    tween_value = left_value + ((right_value - left_value) * blend)
-                    try:
-                        cmds.setAttr(plug, tween_value)
-                        cmds.setKeyframe(node_name, attribute=attr_name, time=current_time, value=tween_value)
-                        keyed_attrs += 1
-                    except Exception:
-                        continue
-        finally:
+        context = context or self.build_tween_machine_context()
+        items = list((context or {}).get("items") or [])
+        if not items:
+            return False, (context or {}).get("message") or "Tween Machine needs a previous and next key around the current frame."
+        current_time = float((context or {}).get("time") or cmds.currentTime(query=True))
+        changed_attrs = 0
+        if key:
             try:
-                cmds.undoInfo(closeChunk=True)
+                cmds.undoInfo(openChunk=True, chunkName="StudentCoreTweenMachine")
             except Exception:
                 pass
-        if not keyed_attrs:
-            if missing_pairs:
-                return False, "Tween Machine needs a previous and next key around the current frame."
+        try:
+            for item in items:
+                plug = item.get("plug") or "{0}.{1}".format(item.get("node"), item.get("attribute"))
+                tween_value = float(item.get("left_value", 0.0)) + ((float(item.get("right_value", 0.0)) - float(item.get("left_value", 0.0))) * blend)
+                try:
+                    cmds.setAttr(plug, tween_value)
+                    if key:
+                        cmds.setKeyframe(item.get("node"), attribute=item.get("attribute"), time=current_time, value=tween_value)
+                    changed_attrs += 1
+                except Exception:
+                    continue
+        finally:
+            if key:
+                try:
+                    cmds.undoInfo(closeChunk=True)
+                except Exception:
+                    pass
+        if not changed_attrs:
             return False, "No settable keyed channels were found for Tween Machine."
-        return True, "Tween Machine keyed {0} channel(s) at {1:.0f}% between previous and next keys.".format(keyed_attrs, percent)
+        if not key:
+            return True, "Tween Machine previewed {0} channel(s) at {1:.0f}%.".format(changed_attrs, percent)
+        return True, "Tween Machine keyed {0} channel(s) at {1:.0f}% between previous and next keys.".format(changed_attrs, percent)
 
     def remove_current_keys(self):
         if not MAYA_AVAILABLE:
@@ -5589,12 +5698,50 @@ if QtWidgets:
         popup.move(x_pos, y_pos)
 
 
+    def _position_popup_near_cursor(popup):
+        if not popup or not QtCore or not QtGui:
+            return
+        try:
+            popup.adjustSize()
+        except Exception:
+            pass
+        cursor_pos = QtGui.QCursor.pos()
+        popup_width = max(popup.width(), popup.sizeHint().width(), 420)
+        popup_height = max(popup.height(), popup.sizeHint().height(), 70)
+        x_pos = cursor_pos.x() + 16
+        y_pos = cursor_pos.y() + 16
+        screen = None
+        try:
+            screen = QtWidgets.QApplication.screenAt(cursor_pos)
+        except Exception:
+            screen = None
+        if screen is None:
+            try:
+                screen = QtWidgets.QApplication.primaryScreen()
+            except Exception:
+                screen = None
+        if screen is not None:
+            try:
+                available = screen.availableGeometry()
+                if x_pos + popup_width > available.right():
+                    x_pos = cursor_pos.x() - popup_width - 16
+                if y_pos + popup_height > available.bottom():
+                    y_pos = cursor_pos.y() - popup_height - 16
+                x_pos = min(max(available.left(), x_pos), max(available.left(), available.right() - popup_width))
+                y_pos = min(max(available.top(), y_pos), max(available.top(), available.bottom() - popup_height))
+            except Exception:
+                pass
+        popup.move(int(x_pos), int(y_pos))
+
+
     class TweenMachinePopup(QtWidgets.QDialog):
         def __init__(self, controller, status_callback=None, post_apply_callback=None, parent=None):
             super(TweenMachinePopup, self).__init__(parent or _maya_main_window())
             self.controller = controller
             self.status_callback = status_callback
             self.post_apply_callback = post_apply_callback
+            self.context = self.controller.build_tween_machine_context()
+            self._last_applied_value = None
             self.setObjectName("toolkitBarTweenMachinePopup")
             self.setWindowTitle("Tween Machine")
             flags = _qt_flag("WindowType", "Tool", QtCore.Qt.Tool)
@@ -5602,9 +5749,17 @@ if QtWidgets:
                 self.setWindowFlags(flags)
             except Exception:
                 pass
+            try:
+                self.setSizeGripEnabled(True)
+            except Exception:
+                pass
+            try:
+                self.setWindowOpacity(getattr(self.controller, "tween_machine_opacity", DEFAULT_TWEEN_MACHINE_OPACITY))
+            except Exception:
+                pass
             self._apply_timer = QtCore.QTimer(self)
             self._apply_timer.setSingleShot(True)
-            self._apply_timer.setInterval(120)
+            self._apply_timer.setInterval(45)
             self._apply_timer.timeout.connect(lambda: self._apply_current_value(create_history=False))
             self._build_ui()
 
@@ -5612,117 +5767,177 @@ if QtWidgets:
             self.setStyleSheet(
                 """
                 QDialog#toolkitBarTweenMachinePopup {
-                    background-color: #2B2B2B;
-                    border: 1px solid #3A3A3A;
+                    background-color: #202020;
+                    color: #F2F2F2;
+                    border: 1px solid #4A4A4A;
                     border-radius: 8px;
                 }
-                QLabel#tweenMachineTitle {
-                    color: #F2F2F2;
+                QFrame#tweenMachineHeader {
+                    background-color: #303030;
+                    border-radius: 6px;
+                }
+                QLabel#tweenMachineHeaderTitle {
+                    color: #FFFFFF;
                     font-size: 12px;
                     font-weight: 800;
                 }
-                QLabel#tweenMachinePercentLabel {
-                    color: #BDEBFF;
-                    font-size: 20px;
-                    font-weight: 900;
-                }
-                QLabel#tweenMachineHelp,
-                QLabel#tweenMachineStatus {
-                    color: #B8B8B8;
-                    font-size: 10px;
-                }
-                QSlider::groove:horizontal {
-                    height: 8px;
-                    background-color: #151515;
-                    border: 1px solid #3A3A3A;
-                    border-radius: 4px;
-                }
-                QSlider::sub-page:horizontal {
-                    background-color: #4CC9F0;
-                    border-radius: 4px;
-                }
-                QSlider::handle:horizontal {
-                    background-color: #F2F2F2;
-                    border: 2px solid #4CC9F0;
-                    width: 18px;
-                    margin: -6px 0;
-                    border-radius: 9px;
-                }
-                QPushButton {
-                    background-color: #202020;
+                QLabel#tweenMachineTitle {
                     color: #F2F2F2;
-                    border: 1px solid #3A3A3A;
-                    border-bottom: 2px solid #4CC9F0;
-                    border-radius: 5px;
-                    padding: 4px 8px;
+                    font-size: 24px;
                     font-weight: 700;
                 }
-                QPushButton:hover {
-                    background-color: #303030;
+                QLabel#tweenMachinePercentLabel {
+                    color: #F2F2F2;
+                    font-size: 24px;
+                    font-weight: 700;
+                }
+                QLabel#tweenMachineValueLabel {
+                    color: #4CC9F0;
+                    font-size: 12px;
+                    font-weight: 800;
+                }
+                QSlider::groove:horizontal {
+                    height: 5px;
+                    background-color: #111111;
+                    border: 1px solid #555555;
+                    border-radius: 3px;
+                }
+                QSlider::sub-page:horizontal {
+                    background-color: #244E55;
+                    border-radius: 3px;
+                }
+                QSlider::handle:horizontal {
+                    background-color: #4CC9F0;
+                    border: 1px solid #BDEFFF;
+                    width: 8px;
+                    height: 30px;
+                    margin: -14px 0;
+                    border-radius: 4px;
+                }
+                QToolButton#tweenMachineTick {
+                    background-color: #4CC9F0;
+                    border: 1px solid #83DDF7;
+                    border-radius: 2px;
+                    min-width: 5px;
+                    max-width: 5px;
+                    min-height: 26px;
+                    max-height: 26px;
+                    padding: 0px;
+                }
+                QToolButton#tweenMachineTick:hover {
+                    background-color: #FFFFFF;
                     border-color: #4CC9F0;
+                }
+                QPushButton#tweenMachineCloseButton {
+                    background-color: #333333;
+                    color: #F2F2F2;
+                    border: 1px solid #555555;
+                    border-radius: 4px;
+                    padding: 2px 6px;
+                    min-width: 24px;
+                    max-width: 24px;
+                }
+                QPushButton#tweenMachineCloseButton:hover {
+                    background-color: #3A3A3A;
+                    border-color: #4CC9F0;
+                }
+                QSizeGrip {
+                    width: 12px;
+                    height: 12px;
+                    background-color: transparent;
                 }
                 """
             )
+            self.setMinimumSize(260, 92)
+            self.resize(360, 118)
             layout = QtWidgets.QVBoxLayout(self)
-            layout.setContentsMargins(12, 10, 12, 10)
-            layout.setSpacing(8)
+            layout.setContentsMargins(7, 7, 7, 7)
+            layout.setSpacing(5)
+            header_frame = QtWidgets.QFrame()
+            header_frame.setObjectName("tweenMachineHeader")
+            header_layout = QtWidgets.QHBoxLayout(header_frame)
+            header_layout.setContentsMargins(6, 3, 6, 3)
+            header_layout.setSpacing(5)
+            header_title = QtWidgets.QLabel("Tween Machine")
+            header_title.setObjectName("tweenMachineHeaderTitle")
+            header_layout.addWidget(header_title, 1)
+            self.value_label = QtWidgets.QLabel("50%")
+            self.value_label.setObjectName("tweenMachineValueLabel")
+            self.value_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            header_layout.addWidget(self.value_label)
+            close_button = QtWidgets.QPushButton("X")
+            close_button.setObjectName("tweenMachineCloseButton")
+            close_button.setToolTip("Close Tween Machine.")
+            close_button.clicked.connect(self.hide)
+            header_layout.addWidget(close_button)
+            layout.addWidget(header_frame)
             header = QtWidgets.QHBoxLayout()
-            title = QtWidgets.QLabel("Tween Machine")
+            header.setSpacing(7)
+            title = QtWidgets.QLabel("0%")
             title.setObjectName("tweenMachineTitle")
             header.addWidget(title)
-            header.addStretch(1)
-            self.percent_label = QtWidgets.QLabel("50%")
-            self.percent_label.setObjectName("tweenMachinePercentLabel")
-            header.addWidget(self.percent_label)
-            layout.addLayout(header)
 
             self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
             self.slider.setObjectName("toolkitBarTweenMachineSlider")
             self.slider.setRange(0, 100)
             self.slider.setValue(50)
-            self.slider.setTickPosition(QtWidgets.QSlider.TicksBelow)
-            self.slider.setTickInterval(25)
+            self.slider.setTickPosition(QtWidgets.QSlider.NoTicks)
             self.slider.setToolTip("0% matches the previous key, 100% matches the next key, 50% is halfway.")
-            layout.addWidget(self.slider)
-
-            labels = QtWidgets.QHBoxLayout()
-            left_label = QtWidgets.QLabel("Previous key")
-            left_label.setObjectName("tweenMachineHelp")
-            right_label = QtWidgets.QLabel("Next key")
-            right_label.setObjectName("tweenMachineHelp")
-            labels.addWidget(left_label)
-            labels.addStretch(1)
-            labels.addWidget(right_label)
-            layout.addLayout(labels)
-
-            presets = QtWidgets.QHBoxLayout()
-            for value, text in ((0, "Prev"), (25, "25"), (50, "50"), (75, "75"), (100, "Next")):
-                button = QtWidgets.QPushButton(text)
+            slider_stack = QtWidgets.QWidget()
+            slider_stack.setMinimumWidth(160)
+            slider_stack.setMinimumHeight(40)
+            slider_stack.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            slider_layout = QtWidgets.QVBoxLayout(slider_stack)
+            slider_layout.setContentsMargins(0, 0, 0, 0)
+            slider_layout.setSpacing(3)
+            ticks = QtWidgets.QHBoxLayout()
+            ticks.setContentsMargins(0, 0, 0, 0)
+            ticks.setSpacing(0)
+            for value in range(0, 101, 10):
+                button = QtWidgets.QToolButton()
+                button.setObjectName("tweenMachineTick")
+                button.setToolTip("{0}%".format(value))
                 button.clicked.connect(lambda _checked=False, slider_value=value: self._set_slider_value(slider_value))
-                presets.addWidget(button)
-            layout.addLayout(presets)
+                ticks.addStretch(1)
+                ticks.addWidget(button)
+            ticks.addStretch(1)
+            slider_layout.addLayout(ticks)
+            slider_layout.addWidget(self.slider)
+            header.addWidget(slider_stack, 1)
 
-            self.status_label = QtWidgets.QLabel("Select animated controls. Move timeline between two keys. Slide to key tween.")
-            self.status_label.setObjectName("tweenMachineStatus")
-            self.status_label.setWordWrap(True)
-            layout.addWidget(self.status_label)
+            self.percent_label = QtWidgets.QLabel("100%")
+            self.percent_label.setObjectName("tweenMachinePercentLabel")
+            header.addWidget(self.percent_label)
+            layout.addLayout(header)
 
             self.slider.valueChanged.connect(self._slider_changed)
             self.slider.sliderReleased.connect(lambda: self._apply_current_value(create_history=True))
+            if not self.context.get("valid"):
+                self.setToolTip(self.context.get("message") or "Select animated controls and move between two keys.")
+            else:
+                self.setToolTip("Drag the blue marker or click a tick to key the current frame between the previous and next keys.")
 
         def _set_slider_value(self, value):
             self.slider.setValue(int(value))
             self._apply_current_value(create_history=True)
 
         def _slider_changed(self, value):
-            self.percent_label.setText("{0}%".format(int(value)))
+            self.slider.setToolTip("{0}%".format(int(value)))
+            self.value_label.setText("{0}%".format(int(value)))
             self._apply_timer.start()
 
         def _apply_current_value(self, create_history=True):
             if self._apply_timer.isActive():
                 self._apply_timer.stop()
-            success, message = self.controller.apply_tween_machine(self.slider.value())
-            self.status_label.setText(message)
+            if self._last_applied_value == self.slider.value() and not create_history:
+                return
+            self._last_applied_value = self.slider.value()
+            success, message = self.controller.apply_tween_machine(
+                self.slider.value(),
+                context=self.context,
+                key=bool(create_history),
+            )
+            self.setToolTip(message)
             if self.status_callback:
                 self.status_callback(message, success)
             if create_history and self.post_apply_callback:
@@ -5730,24 +5945,155 @@ if QtWidgets:
 
 
     def _show_tween_machine_popup(controller, status_callback=None, parent=None, post_apply_callback=None, anchor=None):
+        global _TWEEN_MACHINE_POPUP
+        existing = None
+        if parent is not None:
+            existing = getattr(parent, "_tween_machine_popup", None)
+        if existing is None:
+            existing = _TWEEN_MACHINE_POPUP
+        if existing is not None:
+            try:
+                if existing.isVisible():
+                    existing.hide()
+                    return existing
+            except Exception:
+                pass
+            try:
+                existing.close()
+                existing.deleteLater()
+            except Exception:
+                pass
         popup = TweenMachinePopup(
             controller,
             status_callback=status_callback,
             post_apply_callback=post_apply_callback,
             parent=parent,
         )
+        _TWEEN_MACHINE_POPUP = popup
         if parent is not None:
             try:
                 parent._tween_machine_popup = popup
             except Exception:
                 pass
-        _position_popup_near_time_slider(popup, fallback_anchor=anchor or parent)
+        _position_popup_near_cursor(popup)
         popup.show()
         try:
             popup.raise_()
         except Exception:
             pass
         return popup
+
+
+    def show_tween_machine_popup_for_controller(controller, status_callback=None, post_apply_callback=None):
+        return _show_tween_machine_popup(
+            controller,
+            status_callback=status_callback or getattr(controller, "status_callback", None),
+            post_apply_callback=post_apply_callback,
+        )
+
+
+    class TweenMachineHotkeyManager(QtCore.QObject):
+        def __init__(self, controller, hotkey_text=None, parent=None):
+            super(TweenMachineHotkeyManager, self).__init__(parent)
+            self.controller = controller
+            self.hotkey_text = maya_floating_channel_box.normalize_hotkey(
+                hotkey_text or DEFAULT_TWEEN_MACHINE_HOTKEY,
+                default_value=DEFAULT_TWEEN_MACHINE_HOTKEY,
+            )
+            self.hotkey_parts = maya_floating_channel_box.hotkey_to_parts(self.hotkey_text)
+            self.popup = None
+            self._last_trigger_time = 0.0
+            app = QtWidgets.QApplication.instance()
+            if app:
+                app.installEventFilter(self)
+
+        def set_hotkey(self, hotkey_text):
+            self.hotkey_text = maya_floating_channel_box.normalize_hotkey(
+                hotkey_text,
+                default_value=DEFAULT_TWEEN_MACHINE_HOTKEY,
+            )
+            self.hotkey_parts = maya_floating_channel_box.hotkey_to_parts(self.hotkey_text)
+
+        def shutdown(self):
+            global _TWEEN_MACHINE_POPUP
+            app = QtWidgets.QApplication.instance()
+            if app:
+                try:
+                    app.removeEventFilter(self)
+                except Exception:
+                    pass
+            if self.popup:
+                try:
+                    self.popup.close()
+                except Exception:
+                    pass
+            self.popup = None
+            if _TWEEN_MACHINE_POPUP is not None:
+                try:
+                    _TWEEN_MACHINE_POPUP.close()
+                except Exception:
+                    pass
+                _TWEEN_MACHINE_POPUP = None
+
+        def _event_matches(self, event):
+            if event.type() != QtCore.QEvent.KeyPress:
+                return False
+            if hasattr(event, "isAutoRepeat") and event.isAutoRepeat():
+                return False
+            return maya_floating_channel_box.FloatingChannelBoxHotkeyManager._event_matches(self, event, self.hotkey_parts)
+
+        def eventFilter(self, obj, event):
+            try:
+                if not self._event_matches(event):
+                    return False
+                if maya_floating_channel_box._is_text_entry_widget(QtWidgets.QApplication.focusWidget()):
+                    return False
+                now = time.time()
+                if now - self._last_trigger_time < 0.2:
+                    return True
+                self._last_trigger_time = now
+                if self.popup and self.popup.isVisible():
+                    self.popup.hide()
+                    return True
+                self.popup = _show_tween_machine_popup(
+                    self.controller,
+                    status_callback=getattr(self.controller, "status_callback", None),
+                )
+                return True
+            except Exception:
+                return False
+
+
+    def install_tween_machine_hotkey(controller, hotkey_text=None):
+        global _TWEEN_MACHINE_HOTKEY_MANAGER
+        if not QtWidgets or not QtCore or controller is None:
+            return None
+        hotkey_text = maya_floating_channel_box.normalize_hotkey(
+            hotkey_text or DEFAULT_TWEEN_MACHINE_HOTKEY,
+            default_value=DEFAULT_TWEEN_MACHINE_HOTKEY,
+        )
+        if _TWEEN_MACHINE_HOTKEY_MANAGER is None or _TWEEN_MACHINE_HOTKEY_MANAGER.controller is not controller:
+            if _TWEEN_MACHINE_HOTKEY_MANAGER is not None:
+                try:
+                    _TWEEN_MACHINE_HOTKEY_MANAGER.shutdown()
+                except Exception:
+                    pass
+            _TWEEN_MACHINE_HOTKEY_MANAGER = TweenMachineHotkeyManager(controller, hotkey_text)
+        else:
+            _TWEEN_MACHINE_HOTKEY_MANAGER.set_hotkey(hotkey_text)
+        return _TWEEN_MACHINE_HOTKEY_MANAGER
+
+
+    def shutdown_tween_machine_hotkey(manager=None):
+        global _TWEEN_MACHINE_HOTKEY_MANAGER
+        target = manager or _TWEEN_MACHINE_HOTKEY_MANAGER
+        if target is not None:
+            try:
+                target.shutdown()
+            except Exception:
+                pass
+        if target is _TWEEN_MACHINE_HOTKEY_MANAGER:
+            _TWEEN_MACHINE_HOTKEY_MANAGER = None
 
 
     class StudentCoreToolbarPanel(QtWidgets.QFrame):
@@ -6634,6 +6980,33 @@ if QtWidgets:
             snap_row.addWidget(self.refresh_layer_tint_button, 1)
             main_layout.addLayout(snap_row)
 
+            tween_machine_row = QtWidgets.QHBoxLayout()
+            tween_machine_row.setSpacing(8)
+            tween_machine_row.addWidget(QtWidgets.QLabel("Tween Machine Hotkey"))
+            self.tween_machine_hotkey_edit = QtWidgets.QLineEdit()
+            self.tween_machine_hotkey_edit.setObjectName("sceneHelpersTweenMachineHotkeyEdit")
+            self.tween_machine_hotkey_edit.setText(getattr(self.controller, "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY))
+            self.tween_machine_hotkey_edit.setToolTip("Hotkey for the translucent inbetween popup. Default is Backquote (`). Examples: Backquote, N, T, Ctrl+Shift+T, F8.")
+            tween_machine_row.addWidget(self.tween_machine_hotkey_edit, 1)
+            tween_machine_row.addWidget(QtWidgets.QLabel("Opacity"))
+            self.tween_machine_opacity_spin = QtWidgets.QDoubleSpinBox()
+            self.tween_machine_opacity_spin.setObjectName("sceneHelpersTweenMachineOpacitySpin")
+            self.tween_machine_opacity_spin.setRange(0.2, 1.0)
+            self.tween_machine_opacity_spin.setDecimals(2)
+            self.tween_machine_opacity_spin.setSingleStep(0.05)
+            self.tween_machine_opacity_spin.setValue(getattr(self.controller, "tween_machine_opacity", DEFAULT_TWEEN_MACHINE_OPACITY))
+            self.tween_machine_opacity_spin.setToolTip("Transparency for the Tween Machine popup. Lower is more see-through.")
+            tween_machine_row.addWidget(self.tween_machine_opacity_spin)
+            self.set_tween_machine_hotkey_button = QtWidgets.QPushButton("Set Hotkey")
+            self.set_tween_machine_hotkey_button.setObjectName("sceneHelpersSetTweenMachineHotkeyButton")
+            self.set_tween_machine_hotkey_button.setToolTip("Save the custom hotkey for Tween Machine.")
+            tween_machine_row.addWidget(self.set_tween_machine_hotkey_button)
+            self.open_tween_machine_button = QtWidgets.QPushButton("Open Tween Machine")
+            self.open_tween_machine_button.setObjectName("sceneHelpersOpenTweenMachineButton")
+            self.open_tween_machine_button.setToolTip("Open the translucent inbetween popup next to the cursor.")
+            tween_machine_row.addWidget(self.open_tween_machine_button)
+            main_layout.addLayout(tween_machine_row)
+
             floating_channel_row = QtWidgets.QHBoxLayout()
             floating_channel_row.setSpacing(8)
             floating_channel_row.addWidget(QtWidgets.QLabel("Floating Channel Box Hotkey"))
@@ -6704,9 +7077,10 @@ if QtWidgets:
                 "11. Use Camera Preset to jump between the Front, Side, and Three Quarter cameras.\n"
                 "12. Select a rig root and use Duplicate Rig For Teacher Demo when you want a separate animated copy for a student demonstration.\n"
                 "13. Use Delete Teacher Demo to remove every teacher-demo duplicate and its helper display layer.\n"
-                "14. Tap # to open the Floating Channel Box, or change the hotkey here.\n"
-                "15. Use Floating Graph Editor for a translucent native Maya Graph Editor clone that you can dock into Maya.\n"
-                "16. Select controls first when you want the snap to act only on part of the scene."
+                "14. Tap Backquote (`) to open the Tween Machine beside the cursor, or change the hotkey here.\n"
+                "15. Tap # to open the Floating Channel Box, or change the hotkey here.\n"
+                "16. Use Floating Graph Editor for a translucent native Maya Graph Editor clone that you can dock into Maya.\n"
+                "17. Select controls first when you want the snap to act only on part of the scene."
             )
             help_box.setMaximumHeight(110)
             main_layout.addWidget(help_box)
@@ -6817,7 +7191,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.1")
+            self.version_label = QtWidgets.QLabel("Version 0.3.2")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -6829,6 +7203,9 @@ if QtWidgets:
             self.auto_snap_button.toggled.connect(self._toggle_auto_snap)
             self.animation_layer_tint_button.toggled.connect(self._toggle_animation_layer_tint)
             self.refresh_layer_tint_button.clicked.connect(self._refresh_animation_layer_tint)
+            self.set_tween_machine_hotkey_button.clicked.connect(self._set_tween_machine_hotkey)
+            self.tween_machine_opacity_spin.valueChanged.connect(self._set_tween_machine_opacity)
+            self.open_tween_machine_button.clicked.connect(self._open_tween_machine)
             self.set_floating_channel_hotkey_button.clicked.connect(self._set_floating_channel_hotkey)
             self.floating_channel_opacity_spin.valueChanged.connect(self._set_floating_channel_opacity)
             self.open_floating_channel_box_button.clicked.connect(self._open_floating_channel_box)
@@ -6899,6 +7276,10 @@ if QtWidgets:
             self.camera_dolly_offset_spin.blockSignals(True)
             self.camera_dolly_offset_spin.setValue(float(getattr(self.controller, "scene_helpers_camera_dolly_offset", 0.0)))
             self.camera_dolly_offset_spin.blockSignals(False)
+            self.tween_machine_hotkey_edit.setText(getattr(self.controller, "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY))
+            self.tween_machine_opacity_spin.blockSignals(True)
+            self.tween_machine_opacity_spin.setValue(float(getattr(self.controller, "tween_machine_opacity", DEFAULT_TWEEN_MACHINE_OPACITY)))
+            self.tween_machine_opacity_spin.blockSignals(False)
             self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
             self.floating_channel_opacity_spin.blockSignals(True)
             self.floating_channel_opacity_spin.setValue(float(getattr(self.controller, "floating_channel_box_opacity", maya_floating_channel_box.DEFAULT_CHANNEL_OPACITY)))
@@ -6947,6 +7328,19 @@ if QtWidgets:
 
         def _snap_now(self):
             success, message = self.controller.snap_current_targets()
+            self._set_status(message, success)
+
+        def _set_tween_machine_hotkey(self):
+            success, message = self.controller.set_tween_machine_hotkey(self.tween_machine_hotkey_edit.text())
+            self.tween_machine_hotkey_edit.setText(getattr(self.controller, "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY))
+            self._set_status(message, success)
+
+        def _set_tween_machine_opacity(self, opacity):
+            success, message = self.controller.set_tween_machine_opacity(opacity)
+            self._set_status(message, success)
+
+        def _open_tween_machine(self):
+            success, message = self.controller.show_tween_machine()
             self._set_status(message, success)
 
         def _set_floating_channel_hotkey(self):

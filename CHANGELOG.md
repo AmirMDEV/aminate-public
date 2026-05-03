@@ -2,7 +2,15 @@
 
 ## Unreleased
 
+## Version 0.3.2 - 2026-05-03
+
+- Made the Tween Machine popup smaller by default and resizable so it fits smaller classroom screens while still showing the live percentage readout.
+- Restyled Tween Machine to match Aminate's dark floating Channel Box / Graph Editor chrome, changed the default Tween hotkey to the single-key Backquote shortcut with old `Ctrl+Alt+T` defaults migrating automatically, and added a dedicated low-impact Tween Machine Maya smoke.
+- Added a local Animbot-style Aminate tutorial page with searchable tool sections, a button index, existing screenshot media, an Onion Skin GIF example, and an `Open Tutorials` button in Quick Start; release packaging and the drag-and-drop installer now copy the `docs` directory beside the installed Maya scripts.
+- Changed Tween Machine into a cursor-side translucent inbetween bar with `0%` and `100%` endpoints, clickable blue tick marks, live slider preview, release-only key writing, a default single-key Backquote hotkey, customizable opacity, and cached tween data so slider drags do not rescan animation curves or spam key writes on heavy rigs.
+- Added a heavy-rig Aminate performance smoke with 600 controls and 3,600 keyed channels to keep Tween Machine preview, release keying, selected Toolkit Bar actions, and no-selection animated-control lookup within fast budgets.
 - Fixed Controls Retargeter Maintain Offset baking so each target keeps its starting offset from the source at the source control's first keyed frame, preventing foot controls from baking with the wrong offset when Maya is parked later in the shot.
+- Added a Special Thanks section at the bottom of the Aminate Quick Start tab crediting student testing and feature ideas for Controls Retargeter, Character Skinning, frozen character skinning, and Dynamic Parenting.
 - Redesigned `Controls Retargeter (Face and Body)` into clear source-to-target control pair rows with pick-from-selection buttons, automatic blank-row creation, ignored empty rows, faster name-based Auto Map, and Reduce Keys that keeps the exact source keyframes.
 - Split Aminate's custom tab navigation arrows so `<<` sits on the left side of the top tab bar and `>>` sits on the right side.
 - Simplified Character Skinning transform cleanup into one primary button: `Replace Mesh With Frozen Transform Mesh`, which builds the verified frozen mesh, replaces the selected skinned mesh, preserves weights/materials/UVs/normals, and keeps the old mesh hidden as a backup.

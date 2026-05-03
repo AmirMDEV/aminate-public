@@ -24,9 +24,13 @@ The sections in regular use in this beta are:
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
-`Version 0.3.1`
+`Version 0.3.2`
 
-## What Is New In 0.3.1
+## What Is New In 0.3.2
+
+- `Tween Machine` opens beside the cursor as a compact dark Aminate popup, shows the live percentage while dragging, uses a single-key Backquote default hotkey, can be resized for smaller screens, and toggles on/off instead of stacking duplicate windows.
+- Local `Open Tutorials` documentation is included with the Maya install, with searchable tool sections, screenshots, an Onion Skin GIF example, and a button index.
+- The Toolkit Bar, Tween Machine, and key timing paths now have focused performance checks for heavy rigs and low-impact Maya runtime smoke tests.
 
 - `Character Skinning` keeps skinning tools together. One button replaces a badly transformed skinned mesh with a clean frozen-transform mesh while preserving skin weights and influences, and the same tab can copy exact skinning from a skinned source mesh to a same-topology target mesh.
 - `Controls Retargeter (Face and Body)` is now a simple pair-row workflow: source control on the left, target control on the right, pick controls from selection, auto-map by name quickly, and reduce baked keys back to the exact source keyframes.
@@ -53,7 +57,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 ## Install
 
-1. Download `Aminate_v0.3.1.zip` from the latest release.
+1. Download `Aminate_v0.3.2.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.

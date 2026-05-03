@@ -72,7 +72,8 @@ LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.1"
+VERSION_LABEL = "Version 0.3.2"
+TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
@@ -521,6 +522,25 @@ def _open_external_url(url):
         return False
     if QtGui and hasattr(QtGui, "QDesktopServices"):
         return QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+    return False
+
+
+def _tutorials_index_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), TUTORIALS_DOCS_RELATIVE_PATH)
+
+
+def _open_local_file(path):
+    if not path or not os.path.exists(path):
+        return False
+    if QtGui and QtCore and hasattr(QtGui, "QDesktopServices"):
+        if QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path)):
+            return True
+    if hasattr(os, "startfile"):
+        try:
+            os.startfile(path)
+            return True
+        except Exception:
+            return False
     return False
 
 
@@ -2909,6 +2929,10 @@ if QtWidgets:
         def _build_guide_tab(self):
             layout = QtWidgets.QVBoxLayout(self.guide_page)
             layout.addWidget(self._build_tab_intro(TAB_GUIDE))
+            tutorials_button = QtWidgets.QPushButton("Open Tutorials")
+            tutorials_button.setToolTip("Open Aminate local tutorials and button docs.")
+            tutorials_button.clicked.connect(self._open_tutorials_docs)
+            layout.addWidget(tutorials_button)
             guide = QtWidgets.QPlainTextEdit()
             guide.setReadOnly(True)
             guide.setPlainText(
@@ -3054,7 +3078,12 @@ if QtWidgets:
                 "Troubleshooting\n"
                 "- If a grab or let-go pops, go to that frame and click Fix Jumps.\n"
                 "- If the arm or leg switch finds the wrong controls, fix the boxes by hand and save the switch.\n"
-                "- If the timeline note or video tools are not visible in the combined window, reopen Aminate after the latest script reload."
+                "- If the timeline note or video tools are not visible in the combined window, reopen Aminate after the latest script reload.\n\n"
+                "Special Thanks\n"
+                "- Brogan Bowen, for helping test the Controls Retargeter.\n"
+                "- Alex Potter, for helping test Character Skinning reset.\n"
+                "- V Gerrard Lawless, for the idea behind the frozen character skinning system.\n"
+                "- Wiktor Wisniewski, for the idea behind Dynamic Parenting."
             )
             layout.addWidget(guide)
 
@@ -3480,6 +3509,13 @@ if QtWidgets:
                 self._set_status("Opened the Donate link.", True)
             else:
                 self._set_status("Could not open the Donate link from this Maya session.", False)
+
+        def _open_tutorials_docs(self):
+            docs_path = _tutorials_index_path()
+            if _open_local_file(docs_path):
+                self._set_status("Opened Aminate tutorials.", True)
+            else:
+                self._set_status("Could not open Aminate tutorials: {0}".format(docs_path), False)
 
         def closeEvent(self, event):
             self._remove_key_passthrough_filter()

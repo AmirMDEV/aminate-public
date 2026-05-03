@@ -1,7 +1,7 @@
 {
   "package_name": "Aminate",
-  "version": "Version 0.3.1",
-  "release_tag": "v0.3.1",
+  "version": "Version 0.3.2",
+  "release_tag": "v0.3.2",
   "license": "Aminate Proprietary Source-Available License",
   "license_file": "LICENSE",
   "public_repository": "https://github.com/AmirMDEV/aminate-public",
@@ -37,5 +37,8 @@
     "maya_video_reference_tool.py",
     "game_animation_mode_icon.png",
     "maya_anim_workflow_tools_icon.png"
+  ],
+  "static_dirs": [
+    "docs"
   ]
 }
