@@ -51,10 +51,31 @@
       return "<ul>" + items.map((item) => `<li>${item}</li>`).join("") + "</ul>";
     }
 
+    function mediaItems(section) {
+      return section.mediaItems || [{ type: "image", src: section.media, title: section.title }];
+    }
+
+    function renderMedia(section) {
+      return `<div class="media-grid">${mediaItems(section).map((item) => {
+        const title = item.title || section.title;
+        if (item.type === "video") {
+          return `<figure class="media-item">
+            <video src="${item.src}" controls preload="metadata" poster="${item.poster || section.media || ""}"></video>
+            <figcaption>${title}</figcaption>
+          </figure>`;
+        }
+        return `<figure class="media-item">
+          <img src="${item.src}" alt="${title} tutorial media" loading="lazy">
+          <figcaption>${title}</figcaption>
+        </figure>`;
+      }).join("")}</div>`;
+    }
+
     function render(filterText = "") {
       const filter = filterText.trim().toLowerCase();
       const sections = window.AMINATE_DOCS.sections.filter((section) => {
-        const haystack = [section.title, section.short, section.purpose, section.when, section.buttons.join(" "), section.steps.join(" "), section.tips.join(" ")].join(" ").toLowerCase();
+        const mediaTitles = mediaItems(section).map((item) => item.title || item.src).join(" ");
+        const haystack = [section.title, section.short, section.purpose, section.when, section.buttons.join(" "), section.steps.join(" "), section.tips.join(" "), mediaTitles].join(" ").toLowerCase();
         return !filter || haystack.includes(filter);
       });
 
@@ -67,7 +88,7 @@
       sectionsRoot.innerHTML = sections.map((section) => (
         `<article class="section tool-card" id="${section.id}">
           <div class="media-wrap">
-            <img src="${section.media}" alt="${section.title} tutorial media" loading="lazy">
+            ${renderMedia(section)}
           </div>
           <div class="copy">
             <p class="eyebrow">${section.short}</p>

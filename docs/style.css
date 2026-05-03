@@ -160,19 +160,40 @@ main {
 
 .media-wrap {
   min-height: 250px;
-  display: grid;
-  place-items: center;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #0b0d10;
 }
 
-.media-wrap img {
+.media-grid {
+  display: grid;
+  gap: 10px;
   width: 100%;
   height: 100%;
+  padding: 10px;
+}
+
+.media-item {
+  margin: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.media-item img,
+.media-item video {
+  width: 100%;
+  height: auto;
   max-height: 460px;
   object-fit: contain;
+  border-radius: 4px;
+  background: #050608;
+}
+
+.media-item figcaption {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 h2 {

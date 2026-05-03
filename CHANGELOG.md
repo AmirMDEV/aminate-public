@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added MP4 and GIF tutorial media for Foot Hold, Auto Package In Zip, Auto Selection Sets, Game Animation Mode, Render Environment, and Dynamic Parent, and upgraded the local docs renderer to show multiple tutorial media items per tool.
+- Added Alex Lee to Aminate Special Thanks for the Tween Machine idea.
+- Added the new Tween Machine, Character Skinning frozen-transform, and Scene Helpers feedback-text GIF tutorials to the bundled local documentation page.
+- Optimized heavy-rig performance paths: Tween Machine preview now batches transform-channel writes, animated-control discovery uses one scene connection query instead of one query per animation curve, Auto Snap avoids constant idle polling when Maya exposes a time-unit event, texture reload folder indexing is capped, and tutorial auto-recording no longer rebuilds a full dependency-node scene index on every poll.
+- Expanded `maya_aminate_heavy_rig_perf_smoke.py` into an eight-module performance smoke covering Timing Tools, Contact Hold, Surface Contact, Rotation Doctor, Rig Scale Export, Skin Transfer, Skinning Cleanup, and Timeline Notes with configurable synthetic control counts.
+
 ## Version 0.3.2 - 2026-05-03
 
 - Made the Tween Machine popup smaller by default and resizable so it fits smaller classroom screens while still showing the live percentage readout.

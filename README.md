@@ -29,7 +29,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 ## What Is New In 0.3.2
 
 - `Tween Machine` opens beside the cursor as a compact dark Aminate popup, shows the live percentage while dragging, uses a single-key Backquote default hotkey, can be resized for smaller screens, and toggles on/off instead of stacking duplicate windows.
-- Local `Open Tutorials` documentation is included with the Maya install, with searchable tool sections, screenshots, an Onion Skin GIF example, and a button index.
+- Local `Open Tutorials` documentation is included with the Maya install, with searchable tool sections, a button index, and GIF demos for Tween Machine, Character Skinning frozen-transform cleanup, and Scene Helpers feedback text.
 - The Toolkit Bar, Tween Machine, and key timing paths now have focused performance checks for heavy rigs and low-impact Maya runtime smoke tests.
 
 - `Character Skinning` keeps skinning tools together. One button replaces a badly transformed skinned mesh with a clean frozen-transform mesh while preserving skin weights and influences, and the same tab can copy exact skinning from a skinned source mesh to a same-topology target mesh.
@@ -225,24 +225,39 @@ Simple example:
 6. Add the note.
 7. Scrub through the timeline to read the notes in the live reader.
 
-## Tab Screenshots
+## Tutorial Media
 
 - [Quick Start](release_screenshots/quick_start.png)
 - [Toolkit Bar](release_screenshots/student_core.png)
 - [Toolkit Bar](release_screenshots/student_timeline_bar.png)
+- [Tween Machine GIF](docs/assets/tween_machine.gif)
 - [Reference Manager](release_screenshots/reference_manager.png)
+- [Auto Package In Zip Video](docs/assets/auto_package_zip.mp4)
+- [Auto Package In Zip GIF](docs/assets/auto_package_zip.gif)
 - [Dynamic Parenting](release_screenshots/dynamic_parenting.png)
+- [Dynamic Parent Video](docs/assets/dynamic_parenting.mp4)
+- [Dynamic Parent GIF](docs/assets/dynamic_parenting.gif)
 - [Hand / Foot Hold](release_screenshots/hand_foot_hold.png)
+- [Foot Hold Video](docs/assets/foot_hold.mp4)
+- [Foot Hold GIF](docs/assets/foot_hold.gif)
 - [Scene Helpers](release_screenshots/scene_helpers.png)
+- [Scene Helpers Feedback Text GIF](docs/assets/scene_feedback_text.gif)
+- [Render Environment Video](docs/assets/render_environment.mp4)
+- [Render Environment GIF](docs/assets/render_environment.gif)
+- [Game Animation Mode Video](docs/assets/game_animation_mode.mp4)
+- [Game Animation Mode GIF](docs/assets/game_animation_mode.gif)
 - [Dynamic Pivot](release_screenshots/dynamic_pivot.png)
 - [Universal IK/FK](release_screenshots/universal_ikfk.png)
 - [Controls Retargeter](release_screenshots/face_retarget.png)
 - [Control Picker](release_screenshots/control_picker.png)
+- [Auto Selection Sets Video](docs/assets/auto_selection_sets.mp4)
+- [Auto Selection Sets GIF](docs/assets/auto_selection_sets.gif)
 - [Animators Pencil](release_screenshots/animators_pencil.png)
 - [History Timeline](release_screenshots/history_timeline.png)
 - [Onion Skin](release_screenshots/onion_skin.png)
 - [Rotation Doctor](release_screenshots/rotation_doctor.png)
 - [Character Skinning](release_screenshots/skinning_cleanup.png)
+- [Character Skinning Frozen Transform GIF](docs/assets/character_skinning_rig_scale_fix.gif)
 - [Rig Scale](release_screenshots/rig_scale.png)
 - [Video Reference](release_screenshots/video_reference.png)
 - [Timeline Notes](release_screenshots/timeline_notes.png)

@@ -17,24 +17,31 @@ window.AMINATE_DOCS = {
       icon: "TB",
       short: "Toolkit",
       title: "Toolkit Bar",
-      media: "assets/student_timeline_bar.png",
+      media: "assets/tween_machine.gif",
       purpose: "Compact animBot-style buttons for repeated timing, key, layer, packaging, and workflow jobs.",
       when: "You want fast timeline work without opening separate tabs.",
-      steps: ["Select the controls or keys you want to edit.", "Tap Backquote (`) or click Tween to open the Tween Machine.", "Watch the header readout for the current percentage while dragging.", "Use workflow icons to jump to deeper Aminate tabs."],
+      steps: ["Select animated controls and move to a frame between two keys.", "Tap Backquote (`) or click Tween to open the Tween Machine beside the cursor.", "Click a percentage tick or drag the horizontal bar.", "Watch the live percentage readout while the pose previews, then release to key the current frame."],
       buttons: ["-1", "+1", "In", "Tween", "Cut", "Zero", "2s", "Anim", "Clean", "Zip", "Game"],
-      tips: ["Heavy rigs stay faster when Tween previews cache the left and right keyed poses and only write a key on release."]
+      tips: ["0% matches the previous key, 100% matches the next key, and 50% makes an exact halfway inbetween."]
     },
     {
       id: "scene-helpers",
       icon: "SH",
       short: "Scene",
       title: "Scene Helpers",
-      media: "assets/scene_helpers.png",
-      purpose: "Scene setup, timing cleanup, autosave recovery, render setup, camera offsets, and classroom-safe helper buttons.",
-      when: "The scene needs prep or recovery before animation work can continue.",
-      steps: ["Save the scene first for recovery tools.", "Use Game Animation Mode for frame rate and playback setup.", "Use render and camera helpers when a character needs clean preview images."],
-      buttons: ["Auto Key", "Snap Selected Keys To Frames", "Load Textures", "Open Last Autosave", "Set Up Render Environment", "Delete Render Environment"],
-      tips: ["Use the cleanup buttons one target at a time on heavy classroom rigs."]
+      media: "assets/scene_feedback_text.gif",
+      mediaItems: [
+        { type: "image", src: "assets/scene_feedback_text.gif", title: "Feedback text GIF" },
+        { type: "video", src: "assets/render_environment.mp4", title: "Render environment tutorial", poster: "assets/scene_helpers.png" },
+        { type: "image", src: "assets/render_environment.gif", title: "Render environment GIF" },
+        { type: "video", src: "assets/game_animation_mode.mp4", title: "Game Animation Mode tutorial", poster: "assets/student_timeline_bar.png" },
+        { type: "image", src: "assets/game_animation_mode.gif", title: "Game Animation Mode GIF" }
+      ],
+      purpose: "Scene setup, timing cleanup, autosave recovery, render setup, camera offsets, and scene-native feedback text notes.",
+      when: "The scene needs prep, review notes, or readable feedback placed beside a character control.",
+      steps: ["Select the body part, prop, or control that the feedback belongs to.", "Type the note in Scene Text Notes.", "Choose color, size, wrap, and box settings.", "Click Create Text Note, then key visibility or move the note to another selected control when needed."],
+      buttons: ["Auto Key", "Snap Selected Keys To Frames", "Load Textures", "Create Text Note", "Key On", "Key Off", "Move To Selected", "Apply Style"],
+      tips: ["Scene text notes are real Maya text curves, so feedback can travel with the scene instead of living only in a screenshot."]
     },
     {
       id: "reference-manager",
@@ -42,6 +49,11 @@ window.AMINATE_DOCS = {
       short: "Package",
       title: "Reference Manager",
       media: "assets/reference_manager.png",
+      mediaItems: [
+        { type: "video", src: "assets/auto_package_zip.mp4", title: "Auto package in zip tutorial", poster: "assets/reference_manager.png" },
+        { type: "image", src: "assets/auto_package_zip.gif", title: "Auto package in zip GIF" },
+        { type: "image", src: "assets/reference_manager.png", title: "Reference Manager screenshot" }
+      ],
       purpose: "Collect a scene and every referenced file into one zip for hand-in, review, or transfer.",
       when: "A shot relies on references, textures, image planes, audio, or caches that must travel with the scene.",
       steps: ["Save the Maya scene.", "Click Refresh Needed Files.", "Review missing files.", "Click Package Scene To Zip."],
@@ -54,6 +66,11 @@ window.AMINATE_DOCS = {
       short: "Parent",
       title: "Dynamic Parenting",
       media: "assets/dynamic_parenting.png",
+      mediaItems: [
+        { type: "video", src: "assets/dynamic_parenting.mp4", title: "Dynamic Parent tutorial", poster: "assets/dynamic_parenting.png" },
+        { type: "image", src: "assets/dynamic_parenting.gif", title: "Dynamic Parent GIF" },
+        { type: "image", src: "assets/dynamic_parenting.png", title: "Dynamic Parenting screenshot" }
+      ],
       purpose: "Switch props or controls between parents without visible pops.",
       when: "A magazine, sword, phone, hand, or prop needs to follow different controls during a shot.",
       steps: ["Pick the driven object.", "Click Add Object.", "Pick a parent and click Pick Parent.", "Place the object if needed.", "Click Switch to this Parent or World."],
@@ -66,6 +83,11 @@ window.AMINATE_DOCS = {
       short: "Hold",
       title: "Hand / Foot Hold",
       media: "assets/hand_foot_hold.png",
+      mediaItems: [
+        { type: "video", src: "assets/foot_hold.mp4", title: "Foot Hold tutorial", poster: "assets/hand_foot_hold.png" },
+        { type: "image", src: "assets/foot_hold.gif", title: "Foot Hold GIF" },
+        { type: "image", src: "assets/hand_foot_hold.png", title: "Hand / Foot Hold screenshot" }
+      ],
       purpose: "Keep planted hands or feet locked on chosen world axes while the body keeps moving.",
       when: "Foot sliding, hand contact, or one-axis travel needs a quick non-destructive hold.",
       steps: ["Pick the hand or foot control.", "Set the contact range.", "Choose the world axes to keep still.", "Click Create / Update Hold."],
@@ -126,6 +148,11 @@ window.AMINATE_DOCS = {
       short: "Picker",
       title: "Control Picker",
       media: "assets/control_picker.png",
+      mediaItems: [
+        { type: "video", src: "assets/auto_selection_sets.mp4", title: "Auto selection sets tutorial", poster: "assets/control_picker.png" },
+        { type: "image", src: "assets/auto_selection_sets.gif", title: "Auto selection sets GIF" },
+        { type: "image", src: "assets/control_picker.png", title: "Control Picker screenshot" }
+      ],
       purpose: "Build and use quick picker buttons for rig controls.",
       when: "Students need fast selection without hunting through the viewport or outliner.",
       steps: ["Create a picker set.", "Add selected controls.", "Rename or arrange buttons.", "Click picker buttons to select controls."],
@@ -209,12 +236,12 @@ window.AMINATE_DOCS = {
       icon: "SK",
       short: "Skin",
       title: "Character Skinning",
-      media: "assets/skinning_cleanup.png",
+      media: "assets/character_skinning_rig_scale_fix.gif",
       purpose: "Clean skinned mesh transforms and copy exact skinning for matching topology.",
       when: "A skinned mesh has bad transform values or a duplicate mesh needs the same weights.",
-      steps: ["Pick the skinned mesh.", "Run the frozen-transform replacement.", "For skin transfer, select source then target and copy the pair."],
-      buttons: ["Replace Mesh With Frozen Transform Mesh", "Copy Selected Pair Now"],
-      tips: ["Keep the hidden old mesh backup until the replacement is checked in the scene."]
+      steps: ["Pick the skinned mesh that has translate, rotate, or scale values.", "Click Check Selected Mesh to confirm weights, influences, UVs, materials, and normals.", "Click Make Frozen Copy and inspect the report.", "Click Replace Original only after the checks pass green."],
+      buttons: ["Check Selected Mesh", "Make Frozen Copy", "Replace Original", "Delete Frozen Copy", "Copy Selected Pair Now"],
+      tips: ["The original mesh stays hidden as a backup after replacement, so students can recover if they picked the wrong mesh."]
     },
     {
       id: "rig-scale",
